@@ -81,4 +81,5 @@ konkreten Bugs oder Performance-Problems:
 ## Release
 
 `VERSION` hochzählen, `CHANGELOG.md` ergänzen, ZIP ohne `data/`, `config.json`
-und `update.bat` bauen. Exakter Ablauf steht in `UPDATE.md`.
+und `update.bat` bauen. Exakter Ablauf inkl. Skript-Reihenfolge steht in
+`README_DEV.md`; Update-Anleitung für Nutzer steht in `README.md`.
