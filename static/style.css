@@ -461,30 +461,6 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .notes-area:focus { outline: 1px solid var(--accent); }
 .save-hint { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
 
-/* Week */
-.week-picker { display: flex; gap: 8px; align-items: center; }
-.week-input {
-  width: 70px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 7px 8px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-.week-text {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--text);
-  white-space: pre-wrap;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px;
-  margin: 0 0 12px 0;
-}
-
 .empty-state {
   color: var(--text-faint);
   font-size: 13px;
@@ -550,6 +526,10 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 }
 .month-cell.cell-pos .cell-net { color: var(--green); }
 .month-cell.cell-neg .cell-net { color: var(--red); }
+
+/* Wochenenden optisch absetzen - dezent, ohne mit Netto-Farben zu kollidieren */
+.month-grid-head.weekend { color: var(--accent); }
+.month-cell.weekend:not(.has-trades) { background: var(--bg-hover); }
 
 /* Modal */
 .modal-overlay {

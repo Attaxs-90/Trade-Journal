@@ -79,7 +79,6 @@ function refreshCurrentView() {
   refreshDayList();
   if (state.view === "overview") openOverview();
   else if (state.view === "month") renderMonth();
-  else if (state.view === "week") loadWeek();
   else if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
 }
 
@@ -663,9 +662,9 @@ async function renderMonth() {
 
   const grid = content.querySelector(".month-grid");
   grid.innerHTML = "";
-  ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].forEach(wd => {
+  ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].forEach((wd, idx) => {
     const el = document.createElement("div");
-    el.className = "month-grid-head";
+    el.className = "month-grid-head" + (idx >= 5 ? " weekend" : "");
     el.textContent = wd;
     grid.appendChild(el);
   });
@@ -678,7 +677,8 @@ async function renderMonth() {
     const el = document.createElement("div");
     const dayNum = parseInt(d.date.split("-")[2], 10);
     const hasTrades = d.trades > 0;
-    el.className = "month-cell" + (hasTrades ? " has-trades " + (d.net >= 0 ? "cell-pos" : "cell-neg") : "");
+    const isWeekend = [0, 6].includes(new Date(d.date + "T00:00:00").getDay());
+    el.className = "month-cell" + (isWeekend ? " weekend" : "") + (hasTrades ? " has-trades " + (d.net >= 0 ? "cell-pos" : "cell-neg") : "");
     el.innerHTML = `<div class="cell-date">${dayNum}</div>`
       + (hasTrades ? `<div class="cell-net">${fmtSigned(d.net)} $</div><div class="cell-count">${d.trades} Trades</div>` : "");
     if (hasTrades) el.addEventListener("click", () => openDayModal(d.date));
@@ -719,54 +719,6 @@ document.addEventListener("keydown", (e) => {
 
 function obsTile(label, value) {
   return `<div class="obs-tile"><div class="label">${label}</div><div class="value">${value}</div></div>`;
-}
-
-async function openWeek() {
-  state.view = "week";
-  state.currentDay = null;
-  setActiveNav("week");
-  refreshDayList();
-
-  const content = document.getElementById("content");
-  content.innerHTML = "";
-  content.appendChild(document.getElementById("tpl-week").content.cloneNode(true));
-
-  const now = new Date();
-  const isoYear = now.getFullYear();
-  const isoWeek = getIsoWeek(now);
-  document.getElementById("week-year").value = isoYear;
-  document.getElementById("week-num").value = isoWeek;
-
-  document.getElementById("week-load").addEventListener("click", loadWeek);
-  document.getElementById("week-copy").addEventListener("click", () => {
-    navigator.clipboard.writeText(document.getElementById("week-text").textContent);
-  });
-
-  await loadWeek();
-}
-
-async function loadWeek() {
-  const y = document.getElementById("week-year").value;
-  const w = document.getElementById("week-num").value;
-  const data = await api(withFilter(`/api/week/${y}/${w}`));
-
-  document.getElementById("week-text").textContent = data.text_block || "Keine Trades in dieser Woche.";
-
-  const tbody = document.querySelector("#week-table tbody");
-  tbody.innerHTML = "";
-  for (const d of data.days) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${d.weekday}</td><td>${d.date}</td><td>${d.trades}</td><td>${fmtSigned(d.points)}</td><td class="${cls(d.net)}">${fmtSigned(d.net)} $</td>`;
-    tbody.appendChild(tr);
-  }
-}
-
-function getIsoWeek(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
 /* ---------- Chart (inline SVG, keine externe Lib) ---------- */
@@ -993,7 +945,6 @@ document.querySelectorAll(".nav-item").forEach(el => {
   el.addEventListener("click", () => {
     if (el.dataset.view === "overview") openOverview();
     if (el.dataset.view === "month") openMonth();
-    if (el.dataset.view === "week") openWeek();
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
   });
