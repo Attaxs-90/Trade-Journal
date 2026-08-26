@@ -179,13 +179,13 @@ def api_delete_account(account_id: int):
 
 
 @app.post("/api/accounts/{account_id}/sync")
-def api_sync_account(account_id: int):
+def api_sync_account(account_id: int, full: bool = False):
     account = db.get_account(account_id)
     if not account:
         raise HTTPException(404, "Konto nicht gefunden.")
 
     to_date = datetime.utcnow()
-    if account["last_sync"]:
+    if account["last_sync"] and not full:
         from_date = datetime.fromisoformat(account["last_sync"]) - timedelta(days=1)
     else:
         from_date = to_date - timedelta(days=365)

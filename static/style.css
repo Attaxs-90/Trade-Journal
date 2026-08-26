@@ -652,7 +652,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 }
 .account-name { font-weight: 600; font-size: 13.5px; }
 .account-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
-.account-actions { display: flex; gap: 8px; }
+.account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .account-status {
   grid-column: 1 / -1;
   font-size: 12px;

@@ -856,28 +856,37 @@ async function renderAccounts() {
       <div class="account-actions">
         ${isManual
           ? `<button class="btn btn-secondary acc-reassign">Bisherige nicht zugeordnete Trades zuweisen</button>`
-          : `<button class="btn btn-secondary acc-sync">Jetzt synchronisieren</button>`}
+          : `<button class="btn btn-secondary acc-sync">Jetzt synchronisieren</button>
+             <button class="btn btn-secondary acc-sync-full">Vollständig neu synchronisieren</button>`}
         <button class="btn btn-secondary acc-delete">Entfernen</button>
       </div>
       <div class="account-status"></div>
     `;
     const statusEl = row.querySelector(".account-status");
 
+    async function runSync(full) {
+      statusEl.textContent = full ? "Synchronisiere vollstaendig (kann etwas dauern)…" : "Synchronisiere…";
+      statusEl.className = "account-status";
+      try {
+        const res = await api(`/api/accounts/${acc.id}/sync${full ? "?full=true" : ""}`, { method: "POST" });
+        statusEl.className = "account-status ok";
+        statusEl.textContent = `${res.inserted} neue Trades importiert (${res.parsed} gefunden).`;
+        await refreshDayList();
+        await renderAccountFilter();
+      } catch (err) {
+        statusEl.className = "account-status err";
+        statusEl.textContent = err.message;
+      }
+    }
+
     const syncBtn = row.querySelector(".acc-sync");
-    if (syncBtn) {
-      syncBtn.addEventListener("click", async () => {
-        statusEl.textContent = "Synchronisiere…";
-        statusEl.className = "account-status";
-        try {
-          const res = await api(`/api/accounts/${acc.id}/sync`, { method: "POST" });
-          statusEl.className = "account-status ok";
-          statusEl.textContent = `${res.inserted} neue Trades importiert (${res.parsed} gefunden).`;
-          await refreshDayList();
-          await renderAccountFilter();
-        } catch (err) {
-          statusEl.className = "account-status err";
-          statusEl.textContent = err.message;
-        }
+    if (syncBtn) syncBtn.addEventListener("click", () => runSync(false));
+
+    const syncFullBtn = row.querySelector(".acc-sync-full");
+    if (syncFullBtn) {
+      syncFullBtn.addEventListener("click", () => {
+        if (!confirm("Die letzten 365 Tage komplett neu von MetaTrader abfragen? Geloeschte Trades aus diesem Zeitraum werden dabei wieder importiert.")) return;
+        runSync(true);
       });
     }
 
