@@ -1,0 +1,40 @@
+# === Python-Artefakte ===
+__pycache__/
+*.pyc
+*.pyo
+
+# === Virtuelle Umgebungen ===
+.venv/
+venv/
+env/
+
+# === Nutzerdaten ===
+# WICHTIG: trades.db enthaelt Broker-Zugangsdaten im Klartext
+# (Tabelle broker_accounts). Niemals in ein Repository committen.
+data/
+config.json
+
+# === Datenbank-Dateien (auch ausserhalb von data/) ===
+# -wal / -shm entstehen durch den aktivierten SQLite-WAL-Modus
+*.db
+*.db-wal
+*.db-shm
+
+# === Logs ===
+*.log
+
+# === Update-Artefakte (aus update.bat) ===
+update.zip
+_update_tmp/
+
+# === Build-/Distributions-Ordner ===
+build/
+dist/
+*.egg-info/
+
+# === Betriebssystem & Editor ===
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/

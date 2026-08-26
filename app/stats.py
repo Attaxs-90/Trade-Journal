@@ -1,0 +1,167 @@
+import calendar
+from collections import defaultdict
+from datetime import date, timedelta, datetime as dt
+
+from . import db
+
+WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def _group_by_day(trades: list[dict]) -> dict[str, list[dict]]:
+    grouped = defaultdict(list)
+    for t in trades:
+        grouped[t["day"]].append(t)
+    return grouped
+
+
+def day_stats(trades: list[dict]) -> dict:
+    cum = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    lowest = 0.0
+    highest = 0.0
+    series = []
+
+    for t in trades:
+        cum += t["net_usd"]
+        series.append(round(cum, 2))
+        if cum > peak:
+            peak = cum
+        dd = peak - cum
+        if dd > max_dd:
+            max_dd = dd
+        if cum < lowest:
+            lowest = cum
+        if cum > highest:
+            highest = cum
+
+    durations = []
+    for t in trades:
+        e = dt.fromisoformat(t["entry_time"])
+        x = dt.fromisoformat(t["exit_time"])
+        durations.append((x - e).total_seconds())
+
+    gaps = []
+    for i in range(1, len(trades)):
+        prev_exit = dt.fromisoformat(trades[i - 1]["exit_time"])
+        this_entry = dt.fromisoformat(trades[i]["entry_time"])
+        gaps.append((this_entry - prev_exit).total_seconds())
+
+    prices = [t["entry_price"] for t in trades] + [t["exit_price"] for t in trades]
+
+    return dict(
+        cumulative_series=series,
+        total_points=round(sum(t["points"] for t in trades), 2),
+        total_net=round(sum(t["net_usd"] for t in trades), 2),
+        trade_count=len(trades),
+        lowest_cum=round(lowest, 2),
+        highest_cum=round(highest, 2),
+        max_drawdown=round(max_dd, 2),
+        avg_duration_sec=round(sum(durations) / len(durations), 1) if durations else 0,
+        max_gap_sec=round(max(gaps), 1) if gaps else 0,
+        long_count=sum(1 for t in trades if t["direction"] == "Long"),
+        short_count=sum(1 for t in trades if t["direction"] == "Short"),
+        price_low=min(prices) if prices else 0,
+        price_high=max(prices) if prices else 0,
+    )
+
+
+def _fmt_num(n: float) -> str:
+    s = f"{n:,.2f}"
+    s = s.replace(",", "_").replace(".", ",").replace("_", ".")
+    return s
+
+
+def build_week_payload(iso_year: int, iso_week: int, account_keys: list[str] | None = None) -> dict:
+    monday = date.fromisocalendar(iso_year, iso_week, 1)
+    sunday = date.fromisocalendar(iso_year, iso_week, 7)
+    all_days = [monday + timedelta(days=i) for i in range(7)]
+
+    trades_by_day = _group_by_day(db.get_trades_in_range(str(monday), str(sunday), account_keys))
+
+    day_rows = []
+    for d, wd in zip(all_days, WEEKDAY_NAMES):
+        trades = trades_by_day.get(str(d), [])
+        if trades:
+            st = day_stats(trades)
+            day_rows.append(dict(
+                date=d, weekday=wd, points=st["total_points"], net=st["total_net"],
+                trades=st["trade_count"], lowest_cum=st["lowest_cum"],
+            ))
+        else:
+            day_rows.append(dict(date=d, weekday=wd, points=0.0, net=0.0, trades=0, lowest_cum=0.0))
+
+    months = sorted(set(d["date"].month for d in day_rows))
+    blocks = []
+    for m in months:
+        block_days = [d for d in day_rows if d["date"].month == m]
+        if any(d["trades"] for d in block_days):
+            blocks.append(block_days)
+
+    text_lines = []
+    block_summaries = []
+    for block in blocks:
+        traded_days = [d for d in block if d["trades"] > 0]
+        text_lines.append(f"KW {iso_week}")
+        for d in block:
+            text_lines.append(f"  {d['weekday']}: {_fmt_num(d['points'])} Pkt / {d['trades']} Trades / {_fmt_num(d['net'])} $")
+
+        week_points = round(sum(d["points"] for d in traded_days), 2)
+        week_net = round(sum(d["net"] for d in traded_days), 2)
+        week_trades = sum(d["trades"] for d in traded_days)
+        best = max(traded_days, key=lambda d: d["net"])
+        worst = min(traded_days, key=lambda d: d["net"])
+        lowest = min(traded_days, key=lambda d: d["lowest_cum"])
+
+        text_lines.append(f"  Woche: {_fmt_num(week_points)} Pkt / {week_trades} Trades / {_fmt_num(week_net)} $ netto")
+        text_lines.append(f"  Bester Tag: {best['weekday']} | Schwaechster Tag: {worst['weekday']}")
+        text_lines.append(f"  Tiefstes Tagestief der Woche: {_fmt_num(lowest['lowest_cum'])} $ ({lowest['weekday']})")
+        text_lines.append("")
+
+        block_summaries.append(dict(
+            month=block[0]["date"].month,
+            week_points=week_points, week_net=week_net, week_trades=week_trades,
+            best_day=best["weekday"], worst_day=worst["weekday"],
+            lowest_day_low=lowest["lowest_cum"], lowest_day=lowest["weekday"],
+        ))
+
+    return dict(
+        iso_year=iso_year,
+        iso_week=iso_week,
+        monday=str(monday),
+        sunday=str(sunday),
+        days=[dict(date=str(d["date"]), weekday=d["weekday"], points=d["points"],
+                    net=d["net"], trades=d["trades"]) for d in day_rows],
+        blocks=block_summaries,
+        text_block="\n".join(text_lines).strip(),
+    )
+
+
+def build_month_payload(year: int, month: int, account_keys: list[str] | None = None) -> dict:
+    days_in_month = calendar.monthrange(year, month)[1]
+    start = date(year, month, 1)
+    end = date(year, month, days_in_month)
+    trades_by_day = _group_by_day(db.get_trades_in_range(str(start), str(end), account_keys))
+
+    day_rows = []
+    for day_num in range(1, days_in_month + 1):
+        d = date(year, month, day_num)
+        trades = trades_by_day.get(str(d), [])
+        if trades:
+            st = day_stats(trades)
+            day_rows.append(dict(date=str(d), points=st["total_points"], net=st["total_net"], trades=st["trade_count"]))
+        else:
+            day_rows.append(dict(date=str(d), points=0.0, net=0.0, trades=0))
+
+    traded = [d for d in day_rows if d["trades"] > 0]
+    return dict(
+        year=year,
+        month=month,
+        days_in_month=days_in_month,
+        first_weekday=date(year, month, 1).isoweekday(),  # 1=Mo .. 7=So
+        days=day_rows,
+        total_net=round(sum(d["net"] for d in traded), 2),
+        total_points=round(sum(d["points"] for d in traded), 2),
+        total_trades=sum(d["trades"] for d in traded),
+        trading_days=len(traded),
+    )
