@@ -1,5 +1,6 @@
 """MetaTrader-5-Anbindung. Liest geschlossene Trades direkt aus dem lokalen MT5-Terminal
 per Investor-/Read-Only-Login aus. Es werden keine Order- oder Handelsrechte benoetigt."""
+import time
 from datetime import datetime
 
 try:
@@ -20,6 +21,23 @@ def _ensure_available():
         )
 
 
+def _fetch_deals_stable(from_date: datetime, to_date: datetime, retries: int = 4, delay: float = 1.5) -> list:
+    """MT5 laedt Historie fuer aeltere Zeitraeume teils erst im Hintergrund vom
+    Broker-Server nach - eine Abfrage direkt nach initialize() kann noch
+    unvollstaendige Daten liefern (beobachtet: 22 statt tatsaechlich 62+ Deals
+    bei gleichem Zeitfenster). Deshalb mehrfach abfragen und erst zurueckgeben,
+    wenn sich die Trefferzahl zwischen zwei Versuchen nicht mehr aendert."""
+    deals = mt5.history_deals_get(from_date, to_date) or []
+    prev_count = -1
+    for _ in range(retries):
+        if len(deals) == prev_count:
+            break
+        prev_count = len(deals)
+        time.sleep(delay)
+        deals = mt5.history_deals_get(from_date, to_date) or []
+    return deals
+
+
 def fetch_closed_trades(login: int, password: str, server: str, from_date: datetime, to_date: datetime) -> list[dict]:
     _ensure_available()
 
@@ -28,9 +46,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
         raise MT5Error(f"MT5-Login fehlgeschlagen ({code}): {desc}")
 
     try:
-        deals = mt5.history_deals_get(from_date, to_date)
-        if deals is None:
-            deals = []
+        deals = _fetch_deals_stable(from_date, to_date)
 
         by_position: dict[int, list] = {}
         for d in deals:

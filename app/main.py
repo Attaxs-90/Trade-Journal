@@ -188,7 +188,7 @@ def api_sync_account(account_id: int):
     if account["last_sync"]:
         from_date = datetime.fromisoformat(account["last_sync"]) - timedelta(days=1)
     else:
-        from_date = to_date - timedelta(days=90)
+        from_date = to_date - timedelta(days=365)
 
     error_cls = BROKER_ERRORS.get(account["platform"], Exception)
     try:
