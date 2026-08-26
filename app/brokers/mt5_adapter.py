@@ -38,6 +38,22 @@ def _fetch_deals_stable(from_date: datetime, to_date: datetime, retries: int = 4
     return deals
 
 
+def _fill_incomplete_positions(deals: list) -> list:
+    """Die Zeitfenster-Abfrage liefert fuer sehr frisch geschlossene Positionen
+    manchmal nur den Entry-Deal, nicht den Exit-Deal - auch nach mehrfachem
+    Nachfragen in _fetch_deals_stable (beobachtet: Exit-Deal ueber 1,5 Stunden
+    lang nicht im Zeitfenster-Ergebnis, obwohl das Zeitfenster ihn abdeckt).
+    Eine gezielte Abfrage per position liefert dieselbe Position dagegen sofort
+    vollstaendig. Deshalb jede in der Zeitfenster-Abfrage gefundene Position
+    einzeln nachladen und per Ticket dedupliziert mergen."""
+    position_ids = {d.position_id for d in deals if d.type in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL)}
+    by_ticket = {d.ticket: d for d in deals}
+    for position_id in position_ids:
+        for d in mt5.history_deals_get(position=position_id) or []:
+            by_ticket[d.ticket] = d
+    return list(by_ticket.values())
+
+
 def fetch_closed_trades(login: int, password: str, server: str, from_date: datetime, to_date: datetime) -> list[dict]:
     _ensure_available()
 
@@ -47,6 +63,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
 
     try:
         deals = _fetch_deals_stable(from_date, to_date)
+        deals = _fill_incomplete_positions(deals)
 
         by_position: dict[int, list] = {}
         for d in deals:
