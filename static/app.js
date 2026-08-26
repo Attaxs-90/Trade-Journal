@@ -417,6 +417,22 @@ async function populateDay(container, day) {
     tr.querySelector(".row-delete").addEventListener("click", async () => {
       if (!confirm("Trade wirklich löschen?")) return;
       await api(`/api/trades/${t.id}`, { method: "DELETE" });
+
+      if (data.trades.length === 1) {
+        // letzter Trade des Tages - Tag existiert danach nicht mehr,
+        // GET /api/days/{day} liefert 404. Statt populateDay() erneut
+        // aufzurufen (wuerde dort abbrechen und die alte Zeile stehen
+        // lassen), die Ansicht verlassen, die es nicht mehr gibt.
+        refreshDayList();
+        if (container.closest("#modal-overlay")) {
+          closeModal();
+          if (state.view === "month") renderMonth();
+        } else {
+          openOverview();
+        }
+        return;
+      }
+
       await populateDay(container, day);
     });
   });
