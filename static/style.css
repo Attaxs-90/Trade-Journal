@@ -11,6 +11,7 @@
   --accent: #6c95ff;
   --green-fill: rgba(61, 220, 132, 0.14);
   --red-fill: rgba(255, 107, 107, 0.14);
+  --accent-fill: rgba(108, 149, 255, 0.14);
   --font-sans: -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
   --font-mono: "SF Mono", "Cascadia Mono", Consolas, monospace;
 }
@@ -28,6 +29,7 @@ html[data-theme="light"] {
   --accent: #3b6fe0;
   --green-fill: #e5f6ea;
   --red-fill: #fceaea;
+  --accent-fill: #e8eefc;
 }
 
 /* Schriftart-Varianten - alle auf Windows vorinstalliert, kein Download/CDN noetig.
@@ -527,9 +529,14 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .month-cell.cell-pos .cell-net { color: var(--green); }
 .month-cell.cell-neg .cell-net { color: var(--red); }
 
-/* Wochenenden optisch absetzen - dezent, ohne mit Netto-Farben zu kollidieren */
-.month-grid-head.weekend { color: var(--accent); }
-.month-cell.weekend:not(.has-trades) { background: var(--bg-hover); }
+/* Wochenenden optisch absetzen - Akzentfarbe statt neutralem Grauton, damit
+   der Unterschied zu Werktagen auf den ersten Blick auffaellt. Ueberschreibt
+   nicht die Netto-Faerbung von Handelstagen. */
+.month-grid-head.weekend { color: var(--accent); font-weight: 700; }
+.month-cell.weekend:not(.has-trades) {
+  background: var(--accent-fill);
+  border-color: transparent;
+}
 
 /* Modal */
 .modal-overlay {
