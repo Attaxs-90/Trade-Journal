@@ -129,10 +129,17 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
   flex-shrink: 0;
 }
 
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .theme-toggle {
   all: unset;
   cursor: pointer;
-  margin-left: auto;
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -176,20 +183,19 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
 .sidebar-collapse-btn {
   all: unset;
   cursor: pointer;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: var(--text-faint);
-  font-size: 12px;
-  white-space: nowrap;
-  border-top: 1px solid var(--border);
-  margin-top: -4px;
-  padding-top: 12px;
+  justify-content: center;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
 }
-.sidebar-collapse-btn:hover { color: var(--text); }
-.sidebar-collapse-btn .collapse-icon svg { transition: transform 0.18s ease; }
+.sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--text); }
+.sidebar-collapse-btn .collapse-icon svg { width: 16px; height: 16px; transition: transform 0.18s ease; }
 
 /* Eingeklappter Zustand: nur noch Icon-Leiste, Labels und Textbloecke ausgeblendet.
    Eine Klasse auf .app steuert sowohl die Grid-Spaltenbreite als auch (ueber
@@ -204,8 +210,9 @@ html[data-sidebar="collapsed"] .app .import-box,
 html[data-sidebar="collapsed"] .app .day-list-wrap {
   display: none;
 }
-html[data-sidebar="collapsed"] .app .nav-item,
-html[data-sidebar="collapsed"] .app .sidebar-collapse-btn { justify-content: center; }
+html[data-sidebar="collapsed"] .app .brand { justify-content: center; }
+html[data-sidebar="collapsed"] .app .brand-actions { margin-left: 0; }
+html[data-sidebar="collapsed"] .app .nav-item { justify-content: center; }
 html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { transform: rotate(180deg); }
 
 .import-box {
