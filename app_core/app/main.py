@@ -48,6 +48,11 @@ class AccountCreate(BaseModel):
     login: str = ""
     password: str = ""
     server: str = ""
+    starting_balance: float = 0
+
+
+class StartingBalanceUpdate(BaseModel):
+    starting_balance: float
 
 
 class ReassignTrades(BaseModel):
@@ -109,9 +114,34 @@ def api_update_day_notes(day: str, payload: NotesUpdate):
 
 @app.get("/api/overview")
 def api_overview(accounts: str | None = None):
-    days = db.list_days(_parse_accounts(accounts))
+    keys = _parse_accounts(accounts)
+    days = db.list_days(keys)
+
+    # Startkapital: bei einer Konto-Auswahl nur deren Startkapital summieren
+    # (der Magic-Key "csv" fuer nicht zugeordnete Trades hat keins), sonst
+    # alle verbundenen Konten - die Kurve/der Kontostand sollen dann bei
+    # diesem Basiswert starten statt bei 0. Bevorzugt wird der zuletzt von
+    # MT5 gemeldete Kontostand (synced_balance) zurueckgerechnet um die
+    # Netto-Summe der Trades - das haelt Kurve und Kontostand deckungsgleich
+    # mit dem echten Broker-Konto. Nur wenn kein Sync stattfand, zaehlt das
+    # manuell eingetragene starting_balance.
+    all_accounts = db.list_accounts()
+    net_totals = db.account_net_totals()
+    if keys is None:
+        included = all_accounts
+    else:
+        account_ids = {k for k in keys if k != "csv"}
+        included = [a for a in all_accounts if str(a["id"]) in account_ids]
+
+    start_balance = 0.0
+    for a in included:
+        if a["synced_balance"] is not None:
+            start_balance += a["synced_balance"] - (net_totals.get(a["id"]) or 0)
+        else:
+            start_balance += a["starting_balance"] or 0
+
     days_sorted = sorted(days, key=lambda d: d["day"])
-    cum = 0.0
+    cum = start_balance
     curve = []
     for d in days_sorted:
         cum += d["net_usd"]
@@ -128,6 +158,8 @@ def api_overview(accounts: str | None = None):
         "trading_days": len(days),
         "best_day": best_day,
         "worst_day": worst_day,
+        "start_balance": round(start_balance, 2),
+        "current_balance": round(start_balance + total_net, 2),
     }
 
 
@@ -160,8 +192,18 @@ def api_platforms():
 def api_add_account(payload: AccountCreate):
     if payload.platform not in ALL_PLATFORMS:
         raise HTTPException(400, f"Unbekannte Plattform '{payload.platform}'.")
-    account_id = db.add_account(payload.name, payload.platform, payload.login, payload.password, payload.server)
+    account_id = db.add_account(
+        payload.name, payload.platform, payload.login, payload.password, payload.server, payload.starting_balance
+    )
     return {"id": account_id}
+
+
+@app.put("/api/accounts/{account_id}/starting-balance")
+def api_update_starting_balance(account_id: int, payload: StartingBalanceUpdate):
+    if not db.get_account(account_id):
+        raise HTTPException(404, "Konto nicht gefunden.")
+    db.set_starting_balance(account_id, payload.starting_balance)
+    return {"ok": True}
 
 
 @app.post("/api/trades/reassign")
@@ -192,12 +234,15 @@ def api_sync_account(account_id: int, full: bool = False):
 
     error_cls = BROKER_ERRORS.get(account["platform"], Exception)
     try:
-        trades = sync_account(account, from_date, to_date)
+        result = sync_account(account, from_date, to_date)
     except error_cls as e:
         raise HTTPException(400, str(e))
+    trades = result["trades"]
 
     inserted = db.insert_trades(trades, source=account["platform"], account_id=account_id)
     db.set_last_sync(account_id, to_date.isoformat())
+    if result.get("balance") is not None:
+        db.set_synced_balance(account_id, result["balance"])
     days_touched = sorted(set(t["day"] for t in trades))
     return {"parsed": len(trades), "inserted": inserted, "skipped": len(trades) - inserted, "days": days_touched}
 

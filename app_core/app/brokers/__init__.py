@@ -22,7 +22,9 @@ MANUAL_PLATFORMS = {
 ALL_PLATFORMS = {"mt5": "MetaTrader 5", **MANUAL_PLATFORMS}
 
 
-def sync_account(account: dict, from_date, to_date) -> list[dict]:
+def sync_account(account: dict, from_date, to_date) -> dict:
+    """Gibt {"trades": [...], "balance": float|None} zurueck - balance ist der vom
+    Broker gemeldete Kontostand zum Sync-Zeitpunkt (fuer die Equity-Kurve)."""
     platform = account["platform"]
     if platform not in ADAPTERS:
         raise ValueError(

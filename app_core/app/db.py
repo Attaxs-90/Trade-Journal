@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     login TEXT NOT NULL,
     password TEXT NOT NULL,
     server TEXT NOT NULL,
-    last_sync TEXT
+    last_sync TEXT,
+    starting_balance REAL DEFAULT 0,
+    synced_balance REAL
 );
 
 CREATE TABLE IF NOT EXISTS images (
@@ -70,6 +72,8 @@ CREATE INDEX IF NOT EXISTS idx_images_trade ON images(trade_id);
 MIGRATIONS: list[str] = [
     "ALTER TABLE trades ADD COLUMN source TEXT DEFAULT 'import'",   # -> Version 1
     "ALTER TABLE trades ADD COLUMN account_id INTEGER",             # -> Version 2
+    "ALTER TABLE broker_accounts ADD COLUMN starting_balance REAL DEFAULT 0",  # -> Version 3
+    "ALTER TABLE broker_accounts ADD COLUMN synced_balance REAL",              # -> Version 4
 ]
 
 
@@ -155,7 +159,8 @@ def insert_trades(trades: list[dict], source: str = "import", account_id: int | 
 def list_accounts() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name, platform, login, server, last_sync FROM broker_accounts ORDER BY name"
+            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance "
+            "FROM broker_accounts ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -166,13 +171,23 @@ def get_account(account_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def add_account(name: str, platform: str, login: str, password: str, server: str) -> int:
+def add_account(name: str, platform: str, login: str, password: str, server: str, starting_balance: float = 0) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO broker_accounts (name, platform, login, password, server) VALUES (?, ?, ?, ?, ?)",
-            (name, platform, login, password, server),
+            "INSERT INTO broker_accounts (name, platform, login, password, server, starting_balance) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, platform, login, password, server, starting_balance),
         )
         return cur.lastrowid
+
+
+def set_starting_balance(account_id: int, starting_balance: float):
+    with get_conn() as conn:
+        conn.execute("UPDATE broker_accounts SET starting_balance = ? WHERE id = ?", (starting_balance, account_id))
+
+
+def set_synced_balance(account_id: int, balance: float):
+    with get_conn() as conn:
+        conn.execute("UPDATE broker_accounts SET synced_balance = ? WHERE id = ?", (balance, account_id))
 
 
 def delete_account(account_id: int):
@@ -211,6 +226,17 @@ def _account_filter(account_keys: list[str] | None) -> tuple[str, list]:
     if not parts:
         return "1=0", []
     return "(" + " OR ".join(parts) + ")", params
+
+
+def account_net_totals() -> dict[int, float]:
+    """Netto-Summe je Konto ueber die komplette Handelshistorie (nicht nach
+    Filter-Zeitraum begrenzt) - Basis, um aus dem zuletzt gesyncten MT5-Kontostand
+    (synced_balance) das implizite Startkapital zu berechnen."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT account_id, SUM(net_usd) as total FROM trades WHERE account_id IS NOT NULL GROUP BY account_id"
+        ).fetchall()
+    return {r["account_id"]: r["total"] for r in rows}
 
 
 def list_account_options() -> list[dict]:

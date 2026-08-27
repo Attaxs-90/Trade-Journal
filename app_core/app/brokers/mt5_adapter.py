@@ -1,5 +1,6 @@
 """MetaTrader-5-Anbindung. Liest geschlossene Trades direkt aus dem lokalen MT5-Terminal
 per Investor-/Read-Only-Login aus. Es werden keine Order- oder Handelsrechte benoetigt."""
+import subprocess
 import time
 from datetime import datetime
 
@@ -38,6 +39,21 @@ def _fetch_deals_stable(from_date: datetime, to_date: datetime, retries: int = 4
     return deals
 
 
+def _close_terminal():
+    """mt5.shutdown() unten trennt nur die IPC-Verbindung zum Terminal, laesst
+    das Terminal-Fenster aber offen (startet es sogar automatisch, falls es
+    noch nicht lief). Der Nutzer moechte es nach dem Sync nicht dauerhaft
+    offen haben, deshalb den Terminal-Prozess gezielt per Name beenden -
+    Fehler (z. B. Terminal laeuft gar nicht) werden stillschweigend ignoriert."""
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "terminal64.exe"],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _fill_incomplete_positions(deals: list) -> list:
     """Die Zeitfenster-Abfrage liefert fuer sehr frisch geschlossene Positionen
     manchmal nur den Entry-Deal, nicht den Exit-Deal - auch nach mehrfachem
@@ -54,7 +70,7 @@ def _fill_incomplete_positions(deals: list) -> list:
     return list(by_ticket.values())
 
 
-def fetch_closed_trades(login: int, password: str, server: str, from_date: datetime, to_date: datetime) -> list[dict]:
+def fetch_closed_trades(login: int, password: str, server: str, from_date: datetime, to_date: datetime) -> dict:
     _ensure_available()
 
     if not mt5.initialize(login=login, password=password, server=server):
@@ -62,6 +78,9 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
         raise MT5Error(f"MT5-Login fehlgeschlagen ({code}): {desc}")
 
     try:
+        account_info = mt5.account_info()
+        balance = account_info.balance if account_info else None
+
         deals = _fetch_deals_stable(from_date, to_date)
         deals = _fill_incomplete_positions(deals)
 
@@ -111,6 +130,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                     exit_order_id=f"mt5:{position_id}:{exit_deal.ticket}",
                     source="mt5",
                 ))
-        return trades
+        return {"trades": trades, "balance": balance}
     finally:
         mt5.shutdown()
+        _close_terminal()

@@ -72,6 +72,7 @@ html[data-font="trebuchet"] {
 html, body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
@@ -82,6 +83,7 @@ html, body {
 .app {
   display: grid;
   grid-template-columns: auto 1fr;
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
 }
 
@@ -294,6 +296,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 /* Content */
 .content {
   overflow-y: auto;
+  min-height: 0;
   padding: 32px 40px;
 }
 
@@ -407,8 +410,26 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .obs-tile .value { font-family: var(--font-mono); font-size: 14px; }
 
 /* Chart */
-.chart-wrap { width: 100%; height: 220px; }
+.chart-wrap { width: 100%; height: 260px; position: relative; }
 .chart-wrap svg { width: 100%; height: 100%; display: block; }
+.chart-dot-hit { cursor: pointer; }
+.chart-tooltip {
+  display: none;
+  position: absolute;
+  top: 0; left: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.chart-tooltip-date { color: var(--text-faint); font-size: 11px; }
+.chart-tooltip-value { color: var(--text); font-weight: 600; font-family: var(--font-mono); }
 
 /* Buttons */
 .btn {
@@ -652,6 +673,18 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 }
 .account-name { font-weight: 600; font-size: 13.5px; }
 .account-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.account-balance-edit { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.account-balance-edit .acc-starting-balance {
+  width: 100px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+}
+.account-balance-edit .acc-balance-save { padding: 4px 8px; font-size: 11px; }
 .account-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .account-status {
   grid-column: 1 / -1;

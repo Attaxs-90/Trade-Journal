@@ -95,6 +95,10 @@ function initTheme() {
     const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
     localStorage.setItem("theme", next);
     apply(next);
+    // Die Equity-Kurve backt Theme-Farben als feste Werte ins SVG ein (per
+    // getComputedStyle beim Rendern) - ohne Neuzeichnen blieben nach einem
+    // Theme-Wechsel die alten Farben stehen (z.B. helltext auf hellem Grund).
+    refreshCurrentView();
   });
 }
 initTheme();
@@ -328,7 +332,9 @@ async function openOverview() {
   const data = await api(withFilter("/api/overview"));
 
   const statGrid = document.getElementById("ov-stats");
-  statGrid.innerHTML = tile("Netto gesamt", fmtSigned(data.total_net) + " $", cls(data.total_net))
+  statGrid.innerHTML = tile("Startkapital", fmtNum(data.start_balance) + " $")
+    + tile("Kontostand", fmtNum(data.current_balance) + " $", cls(data.current_balance - data.start_balance))
+    + tile("Netto gesamt", fmtSigned(data.total_net) + " $", cls(data.total_net))
     + tile("Trades gesamt", data.total_trades)
     + tile("Handelstage", data.trading_days)
     + tile("Bester Tag", data.best_day ? `${data.best_day.day} (${fmtSigned(data.best_day.net_usd)} $)` : "–")
@@ -336,7 +342,10 @@ async function openOverview() {
 
   const chartWrap = document.getElementById("ov-chart");
   if (data.curve.length > 1) {
-    chartWrap.innerHTML = lineChartSvg(data.curve.map(p => p.cum_net), data.curve.map(p => p.day));
+    const curveValues = data.curve.map(p => p.cum_net);
+    const curveLabels = data.curve.map(p => p.day);
+    chartWrap.innerHTML = lineChartSvg(curveValues, curveLabels, data.start_balance) + `<div class="chart-tooltip"></div>`;
+    attachChartTooltip(chartWrap);
   } else {
     chartWrap.innerHTML = `<div class="empty-state">Mindestens 2 Tage nötig für eine Kurve.</div>`;
   }
@@ -739,33 +748,151 @@ function obsTile(label, value) {
 
 /* ---------- Chart (inline SVG, keine externe Lib) ---------- */
 
-function lineChartSvg(values, labels) {
-  const w = 1000, h = 220, padL = 50, padR = 10, padT = 16, padB = 24;
-  const min = Math.min(0, ...values), max = Math.max(0, ...values);
+function lineChartSvg(values, labels, baseline = 0) {
+  const w = 1000, h = 260, padL = 62, padR = 16, padT = 14, padB = 28;
+
+  // Wertebereich mit Puffer statt fest bei 0 zu starten - sonst quetscht ein
+  // Kontostand (z.B. 9.800-10.500) sich auf ein paar Pixel am oberen Rand
+  // zusammen, waehrend der riesige ungenutzte Bereich bis 0 leer bleibt.
+  // Das Startkapital fliesst mit in die Spanne ein, damit die Referenzlinie
+  // immer sichtbar bleibt, auch wenn die Kurve nie in ihre Naehe kommt.
+  const rawMin = Math.min(...values, baseline), rawMax = Math.max(...values, baseline);
+  const span = (rawMax - rawMin) || Math.abs(rawMax) || 1;
+  const pad = span * 0.15;
+  const min = rawMin - pad, max = rawMax + pad;
   const range = (max - min) || 1;
   const stepX = (w - padL - padR) / (values.length - 1 || 1);
 
   const x = i => padL + i * stepX;
   const y = v => padT + (h - padT - padB) * (1 - (v - min) / range);
 
-  const points = values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const zeroY = y(0);
   const last = values[values.length - 1];
   const cs = getComputedStyle(document.documentElement);
   const green = cs.getPropertyValue("--green").trim();
   const red = cs.getPropertyValue("--red").trim();
   const border = cs.getPropertyValue("--border").trim();
   const faint = cs.getPropertyValue("--text-faint").trim();
-  const lineColor = last >= 0 ? green : red;
+  const text = cs.getPropertyValue("--text").trim();
 
+  const points = values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const baselineY = y(baseline);
+  // Flaeche zwischen Kurve und Startkapital-Linie (nicht bis zum Kartenrand) -
+  // so entsteht optisch ein Gewinn-/Verlust-Band relativ zum Startkapital.
+  const areaPoints = `${x(0)},${baselineY} ${points} ${x(values.length - 1)},${baselineY}`;
+
+  // Horizontale Gitterlinien mit Werten - macht den ungefaehren Stand an
+  // jeder Stelle der Kurve ablesbar, ohne jeden Punkt einzeln pruefen zu muessen.
+  const GRID_LINES = 4;
+  let gridSvg = "";
+  for (let i = 0; i <= GRID_LINES; i++) {
+    const v = min + (range * i / GRID_LINES);
+    const gy = y(v);
+    gridSvg += `<line x1="${padL}" y1="${gy}" x2="${w - padR}" y2="${gy}" stroke="${border}" stroke-width="1" opacity="0.6" />`;
+    gridSvg += `<text x="${padL - 8}" y="${gy + 3}" fill="${faint}" font-size="10" text-anchor="end">${fmtNum(v, 0)}</text>`;
+  }
+
+  // X-Achse: mehrere Datums-Labels statt nur Anfang/Ende, damit man den
+  // Zeitpunkt eines Kurvenabschnitts grob zuordnen kann.
+  const maxLabels = Math.min(6, values.length);
+  let xLabelsSvg = "";
+  if (values.length === 1) {
+    xLabelsSvg = `<text x="${x(0)}" y="${h - 8}" fill="${faint}" font-size="10" text-anchor="middle">${labels[0]}</text>`;
+  } else {
+    for (let i = 0; i < maxLabels; i++) {
+      const idx = Math.round(i * (values.length - 1) / (maxLabels - 1));
+      const anchor = idx === 0 ? "start" : idx === values.length - 1 ? "end" : "middle";
+      xLabelsSvg += `<text x="${x(idx)}" y="${h - 8}" fill="${faint}" font-size="10" text-anchor="${anchor}">${labels[idx]}</text>`;
+    }
+  }
+
+  // Sichtbare Punkte, Farbe je nachdem ob ueber oder unter dem Startkapital.
+  const dots = values.map((v, i) =>
+    `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${v >= baseline ? green : red}" />`
+  ).join("");
+
+  // Grosse unsichtbare Trefferflaechen statt des nativen (verzoegerten,
+  // winzigen) SVG-<title>-Tooltips - macht Hover sofort und leichter zu
+  // treffen. Werte liegen als data-Attribute fuer attachChartTooltip() bereit.
+  const hitAreas = values.map((v, i) =>
+    `<circle class="chart-dot-hit" cx="${x(i)}" cy="${y(v)}" r="14" fill="transparent" data-day="${labels[i]}" data-value="${v}" data-color="${v >= baseline ? green : red}" />`
+  ).join("");
+
+  const uid = "chart" + Math.random().toString(36).slice(2, 8);
+
+  // Kurve + Flaeche je zweimal (gruen/rot) zeichnen und per clipPath auf den
+  // Bereich ueber bzw. unter der Startkapital-Linie beschraenken - so wechselt
+  // die Farbe automatisch genau an der Stelle, wo die Kurve die Linie kreuzt.
   return `
   <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <line x1="${padL}" y1="${zeroY}" x2="${w - padR}" y2="${zeroY}" stroke="${border}" stroke-dasharray="4 4" />
-    <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="2" />
-    <circle cx="${x(values.length - 1)}" cy="${y(last)}" r="3.5" fill="${lineColor}" />
-    <text x="${padL}" y="${h - 6}" fill="${faint}" font-size="10">${labels[0]}</text>
-    <text x="${w - padR}" y="${h - 6}" fill="${faint}" font-size="10" text-anchor="end">${labels[labels.length - 1]}</text>
+    <defs>
+      <clipPath id="${uid}-above"><rect x="0" y="0" width="${w}" height="${Math.max(baselineY, 0)}" /></clipPath>
+      <clipPath id="${uid}-below"><rect x="0" y="${baselineY}" width="${w}" height="${Math.max(h - baselineY, 0)}" /></clipPath>
+      <linearGradient id="${uid}-g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${green}" stop-opacity="0.3" />
+        <stop offset="100%" stop-color="${green}" stop-opacity="0" />
+      </linearGradient>
+      <linearGradient id="${uid}-r" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0%" stop-color="${red}" stop-opacity="0.3" />
+        <stop offset="100%" stop-color="${red}" stop-opacity="0" />
+      </linearGradient>
+    </defs>
+    ${gridSvg}
+    <g clip-path="url(#${uid}-above)">
+      <polygon points="${areaPoints}" fill="url(#${uid}-g)" />
+      <polyline points="${points}" fill="none" stroke="${green}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+    </g>
+    <g clip-path="url(#${uid}-below)">
+      <polygon points="${areaPoints}" fill="url(#${uid}-r)" />
+      <polyline points="${points}" fill="none" stroke="${red}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+    </g>
+    <line x1="${padL}" y1="${baselineY}" x2="${w - padR}" y2="${baselineY}" stroke="${text}" stroke-width="1" stroke-dasharray="5 4" opacity="0.7" />
+    <text x="${w - padR}" y="${baselineY - 6}" fill="${text}" font-size="11" text-anchor="end">Startkapital</text>
+    ${dots}
+    <circle cx="${x(values.length - 1)}" cy="${y(last)}" r="4.5" fill="${last >= baseline ? green : red}" stroke="${text}" stroke-width="1.5" />
+    ${xLabelsSvg}
+    <circle class="chart-hover-ring" r="7" fill="none" stroke-width="2" opacity="0" />
+    ${hitAreas}
   </svg>`;
+}
+
+// Sofortiges, gut lesbares Tooltip statt des traegen nativen SVG-<title> -
+// wird nach dem Einfuegen des lineChartSvg()-Markups auf den chart-wrap
+// aufgerufen (braucht die tatsaechlichen DOM-Positionen der Trefferkreise).
+function attachChartTooltip(chartWrap) {
+  const tooltip = chartWrap.querySelector(".chart-tooltip");
+  const ring = chartWrap.querySelector(".chart-hover-ring");
+  if (!tooltip) return;
+
+  const position = (e) => {
+    const wrapRect = chartWrap.getBoundingClientRect();
+    const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    let left = e.clientX - wrapRect.left + 14;
+    let top = e.clientY - wrapRect.top - th - 10;
+    if (left + tw > wrapRect.width) left = e.clientX - wrapRect.left - tw - 14;
+    if (top < 0) top = e.clientY - wrapRect.top + 14;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+
+  chartWrap.querySelectorAll(".chart-dot-hit").forEach(hit => {
+    hit.addEventListener("mouseenter", (e) => {
+      tooltip.innerHTML = `<div class="chart-tooltip-date">${fmtDate(hit.dataset.day)}</div>`
+        + `<div class="chart-tooltip-value">${fmtNum(parseFloat(hit.dataset.value))} $</div>`;
+      tooltip.style.display = "block";
+      if (ring) {
+        ring.setAttribute("cx", hit.getAttribute("cx"));
+        ring.setAttribute("cy", hit.getAttribute("cy"));
+        ring.setAttribute("stroke", hit.dataset.color);
+        ring.style.opacity = "1";
+      }
+      position(e);
+    });
+    hit.addEventListener("mousemove", position);
+    hit.addEventListener("mouseleave", () => {
+      tooltip.style.display = "none";
+      if (ring) ring.style.opacity = "0";
+    });
+  });
 }
 
 /* ---------- Konten & Sync ---------- */
@@ -813,6 +940,7 @@ async function openAccounts() {
     e.preventDefault();
     const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
+    payload.starting_balance = parseFloat(payload.starting_balance) || 0;
     try {
       await api("/api/accounts", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -852,6 +980,12 @@ async function renderAccounts() {
         <div class="account-name">${acc.name}</div>
         <div class="account-meta">${platformName}${isManual ? "" : ` · Login ${acc.login} · Server ${acc.server}`}</div>
         <div class="account-meta">${isManual ? "Zuordnung per CSV-Import" : `Letzter Sync: ${lastSync}`}</div>
+        ${acc.synced_balance !== null
+          ? `<div class="account-meta">Kontostand (aus Sync): ${fmtNum(acc.synced_balance)} $</div>`
+          : `<div class="account-meta account-balance-edit">
+               Startkapital: <input type="number" step="0.01" class="acc-starting-balance" value="${acc.starting_balance || 0}">
+               <button type="button" class="btn btn-secondary acc-balance-save">Speichern</button>
+             </div>`}
       </div>
       <div class="account-actions">
         ${isManual
@@ -863,6 +997,24 @@ async function renderAccounts() {
       <div class="account-status"></div>
     `;
     const statusEl = row.querySelector(".account-status");
+
+    const balanceSaveBtn = row.querySelector(".acc-balance-save");
+    if (balanceSaveBtn) balanceSaveBtn.addEventListener("click", async () => {
+      const input = row.querySelector(".acc-starting-balance");
+      const value = parseFloat(input.value) || 0;
+      try {
+        await api(`/api/accounts/${acc.id}/starting-balance`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ starting_balance: value }),
+        });
+        statusEl.className = "account-status ok";
+        statusEl.textContent = "Startkapital gespeichert.";
+        if (state.view === "overview") refreshCurrentView();
+      } catch (err) {
+        statusEl.className = "account-status err";
+        statusEl.textContent = err.message;
+      }
+    });
 
     async function runSync(full) {
       statusEl.textContent = full ? "Synchronisiere vollstaendig (kann etwas dauern)…" : "Synchronisiere…";
