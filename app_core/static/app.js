@@ -95,10 +95,11 @@ function initTheme() {
     const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
     localStorage.setItem("theme", next);
     apply(next);
-    // Die Equity-Kurve backt Theme-Farben als feste Werte ins SVG ein (per
-    // getComputedStyle beim Rendern) - ohne Neuzeichnen blieben nach einem
-    // Theme-Wechsel die alten Farben stehen (z.B. helltext auf hellem Grund).
+    // Die Equity-Kurve und die Newsbar-Impact-Farben backen Theme-Farben als
+    // feste Werte ein (per getComputedStyle beim Rendern) - ohne Neuzeichnen
+    // blieben nach einem Theme-Wechsel die alten Farben stehen.
     refreshCurrentView();
+    if (typeof renderNewsFilters === "function") { renderNewsFilters(); renderNewsSections(); }
   });
 }
 initTheme();
@@ -1130,3 +1131,176 @@ document.querySelectorAll(".nav-item").forEach(el => {
 loadFilterState();
 renderAccountFilter();
 openOverview();
+
+/* ---------- Newsbar (ForexFactory-Wirtschaftskalender) ---------- */
+
+const NEWS_IMPACT_LEVELS = [
+  { key: "High", label: "High Impact" },
+  { key: "Medium", label: "Medium Impact" },
+  { key: "Low", label: "Low Impact" },
+  { key: "Holiday", label: "Non-Economic / Holiday" },
+];
+const NEWS_CURRENCIES = ["AUD", "CAD", "CHF", "CNY", "EUR", "GBP", "JPY", "NZD", "USD"];
+const NEWS_EVENT_TYPES = ["Growth", "Housing", "Inflation", "Consumer Surveys", "Employment", "Business Surveys", "Central Bank", "Speeches", "Bonds", "Misc"];
+
+const newsFilterState = {
+  impact: new Set(NEWS_IMPACT_LEVELS.map(l => l.key)),
+  currency: new Set(NEWS_CURRENCIES),
+  type: new Set(NEWS_EVENT_TYPES),
+};
+let newsEvents = [];
+let newsLoadFailed = false;
+
+function loadNewsFilterState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("newsCalendarFilter") || "null");
+    if (saved) {
+      if (Array.isArray(saved.impact)) newsFilterState.impact = new Set(saved.impact);
+      if (Array.isArray(saved.currency)) newsFilterState.currency = new Set(saved.currency);
+      if (Array.isArray(saved.type)) newsFilterState.type = new Set(saved.type);
+    }
+  } catch (e) { /* ignore */ }
+}
+function saveNewsFilterState() {
+  localStorage.setItem("newsCalendarFilter", JSON.stringify({
+    impact: [...newsFilterState.impact], currency: [...newsFilterState.currency], type: [...newsFilterState.type],
+  }));
+}
+
+function impactColorVar(impact) {
+  const cs = getComputedStyle(document.documentElement);
+  const map = { High: "--impact-high", Medium: "--impact-medium", Low: "--impact-low" };
+  return cs.getPropertyValue(map[impact] || "--impact-none").trim();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderNewsFilters() {
+  const impactWrap = document.getElementById("newsbar-filter-impact");
+  impactWrap.innerHTML = NEWS_IMPACT_LEVELS.map(lvl => `
+    <button type="button" class="newsbar-chip${newsFilterState.impact.has(lvl.key) ? " active" : ""}" data-group="impact" data-key="${lvl.key}" title="${lvl.label}">
+      <span class="newsbar-chip-dot" style="background:${impactColorVar(lvl.key)}"></span>${lvl.key}
+    </button>
+  `).join("");
+
+  const typeWrap = document.getElementById("newsbar-filter-types");
+  typeWrap.innerHTML = NEWS_EVENT_TYPES.map(t => `
+    <button type="button" class="newsbar-chip${newsFilterState.type.has(t) ? " active" : ""}" data-group="type" data-key="${t}">${t}</button>
+  `).join("");
+
+  const curWrap = document.getElementById("newsbar-filter-currencies");
+  curWrap.innerHTML = NEWS_CURRENCIES.map(c => `
+    <button type="button" class="newsbar-chip${newsFilterState.currency.has(c) ? " active" : ""}" data-group="currency" data-key="${c}">${c}</button>
+  `).join("");
+
+  document.querySelectorAll("#newsbar-filter-panel .newsbar-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const group = chip.dataset.group, key = chip.dataset.key;
+      if (newsFilterState[group].has(key)) newsFilterState[group].delete(key); else newsFilterState[group].add(key);
+      chip.classList.toggle("active");
+      saveNewsFilterState();
+      renderNewsSections();
+    });
+  });
+
+  document.querySelectorAll("#newsbar-filter-panel a[data-filter]").forEach(a => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const group = a.dataset.filter, mode = a.dataset.mode;
+      const source = group === "impact" ? NEWS_IMPACT_LEVELS.map(l => l.key) : group === "currency" ? NEWS_CURRENCIES : NEWS_EVENT_TYPES;
+      newsFilterState[group] = new Set(mode === "all" ? source : []);
+      saveNewsFilterState();
+      renderNewsFilters();
+      renderNewsSections();
+    });
+  });
+}
+
+function newsRowHtml(e) {
+  const dt = new Date(e.time);
+  const time = dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const values = (e.forecast || e.previous)
+    ? `<div class="news-row-values">P: ${escapeHtml(e.forecast || "–")} · V: ${escapeHtml(e.previous || "–")}</div>`
+    : "";
+  return `
+    <a class="news-row" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
+      <div class="news-row-line1">
+        <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
+        <span class="news-row-time">${time}</span>
+        <span class="news-row-currency">${escapeHtml(e.currency)}</span>
+        <span class="news-row-title">${escapeHtml(e.title)}</span>
+      </div>
+      ${values}
+    </a>`;
+}
+
+function fillNewsList(elId, events, emptyMsg) {
+  const el = document.getElementById(elId);
+  el.innerHTML = events.length ? events.map(newsRowHtml).join("") : `<div class="empty-state">${emptyMsg}</div>`;
+}
+
+function renderNewsSections() {
+  const now = new Date();
+  const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today0 = startOfDay(now);
+  const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
+  const dayAfter0 = new Date(today0); dayAfter0.setDate(dayAfter0.getDate() + 2);
+
+  const filtered = newsEvents.filter(e =>
+    newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type)
+  );
+
+  const upcoming = [], hot = [], history = [];
+  for (const e of filtered) {
+    const t = new Date(e.time);
+    const day0 = startOfDay(t);
+    if (day0 >= today0 && day0 < dayAfter0 && t >= now) upcoming.push(e);
+    else if (day0.getTime() === today0.getTime() && t < now) hot.push(e);
+    else if (day0 < today0) history.push(e);
+  }
+  upcoming.sort((a, b) => new Date(a.time) - new Date(b.time));
+  hot.sort((a, b) => new Date(b.time) - new Date(a.time));
+  history.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  const emptyMsg = newsLoadFailed && !newsEvents.length ? "Kalender aktuell nicht erreichbar." : "Keine Termine.";
+  fillNewsList("news-upcoming", upcoming, emptyMsg);
+  fillNewsList("news-hot", hot.slice(0, 30), emptyMsg);
+  fillNewsList("news-history", history.slice(0, 60), emptyMsg);
+}
+
+async function loadNews() {
+  try {
+    const data = await api("/api/news/calendar");
+    newsEvents = data.events || [];
+    newsLoadFailed = false;
+  } catch (e) {
+    newsLoadFailed = true;
+  }
+  renderNewsSections();
+}
+
+function initNewsbar() {
+  const collapseBtn = document.getElementById("newsbar-collapse");
+  const apply = (collapsed) => {
+    if (collapsed) document.documentElement.setAttribute("data-newsbar", "collapsed");
+    else document.documentElement.removeAttribute("data-newsbar");
+  };
+  apply(localStorage.getItem("newsbarCollapsed") === "true");
+  collapseBtn.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-newsbar") !== "collapsed";
+    localStorage.setItem("newsbarCollapsed", String(next));
+    apply(next);
+  });
+
+  const filterBtn = document.getElementById("newsbar-filter-btn");
+  const panel = document.getElementById("newsbar-filter-panel");
+  filterBtn.addEventListener("click", () => { panel.hidden = !panel.hidden; });
+
+  loadNewsFilterState();
+  renderNewsFilters();
+  loadNews();
+  setInterval(loadNews, 5 * 60 * 1000);
+}
+initNewsbar();

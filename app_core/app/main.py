@@ -5,7 +5,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db
+from . import db, news
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
 from .config import IMAGES_DIR
 from .images import save_image, delete_image_files
@@ -266,6 +266,13 @@ def api_delete_image(image_id: int):
     db.delete_image(image_id)
     delete_image_files(image["filename"], image["thumb_filename"])
     return {"ok": True}
+
+
+@app.get("/api/news/calendar")
+def api_news_calendar():
+    result = news.fetch_calendar()
+    fetched_at = result["fetched_at"].isoformat() if result["fetched_at"] else None
+    return {"events": result["events"], "fetched_at": fetched_at}
 
 
 app.mount("/media", StaticFiles(directory=str(IMAGES_DIR)), name="media")

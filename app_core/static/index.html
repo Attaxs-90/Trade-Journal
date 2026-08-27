@@ -14,6 +14,9 @@
     if (localStorage.getItem("sidebarCollapsed") === "true") {
       document.documentElement.setAttribute("data-sidebar", "collapsed");
     }
+    if (localStorage.getItem("newsbarCollapsed") === "true") {
+      document.documentElement.setAttribute("data-newsbar", "collapsed");
+    }
   })();
 </script>
 </head>
@@ -75,6 +78,54 @@
   <main class="content" id="content">
     <!-- dynamisch befüllt -->
   </main>
+
+  <aside class="newsbar" id="newsbar">
+    <div class="newsbar-header">
+      <span class="newsbar-title">Marktnews</span>
+      <button class="newsbar-filter-btn" id="newsbar-filter-btn" title="Filter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="4 4 20 4 14 12.5 14 19 10 21 10 12.5 4 4"/></svg>
+      </button>
+      <button class="newsbar-collapse-btn" id="newsbar-collapse" title="Newsbar ein-/ausklappen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+
+    <div class="newsbar-filter-panel" id="newsbar-filter-panel" hidden>
+      <div class="newsbar-filter-group">
+        <div class="newsbar-filter-group-title">
+          Expected Impact (<a href="#" data-filter="impact" data-mode="all">all</a>, <a href="#" data-filter="impact" data-mode="none">none</a>)
+        </div>
+        <div class="newsbar-chip-row" id="newsbar-filter-impact"></div>
+      </div>
+      <div class="newsbar-filter-group">
+        <div class="newsbar-filter-group-title">
+          Event Types (<a href="#" data-filter="type" data-mode="all">all</a>, <a href="#" data-filter="type" data-mode="none">none</a>)
+        </div>
+        <div class="newsbar-chip-row" id="newsbar-filter-types"></div>
+      </div>
+      <div class="newsbar-filter-group">
+        <div class="newsbar-filter-group-title">
+          Currencies (<a href="#" data-filter="currency" data-mode="all">all</a>, <a href="#" data-filter="currency" data-mode="none">none</a>)
+        </div>
+        <div class="newsbar-chip-row" id="newsbar-filter-currencies"></div>
+      </div>
+    </div>
+
+    <div class="newsbar-body" id="newsbar-body">
+      <div class="newsbar-section">
+        <div class="newsbar-section-title">Anstehend (heute &amp; morgen)</div>
+        <div class="newsbar-list" id="news-upcoming"></div>
+      </div>
+      <div class="newsbar-section">
+        <div class="newsbar-section-title">Bereits veröffentlicht heute</div>
+        <div class="newsbar-list" id="news-hot"></div>
+      </div>
+      <div class="newsbar-section">
+        <div class="newsbar-section-title">Historie</div>
+        <div class="newsbar-list" id="news-history"></div>
+      </div>
+    </div>
+  </aside>
 
 </div>
 

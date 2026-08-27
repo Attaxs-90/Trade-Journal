@@ -12,6 +12,10 @@
   --green-fill: rgba(61, 220, 132, 0.14);
   --red-fill: rgba(255, 107, 107, 0.14);
   --accent-fill: rgba(108, 149, 255, 0.14);
+  --impact-high: #ff6b6b;
+  --impact-medium: #ffa94d;
+  --impact-low: #ffd43b;
+  --impact-none: #8b93a1;
   --font-sans: -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
   --font-mono: "SF Mono", "Cascadia Mono", Consolas, monospace;
 }
@@ -30,6 +34,10 @@ html[data-theme="light"] {
   --green-fill: #e5f6ea;
   --red-fill: #fceaea;
   --accent-fill: #e8eefc;
+  --impact-high: #d93636;
+  --impact-medium: #d9822b;
+  --impact-low: #c9a227;
+  --impact-none: #9aa1ac;
 }
 
 /* Schriftart-Varianten - alle auf Windows vorinstalliert, kein Download/CDN noetig.
@@ -82,7 +90,7 @@ html, body {
 
 .app {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
 }
@@ -822,3 +830,159 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   border-radius: 0 0 3px 0;
 }
 .lightbox-handle:hover::before { border-color: var(--accent); }
+
+/* Newsbar (ForexFactory-Wirtschaftskalender, rechte Spalte) */
+.newsbar {
+  width: 300px;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: width 0.18s ease;
+}
+html[data-newsbar="collapsed"] .app .newsbar { width: 44px; }
+
+/* Duenner, erst beim Hover sichtbarer Scrollbar statt der klobigen
+   Standardleiste - Inhalt bleibt scrollbar, draengt sich optisch aber nicht auf. */
+.newsbar-filter-panel, .newsbar-body {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.newsbar-filter-panel:hover, .newsbar-body:hover {
+  scrollbar-color: var(--border) transparent;
+}
+.newsbar-filter-panel::-webkit-scrollbar, .newsbar-body::-webkit-scrollbar { width: 5px; }
+.newsbar-filter-panel::-webkit-scrollbar-thumb, .newsbar-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+.newsbar-filter-panel:hover::-webkit-scrollbar-thumb, .newsbar-body:hover::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+.newsbar-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.newsbar-title { font-weight: 600; font-size: 13px; white-space: nowrap; }
+html[data-newsbar="collapsed"] .app .newsbar-title { display: none; }
+html[data-newsbar="collapsed"] .app .newsbar-header { justify-content: center; padding: 12px 6px; }
+
+.newsbar-filter-btn, .newsbar-collapse-btn {
+  all: unset;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+.newsbar-filter-btn { margin-left: auto; }
+html[data-newsbar="collapsed"] .app .newsbar-filter-btn { display: none; }
+.newsbar-filter-btn:hover, .newsbar-collapse-btn:hover { background: var(--bg-hover); color: var(--text); }
+.newsbar-filter-btn svg, .newsbar-collapse-btn svg { width: 14px; height: 14px; }
+.newsbar-collapse-btn svg { transition: transform 0.18s ease; }
+html[data-newsbar="collapsed"] .app .newsbar-collapse-btn svg { transform: rotate(180deg); }
+
+.newsbar-filter-panel {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+html[data-newsbar="collapsed"] .app .newsbar-filter-panel,
+.newsbar-filter-panel[hidden] { display: none; }
+.newsbar-filter-group-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+  margin-bottom: 5px;
+}
+.newsbar-filter-group-title a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.newsbar-filter-group-title a:hover { text-decoration: underline; }
+
+/* Kompakte Toggle-Chips statt nativer Checkboxen - deutlich weniger Platz,
+   moderneres Erscheinungsbild als Checkbox+Text-Zeilen. */
+.newsbar-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.newsbar-chip {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  line-height: 1.6;
+}
+.newsbar-chip:hover { border-color: var(--text-faint); }
+.newsbar-chip.active {
+  background: var(--accent-fill);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.newsbar-chip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+.newsbar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 0 10px;
+}
+html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
+
+.newsbar-section { padding: 8px 12px 2px; }
+.newsbar-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.newsbar-list { display: flex; flex-direction: column; }
+.newsbar-list .empty-state { padding: 4px 0; font-size: 11.5px; }
+
+.news-row {
+  display: block;
+  padding: 4px 5px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  line-height: 1.3;
+}
+.news-row:hover { background: var(--bg-hover); }
+.news-row-line1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.news-row-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.news-row-time { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); flex-shrink: 0; }
+.news-row-currency { font-size: 10px; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+.news-row-title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.news-row-values { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); margin: 1px 0 0 12px; }
