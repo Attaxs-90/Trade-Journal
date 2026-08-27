@@ -1220,19 +1220,16 @@ function renderNewsFilters() {
 
 function newsRowHtml(e) {
   const dt = new Date(e.time);
+  const weekday = dt.toLocaleDateString("de-DE", { weekday: "short" });
   const time = dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-  const values = (e.forecast || e.previous)
-    ? `<div class="news-row-values">P: ${escapeHtml(e.forecast || "–")} · V: ${escapeHtml(e.previous || "–")}</div>`
-    : "";
   return `
     <a class="news-row" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
       <div class="news-row-line1">
         <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
-        <span class="news-row-time">${time}</span>
+        <span class="news-row-time">${weekday} ${time}</span>
         <span class="news-row-currency">${escapeHtml(e.currency)}</span>
         <span class="news-row-title">${escapeHtml(e.title)}</span>
       </div>
-      ${values}
     </a>`;
 }
 
@@ -1245,27 +1242,30 @@ function renderNewsSections() {
   const now = new Date();
   const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const today0 = startOfDay(now);
-  const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
-  const dayAfter0 = new Date(today0); dayAfter0.setDate(dayAfter0.getDate() + 2);
+  // Montag der laufenden Woche (getDay(): 0=So..6=Sa) bis Samstag 00:00 (exklusiv) -
+  // deckt Montag bis Freitag ab, unabhaengig davon ob der Tag schon vorbei ist.
+  const mondayOffset = (today0.getDay() + 6) % 7;
+  const monday0 = new Date(today0); monday0.setDate(monday0.getDate() - mondayOffset);
+  const saturday0 = new Date(monday0); saturday0.setDate(saturday0.getDate() + 5);
 
   const filtered = newsEvents.filter(e =>
     newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type)
   );
 
-  const upcoming = [], hot = [], history = [];
+  const week = [], hot = [], history = [];
   for (const e of filtered) {
     const t = new Date(e.time);
     const day0 = startOfDay(t);
-    if (day0 >= today0 && day0 < dayAfter0 && t >= now) upcoming.push(e);
-    else if (day0.getTime() === today0.getTime() && t < now) hot.push(e);
-    else if (day0 < today0) history.push(e);
+    if (day0 >= monday0 && day0 < saturday0) week.push(e);
+    if (day0.getTime() === today0.getTime() && t < now) hot.push(e);
+    else if (day0 < monday0) history.push(e);
   }
-  upcoming.sort((a, b) => new Date(a.time) - new Date(b.time));
+  week.sort((a, b) => new Date(a.time) - new Date(b.time));
   hot.sort((a, b) => new Date(b.time) - new Date(a.time));
   history.sort((a, b) => new Date(b.time) - new Date(a.time));
 
   const emptyMsg = newsLoadFailed && !newsEvents.length ? "Kalender aktuell nicht erreichbar." : "Keine Termine.";
-  fillNewsList("news-upcoming", upcoming, emptyMsg);
+  fillNewsList("news-upcoming", week, emptyMsg);
   fillNewsList("news-hot", hot.slice(0, 30), emptyMsg);
   fillNewsList("news-history", history.slice(0, 60), emptyMsg);
 }
@@ -1293,10 +1293,29 @@ function initNewsbar() {
     localStorage.setItem("newsbarCollapsed", String(next));
     apply(next);
   });
+  document.querySelector(".newsbar-icon").addEventListener("click", () => {
+    if (document.documentElement.getAttribute("data-newsbar") === "collapsed") {
+      localStorage.setItem("newsbarCollapsed", "false");
+      apply(false);
+    }
+  });
 
   const filterBtn = document.getElementById("newsbar-filter-btn");
   const panel = document.getElementById("newsbar-filter-panel");
   filterBtn.addEventListener("click", () => { panel.hidden = !panel.hidden; });
+
+  const historyToggle = document.getElementById("news-history-toggle");
+  const historyList = document.getElementById("news-history");
+  const applyHistoryCollapsed = (collapsed) => {
+    historyList.classList.toggle("collapsed", collapsed);
+    historyToggle.classList.toggle("collapsed", collapsed);
+  };
+  applyHistoryCollapsed(localStorage.getItem("newsHistoryCollapsed") === "true");
+  historyToggle.addEventListener("click", () => {
+    const next = !historyList.classList.contains("collapsed");
+    localStorage.setItem("newsHistoryCollapsed", String(next));
+    applyHistoryCollapsed(next);
+  });
 
   loadNewsFilterState();
   renderNewsFilters();
