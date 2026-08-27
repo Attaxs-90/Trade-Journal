@@ -2,7 +2,9 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# app/config.py -> app/ -> app_core/ -> Projekt-Root (wo data/ und config.json
+# liegen, bewusst ausserhalb von app_core/, damit Updates sie nie anfassen).
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = DATA_DIR / "trades.db"

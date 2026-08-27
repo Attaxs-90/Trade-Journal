@@ -11,14 +11,19 @@ if not exist "update.zip" (
     echo Keine update.zip in diesem Ordner gefunden.
     echo.
     echo Bitte die neue update.zip-Datei in diesen Ordner legen
-    echo ^(neben start.bat^) und update.bat erneut per Doppelklick starten.
+    echo ^(neben update.bat, in app_core\^) und update.bat erneut per
+    echo Doppelklick starten.
     echo.
     pause
     exit /b 1
 )
 
 echo Beende Trade Journal, falls es noch laeuft...
-taskkill /F /IM python.exe >nul 2>&1
+rem Gezielt nur den Prozess auf Port 8420 beenden, nicht jeden Python-Prozess
+rem auf dem Rechner (siehe CLAUDE.md).
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr :8420 ^| findstr LISTENING') do (
+    taskkill /F /PID %%p >nul 2>&1
+)
 
 echo Entpacke Update...
 if exist "_update_tmp" rd /s /q "_update_tmp"

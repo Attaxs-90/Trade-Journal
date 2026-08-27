@@ -15,15 +15,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Kommentare auf Deutsch, ohne Umlaute (bestehende Konvention). UI und
   Nutzerkommunikation auf Deutsch mit Umlauten.
 
+## Ordnerstruktur
+
+Der Hauptordner zeigt bewusst nur `start.bat` (plus Nutzerdaten). Der
+komplette Code liegt in `app_core/` und wird bei Updates ersetzt:
+
+```
+trade-journal/
+├── start.bat          <- duenner, kaum aenderbarer Einstiegspunkt
+├── data/, config.json <- Nutzerdaten, siehe unten
+├── github_token.txt   <- Zugriffstoken fuers Release-Repo, niemals committen
+└── app_core/          <- kompletter Code, wird bei Updates ersetzt
+    ├── app/, static/, run.py, requirements.txt, VERSION, CHANGELOG.md
+    ├── update_check.ps1   <- Versionscheck beim Start, siehe "Release"
+    └── README.md, README_DEV.md, build_release.ps1, dev_reset.*, update.bat
+```
+
+`CLAUDE.md` und `.git`/`.gitignore` bleiben bewusst am Projekt-Root (Claude
+Code und Git suchen dort danach).
+
 ## Betrieb
 
 ```bash
+cd app_core
 python -m pip install -r requirements.txt
 python run.py     # startet auf 127.0.0.1:8420 und oeffnet den Browser
 ```
 
-- **Kein Auto-Reload:** nach Änderungen an `app/*.py` Server neu starten.
-  `static/`-Änderungen brauchen nur einen Browser-Reload.
+- **Kein Auto-Reload:** nach Änderungen an `app_core/app/*.py` Server neu
+  starten. `app_core/static/`-Änderungen brauchen nur einen Browser-Reload.
 - Hängt ein alter Prozess auf dem Port: `netstat -ano | findstr :8420`, dann
   gezielt `taskkill /F /PID <pid>`. Nicht `taskkill /IM python.exe` — das killt
   jeden Python-Prozess auf dem Rechner.
@@ -34,11 +54,11 @@ python run.py     # startet auf 127.0.0.1:8420 und oeffnet den Browser
 
 | Code — wird bei Updates überschrieben | Nutzerdaten — niemals anfassen |
 |---|---|
-| `app/`, `static/`, `run.py`, `*.bat`, `requirements.txt`, `VERSION` | `data/`, `config.json` |
+| alles unter `app_core/` | `data/`, `config.json`, `github_token.txt` |
 
-Die App wird als ZIP an nicht-technische Nutzer verteilt, die per Doppelklick
-auf `update.bat` aktualisieren; das Skript schließt `data/` und `config.json`
-beim Kopieren explizit aus. Diese Grenze nicht aufweichen: keine generierten
+`start.bat` wird bewusst NIE von einem Update überschrieben (eine laufende
+.bat-Datei sollte sich nicht selbst ersetzen) — nur `app_core/` wird beim
+Update ersetzt. Diese Grenze nicht aufweichen: keine generierten
 Code-Artefakte nach `data/`, keine Nutzerdaten außerhalb davon.
 
 `trades.db` enthält Broker-Passwörter im Klartext — bewusst akzeptiert für den
@@ -80,6 +100,10 @@ konkreten Bugs oder Performance-Problems:
 
 ## Release
 
-`VERSION` hochzählen, `CHANGELOG.md` ergänzen, ZIP ohne `data/`, `config.json`
-und `update.bat` bauen. Exakter Ablauf inkl. Skript-Reihenfolge steht in
-`README_DEV.md`; Update-Anleitung für Nutzer steht in `README.md`.
+`VERSION` hochzählen, `CHANGELOG.md` ergänzen, `app_core/build_release.ps1`
+baut `update.zip`. Verteilung läuft über ein privates GitHub-Release
+(`gh release create`) — `app_core/update_check.ps1` prüft das beim Start
+automatisch und fragt vor dem Einspielen nach. Exakter Ablauf inkl.
+Skript-Reihenfolge und einmaliger GitHub-Einrichtung steht in
+`app_core/README_DEV.md`; Update-Anleitung für Nutzer steht in
+`app_core/README.md`.

@@ -1,10 +1,11 @@
 # Baut update.zip fuer die Verteilung an Nutzer - nur Code-Dateien, siehe
 # README_DEV.md "Update bauen und verteilen". Nie data\, nie config.json,
-# nie update.bat selbst (das bleibt unveraendert beim Nutzer).
+# nie start.bat (liegt am Projekt-Root, nicht in app_core/, und wird von
+# update_check.ps1 bewusst nie ueberschrieben).
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$files = @("app", "static", "run.py", "requirements.txt", "VERSION", "CHANGELOG.md", "start.bat", "README.md")
+$files = @("app", "static", "run.py", "requirements.txt", "VERSION", "CHANGELOG.md", "README.md", "update_check.ps1")
 
 foreach ($f in $files) {
     if (-not (Test-Path $f)) {
@@ -35,4 +36,4 @@ Compress-Archive -Path (Join-Path $staging "*") -DestinationPath "update.zip" -F
 Remove-Item $staging -Recurse -Force
 
 Write-Host "update.zip erstellt aus: $($files -join ', ')"
-Write-Host "Ausgeschlossen (wie vorgesehen): data\, config.json, update.bat, dev_reset.*, __pycache__"
+Write-Host "Ausgeschlossen (wie vorgesehen): data\, config.json, start.bat, update.bat, dev_reset.*, build_release.ps1, __pycache__"

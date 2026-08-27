@@ -7,7 +7,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+# dev_reset.py liegt in app_core/, data/ und config.json am Projekt-Root.
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_PATH = BASE_DIR / "config.json"
 
@@ -45,7 +46,7 @@ def main():
         print(f"config.json -> {dest.name}")
 
     print()
-    print("Fertig. Naechster Start (start.bat / python run.py) erzeugt eine")
+    print("Fertig. Naechster Start (start.bat / python app_core\\run.py) erzeugt eine")
     print("frische, leere Datenbank und eine Standard-config.json.")
 
 

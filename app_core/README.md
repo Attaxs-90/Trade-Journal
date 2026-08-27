@@ -20,23 +20,22 @@ Vorausgesetzt: [Python](https://www.python.org/downloads/) ist installiert
 
 Beim nächsten Mal reicht wieder ein Doppelklick auf `start.bat`.
 
-## Ein Update einspielen
+## Updates
 
-Du bekommst von Zeit zu Zeit eine neue `update.zip`-Datei (per Mail, Chat,
-USB-Stick — wie auch immer).
+`start.bat` prüft bei jedem Start automatisch, ob eine neue Version
+verfügbar ist:
 
-1. Trade Journal beenden, falls es gerade läuft.
-2. Die `update.zip` **direkt in den `trade-journal`-Ordner legen**, neben
-   `start.bat`.
-3. Auf `update.bat` doppelklicken.
-4. Ein schwarzes Fenster zeigt den Fortschritt und meldet sich am Ende mit
-   "Update abgeschlossen! Deine Daten sind erhalten."
-5. Trade Journal wie gewohnt über `start.bat` starten.
+- Gibt es keine neue Version (oder keine Internetverbindung), startet Trade
+  Journal einfach ganz normal.
+- Gibt es eine neue Version, fragt das schwarze Fenster **"Update
+  verfügbar: vX.X.X — Jetzt aktualisieren? (J/N)"**. Mit `J` + Enter wird das
+  Update automatisch heruntergeladen und eingespielt, mit `N` + Enter startet
+  Trade Journal wie gewohnt mit der aktuellen Version weiter — du wirst beim
+  nächsten Start wieder gefragt.
 
 **Deine Trades, Konten, Notizen und Bilder bleiben bei einem Update immer
 erhalten** — sie liegen im Ordner `data/` und in `config.json`, die ein
-Update nie überschreibt oder löscht. Ist keine `update.zip` vorhanden, bricht
-`update.bat` mit einer klaren Meldung ab, ohne irgendetwas zu verändern.
+Update nie überschreibt oder löscht.
 
 ## Wo liegen meine Daten?
 
@@ -60,6 +59,6 @@ einen USB-Stick) schadet trotzdem nicht.
   bittet dich, es danach erneut zu starten.
 - **Die Seite öffnet sich nicht von selbst:** im Browser manuell
   `http://127.0.0.1:8420` aufrufen, während das schwarze Fenster offen ist.
-- **`update.bat` meldet einen Fehler beim Kopieren:** sicherstellen, dass
-  Trade Journal wirklich komplett beendet ist (schwarzes Fenster geschlossen),
-  dann `update.bat` erneut starten.
+- **Der Update-Download schlägt fehl:** meist Internet- oder
+  Verbindungsproblem — Trade Journal startet trotzdem ganz normal weiter,
+  beim nächsten Start wird es erneut versucht.

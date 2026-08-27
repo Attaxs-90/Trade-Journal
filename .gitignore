@@ -14,6 +14,10 @@ env/
 data/
 config.json
 
+# === Update-Check ===
+# Read-only Zugriffstoken fuers private Release-Repo, siehe README_DEV.md.
+github_token.txt
+
 # === Datenbank-Dateien (auch ausserhalb von data/) ===
 # -wal / -shm entstehen durch den aktivierten SQLite-WAL-Modus
 *.db
