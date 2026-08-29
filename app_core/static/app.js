@@ -433,7 +433,17 @@ async function goToJournalTemplateSettings() {
   document.getElementById("modal-overlay").classList.remove("visible");
   await openSettings();
   const card = document.getElementById("journal-templates-card");
-  card?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Kein card.scrollIntoView(): direkt nach dem innerHTML-Neuaufbau der Seite
+  // ermittelt Chromium den scrollbaren Vorfahren manchmal falsch und scrollt
+  // kurz die ganze Seite (inkl. Sidebar/Newsbar) statt nur .content - deshalb
+  // stattdessen gezielt .content scrollen.
+  const scrollHost = document.querySelector(".content");
+  if (card && scrollHost) {
+    const cardRect = card.getBoundingClientRect();
+    const hostRect = scrollHost.getBoundingClientRect();
+    const target = scrollHost.scrollTop + (cardRect.top - hostRect.top) - 12;
+    scrollHost.scrollTo({ top: target, behavior: "smooth" });
+  }
   card?.classList.add("settings-card-highlight");
   setTimeout(() => card?.classList.remove("settings-card-highlight"), 1600);
 }
