@@ -746,10 +746,10 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 
 /* Tags */
 .tag-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto auto auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
-  align-items: center;
   margin-top: 10px;
 }
 .tag-form input[type="text"] {
@@ -760,7 +760,9 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   padding: 9px 10px;
   font-size: 13px;
   font-family: var(--font-sans);
+  width: 180px;
 }
+.tag-color-row { display: flex; align-items: center; gap: 10px; }
 .tag-form input[type="color"] {
   width: 36px;
   height: 36px;
