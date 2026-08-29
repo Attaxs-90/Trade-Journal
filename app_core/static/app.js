@@ -430,6 +430,7 @@ async function openSettings() {
    ist statt in der Seite gesucht werden zu muessen. */
 async function goToJournalTemplateSettings() {
   await flushJournal();
+  document.getElementById("modal-overlay").classList.remove("visible");
   await openSettings();
   const card = document.getElementById("journal-templates-card");
   card?.scrollIntoView({ behavior: "smooth", block: "start" });
