@@ -137,7 +137,7 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
   flex-shrink: 0;
 }
 
-.theme-toggle {
+.brand-icon-btn {
   all: unset;
   cursor: pointer;
   width: 28px;
@@ -147,11 +147,18 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  color: var(--text-dim);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
 }
-.theme-toggle:hover { background: var(--bg-hover); }
+.brand-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.brand-icon-btn svg { width: 16px; height: 16px; }
+.brand-icon-btn:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+
+.theme-toggle { font-size: 14px; }
+
+.sync-btn.syncing svg { animation: brand-icon-spin 0.9s linear infinite; }
+@keyframes brand-icon-spin { to { transform: rotate(360deg); } }
 
 .nav { display: flex; flex-direction: column; gap: 4px; }
 
@@ -180,22 +187,7 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
 }
 .nav-icon svg { width: 18px; height: 18px; }
 
-.sidebar-collapse-btn {
-  all: unset;
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-}
-.sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--text); }
-.sidebar-collapse-btn .collapse-icon svg { width: 16px; height: 16px; transition: transform 0.18s ease; }
+.sidebar-collapse-btn .collapse-icon svg { transition: transform 0.18s ease; }
 
 /* Eingeklappter Zustand: nur noch Icon-Leiste, Labels und Textbloecke ausgeblendet.
    Eine Klasse auf .app steuert sowohl die Grid-Spaltenbreite als auch (ueber
@@ -204,6 +196,7 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
 html[data-sidebar="collapsed"] .app .sidebar { padding-left: 12px; padding-right: 12px; }
 html[data-sidebar="collapsed"] .app .brand-text,
 html[data-sidebar="collapsed"] .app .theme-toggle,
+html[data-sidebar="collapsed"] .app .sync-btn,
 html[data-sidebar="collapsed"] .app .nav-label,
 html[data-sidebar="collapsed"] .app .filter-box,
 html[data-sidebar="collapsed"] .app .import-box,

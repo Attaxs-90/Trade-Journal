@@ -116,6 +116,50 @@ function initSidebarCollapse() {
 }
 initSidebarCollapse();
 
+/* ---------- Globaler Sync-Button ---------- */
+
+function initGlobalSync() {
+  const btn = document.getElementById("global-sync-btn");
+  const defaultTitle = btn.title;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.classList.add("syncing");
+    btn.title = "Synchronisiere…";
+    try {
+      const [accounts, platforms] = await Promise.all([api("/api/accounts"), getPlatforms()]);
+      const autoAccounts = accounts.filter(acc => {
+        const p = platforms.find(pl => pl.key === acc.platform);
+        return p && !p.manual;
+      });
+      if (!autoAccounts.length) {
+        btn.title = "Keine automatisch synchronisierbaren Konten verbunden.";
+        return;
+      }
+      let inserted = 0, failed = 0;
+      for (const acc of autoAccounts) {
+        try {
+          const res = await api(`/api/accounts/${acc.id}/sync`, { method: "POST" });
+          inserted += res.inserted;
+        } catch (err) {
+          failed++;
+        }
+      }
+      btn.title = failed
+        ? `${inserted} neue Trades importiert, ${failed} Konto(en) fehlgeschlagen.`
+        : `${inserted} neue Trades importiert.`;
+      await refreshDayList();
+      await renderAccountFilter();
+      refreshCurrentView();
+      if (state.view === "accounts") await renderAccounts();
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("syncing");
+      setTimeout(() => { btn.title = defaultTitle; }, 4000);
+    }
+  });
+}
+initGlobalSync();
+
 /* ---------- Schriftart ---------- */
 
 const FONT_OPTIONS = [
