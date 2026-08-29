@@ -1,4 +1,9 @@
-const state = { view: "overview", currentDay: null, filterMode: "all", filterKeys: [] };
+const state = {
+  view: "overview", currentDay: null,
+  filterMode: "all", filterKeys: [],
+  tagFilterMode: "all", tagFilterKeys: [], tagFilterLogic: "or",
+  selectedTradeIds: new Set(),
+};
 
 /* ---------- Konten-Filter ---------- */
 
@@ -18,10 +23,33 @@ function accountsQS() {
   if (state.filterMode !== "selected" || !state.filterKeys.length) return "";
   return `accounts=${encodeURIComponent(state.filterKeys.join(","))}`;
 }
+
+/* ---------- Tags-Filter ---------- */
+
+function loadTagFilterState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("tagFilter") || "null");
+    if (saved && saved.mode) {
+      state.tagFilterMode = saved.mode;
+      state.tagFilterKeys = saved.keys || [];
+      state.tagFilterLogic = saved.logic || "or";
+    }
+  } catch (e) { /* ignore */ }
+}
+function saveTagFilterState() {
+  localStorage.setItem("tagFilter", JSON.stringify({
+    mode: state.tagFilterMode, keys: state.tagFilterKeys, logic: state.tagFilterLogic,
+  }));
+}
+function tagsQS() {
+  if (state.tagFilterMode !== "selected" || !state.tagFilterKeys.length) return "";
+  return `tags=${encodeURIComponent(state.tagFilterKeys.join(","))}&tag_logic=${state.tagFilterLogic}`;
+}
+
 function withFilter(url) {
-  const qs = accountsQS();
-  if (!qs) return url;
-  return url + (url.includes("?") ? "&" : "?") + qs;
+  const parts = [accountsQS(), tagsQS()].filter(Boolean);
+  if (!parts.length) return url;
+  return url + (url.includes("?") ? "&" : "?") + parts.join("&");
 }
 
 async function renderAccountFilter() {
@@ -73,6 +101,73 @@ async function renderAccountFilter() {
     });
     list.appendChild(label);
   }
+}
+
+let cachedTags = null;
+async function getTags(force = false) {
+  if (force || !cachedTags) cachedTags = await api("/api/tags");
+  return cachedTags;
+}
+function invalidateTagsCache() { cachedTags = null; }
+
+async function renderTagFilter() {
+  const tags = await getTags();
+  const list = document.getElementById("tag-filter-list");
+  list.innerHTML = "";
+
+  const masterLabel = document.createElement("label");
+  masterLabel.className = "filter-item master";
+  masterLabel.innerHTML = `<input type="checkbox" id="tag-filter-all"> Alle Tags`;
+  list.appendChild(masterLabel);
+  const masterInput = masterLabel.querySelector("input");
+  masterInput.checked = state.tagFilterMode === "all";
+  masterInput.addEventListener("change", () => {
+    state.tagFilterMode = "all";
+    state.tagFilterKeys = [];
+    saveTagFilterState();
+    renderTagFilter();
+    refreshCurrentView();
+  });
+
+  if (!tags.length) {
+    const hint = document.createElement("div");
+    hint.className = "empty-state";
+    hint.style.padding = "6px 0";
+    hint.textContent = "Noch keine Tags angelegt.";
+    list.appendChild(hint);
+  } else {
+    for (const tag of tags) {
+      const label = document.createElement("label");
+      label.className = "filter-item";
+      label.innerHTML = `<input type="checkbox" data-key="${tag.id}"><span class="filter-item-dot" style="background:${tag.color}"></span>${escapeHtml(tag.name)}`;
+      const input = label.querySelector("input");
+      input.checked = state.tagFilterMode === "selected" && state.tagFilterKeys.includes(String(tag.id));
+      input.addEventListener("change", () => {
+        const checked = Array.from(list.querySelectorAll("input[data-key]:checked")).map(i => i.dataset.key);
+        if (!checked.length) {
+          state.tagFilterMode = "all";
+          state.tagFilterKeys = [];
+        } else {
+          state.tagFilterMode = "selected";
+          state.tagFilterKeys = checked;
+        }
+        saveTagFilterState();
+        renderTagFilter();
+        refreshCurrentView();
+      });
+      list.appendChild(label);
+    }
+  }
+
+  document.querySelectorAll("#tag-logic-toggle .tag-logic-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.logic === state.tagFilterLogic);
+    btn.onclick = () => {
+      state.tagFilterLogic = btn.dataset.logic;
+      saveTagFilterState();
+      renderTagFilter();
+      refreshCurrentView();
+    };
+  });
 }
 
 function refreshCurrentView() {
@@ -208,6 +303,140 @@ async function openSettings() {
   content.appendChild(document.getElementById("tpl-settings").content.cloneNode(true));
   renderFontSettings();
   await renderSettingsAccountDelete();
+  await renderTagsSettings();
+}
+
+/* ---------- Tags-Verwaltung (Einstellungen) ---------- */
+
+const TAG_PRESET_COLORS = [
+  "#6c95ff", "#3ddc84", "#ff6b6b", "#ffa94d", "#ffd43b",
+  "#c792ea", "#4dd4d0", "#ff8fc7", "#8b93a1", "#4f8cff",
+];
+
+let editingTagId = null;
+
+function renderTagSwatches(selectedColor) {
+  const row = document.getElementById("tag-swatch-row");
+  row.innerHTML = TAG_PRESET_COLORS.map(c =>
+    `<button type="button" class="tag-swatch${c.toLowerCase() === (selectedColor || "").toLowerCase() ? " active" : ""}" style="background:${c}" data-color="${c}"></button>`
+  ).join("");
+  row.querySelectorAll(".tag-swatch").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.getElementById("tag-color-input").value = btn.dataset.color;
+      row.querySelectorAll(".tag-swatch").forEach(b => b.classList.toggle("active", b === btn));
+    });
+  });
+}
+
+async function renderTagsSettings() {
+  const form = document.getElementById("tag-form");
+  const nameInput = document.getElementById("tag-name-input");
+  const groupInput = document.getElementById("tag-group-input");
+  const colorInput = document.getElementById("tag-color-input");
+  const submitBtn = document.getElementById("tag-form-submit");
+  const cancelBtn = document.getElementById("tag-form-cancel");
+
+  function resetForm() {
+    editingTagId = null;
+    form.reset();
+    colorInput.value = TAG_PRESET_COLORS[0];
+    renderTagSwatches(colorInput.value);
+    submitBtn.textContent = "Tag anlegen";
+    cancelBtn.hidden = true;
+  }
+
+  cancelBtn.onclick = resetForm;
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = { name: nameInput.value.trim(), color: colorInput.value, tag_group: groupInput.value.trim() };
+    if (!payload.name) return;
+    try {
+      if (editingTagId) {
+        await api(`/api/tags/${editingTagId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        });
+      } else {
+        await api("/api/tags", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        });
+      }
+      invalidateTagsCache();
+      resetForm();
+      await renderTagsList();
+      await renderTagFilter();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  resetForm();
+  await renderTagsList();
+}
+
+async function renderTagsList() {
+  const [tags, stats] = await Promise.all([getTags(true), api("/api/tag-stats")]);
+  const statsById = new Map(stats.map(s => [s.id, s]));
+
+  const groupOptions = document.getElementById("tag-group-options");
+  const groups = [...new Set(tags.map(t => t.tag_group).filter(Boolean))];
+  groupOptions.innerHTML = groups.map(g => `<option value="${escapeHtml(g)}">`).join("");
+
+  const list = document.getElementById("tag-list");
+  list.innerHTML = "";
+  if (!tags.length) {
+    list.innerHTML = `<div class="empty-state">Noch keine Tags angelegt.</div>`;
+    return;
+  }
+
+  const byGroup = new Map();
+  for (const t of tags) {
+    const g = t.tag_group || "Ohne Gruppe";
+    if (!byGroup.has(g)) byGroup.set(g, []);
+    byGroup.get(g).push(t);
+  }
+
+  for (const [group, groupTags] of byGroup) {
+    const block = document.createElement("div");
+    block.className = "tag-group-block";
+    block.innerHTML = `<div class="tag-group-title">${escapeHtml(group)}</div>`;
+    for (const t of groupTags) {
+      const s = statsById.get(t.id) || { trade_count: 0, net_usd: 0, winrate: 0 };
+      const row = document.createElement("div");
+      row.className = "tag-row";
+      row.innerHTML = `
+        <div class="tag-row-name"><span class="tag-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}</div>
+        <div class="tag-row-actions">
+          <button type="button" class="btn btn-secondary tag-edit">Bearbeiten</button>
+          <button type="button" class="btn btn-danger tag-delete">Löschen</button>
+        </div>
+        <div class="tag-row-stats">${s.trade_count} Trade(s) · <span class="${cls(s.net_usd)}">${fmtSigned(s.net_usd)} $</span> · Winrate ${fmtNum(s.winrate, 1)}%</div>
+      `;
+      row.querySelector(".tag-edit").addEventListener("click", () => {
+        editingTagId = t.id;
+        document.getElementById("tag-name-input").value = t.name;
+        document.getElementById("tag-group-input").value = t.tag_group || "";
+        document.getElementById("tag-color-input").value = t.color;
+        renderTagSwatches(t.color);
+        document.getElementById("tag-form-submit").textContent = "Speichern";
+        document.getElementById("tag-form-cancel").hidden = false;
+        document.getElementById("tag-name-input").focus();
+      });
+      row.querySelector(".tag-delete").addEventListener("click", async () => {
+        const msg = s.trade_count
+          ? `Tag "${t.name}" wirklich löschen? Er ist ${s.trade_count} Trade(s) zugewiesen - die Zuordnung geht dabei verloren.`
+          : `Tag "${t.name}" wirklich löschen?`;
+        if (!confirm(msg)) return;
+        await api(`/api/tags/${t.id}`, { method: "DELETE" });
+        invalidateTagsCache();
+        await renderTagsList();
+        await renderTagFilter();
+        if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
+      });
+      block.appendChild(row);
+    }
+    list.appendChild(block);
+  }
 }
 
 async function renderSettingsAccountDelete() {
@@ -257,6 +486,82 @@ function fmtDuration(sec) {
   return `${m}:${String(s).padStart(2, "0")} Min`;
 }
 function cls(n) { return n >= 0 ? "pos" : "neg"; }
+
+/* ---------- Tag-Chips & Popover (Tagesansicht) ---------- */
+
+function tagTextColor(hex) {
+  const c = (hex || "#6c95ff").replace("#", "");
+  const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#1a1d21" : "#ffffff";
+}
+function tagChipHtml(tag) {
+  return `<span class="tag-chip" style="background:${tag.color};color:${tagTextColor(tag.color)}">${escapeHtml(tag.name)}</span>`;
+}
+
+function renderTradeTagCell(cell, trade) {
+  cell.innerHTML = (trade.tags || []).map(tagChipHtml).join("");
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "tag-add-btn";
+  addBtn.title = "Tags zuweisen";
+  addBtn.textContent = "+";
+  addBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openTagPopover(addBtn, trade, cell);
+  });
+  cell.appendChild(addBtn);
+}
+
+async function openTagPopover(button, trade, cell) {
+  const tags = await getTags();
+  const popover = document.getElementById("tag-popover");
+  const list = document.getElementById("tag-popover-list");
+  const empty = document.getElementById("tag-popover-empty");
+
+  if (!tags.length) {
+    list.innerHTML = "";
+    empty.hidden = false;
+  } else {
+    empty.hidden = true;
+    const assigned = new Set((trade.tags || []).map(t => t.id));
+    list.innerHTML = tags.map(t => `
+      <label class="tag-popover-item">
+        <input type="checkbox" data-tag-id="${t.id}" ${assigned.has(t.id) ? "checked" : ""}>
+        <span class="tag-color-dot" style="background:${t.color}"></span>${escapeHtml(t.name)}
+      </label>`).join("");
+    list.querySelectorAll("input").forEach(cb => {
+      cb.addEventListener("change", async () => {
+        const tagIds = Array.from(list.querySelectorAll("input:checked")).map(i => parseInt(i.dataset.tagId));
+        await api(`/api/trades/${trade.id}/tags`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag_ids: tagIds }),
+        });
+        trade.tags = tags.filter(t => tagIds.includes(t.id));
+        renderTradeTagCell(cell, trade);
+      });
+    });
+  }
+
+  popover.hidden = false;
+  const rect = button.getBoundingClientRect();
+  popover.style.top = `${rect.bottom + 4}px`;
+  popover.style.left = `${rect.left}px`;
+  requestAnimationFrame(() => {
+    const pRect = popover.getBoundingClientRect();
+    if (pRect.right > window.innerWidth - 8) popover.style.left = `${Math.max(8, window.innerWidth - pRect.width - 8)}px`;
+    if (pRect.bottom > window.innerHeight - 8) popover.style.top = `${Math.max(8, rect.top - pRect.height - 4)}px`;
+  });
+}
+
+function initTagPopover() {
+  document.addEventListener("click", (e) => {
+    const popover = document.getElementById("tag-popover");
+    if (popover.hidden) return;
+    if (!popover.contains(e.target) && !e.target.closest(".tag-add-btn")) popover.hidden = true;
+  });
+}
+initTagPopover();
 
 function attachOutsideClose(overlayEl, closeFn) {
   // Schliesst nur, wenn Mousedown UND Click beide direkt auf dem Hintergrund
@@ -443,11 +748,24 @@ async function populateDay(container, day) {
   const highIdx = cumVals.indexOf(Math.max(...cumVals));
   const lowIdx = cumVals.indexOf(Math.min(...cumVals));
 
+  state.selectedTradeIds = new Set();
+  const bulkBar = container.querySelector(".bulk-tag-bar");
+  const selectAllCb = container.querySelector(".day-table-select-all");
+  bulkBar.hidden = true;
+  selectAllCb.checked = false;
+
+  function updateBulkBar() {
+    const n = state.selectedTradeIds.size;
+    bulkBar.hidden = n === 0;
+    container.querySelector(".bulk-tag-count").textContent = `${n} Trade(s) ausgewählt`;
+  }
+
   data.trades.forEach((t, i) => {
     const tr = document.createElement("tr");
     const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
-    const tag = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
+    const hiLoBadge = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
     tr.innerHTML = `
+      <td class="col-check"><input type="checkbox" class="row-select" data-id="${t.id}"></td>
       <td>${fmtTime(t.entry_time)}</td>
       <td>${fmtTime(t.exit_time)}</td>
       <td class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</td>
@@ -456,12 +774,22 @@ async function populateDay(container, day) {
       <td>${t.exit_type || ""}</td>
       <td class="${cls(t.points)}">${fmtSigned(t.points)}</td>
       <td class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</td>
-      <td class="${cumClass}">${fmtSigned(cumVals[i])} $${tag}</td>
+      <td class="${cumClass}">${fmtSigned(cumVals[i])} $${hiLoBadge}</td>
+      <td class="tag-cell"></td>
       <td><input class="row-note" data-id="${t.id}" value="${(t.notes || "").replace(/"/g, "&quot;")}" placeholder="Notiz…"></td>
       <td class="image-cell"></td>
       <td><button class="btn btn-danger row-delete" data-id="${t.id}">Löschen</button></td>
     `;
     tbody.appendChild(tr);
+
+    renderTradeTagCell(tr.querySelector(".tag-cell"), t);
+
+    tr.querySelector(".row-select").addEventListener("change", (e) => {
+      if (e.target.checked) state.selectedTradeIds.add(t.id);
+      else state.selectedTradeIds.delete(t.id);
+      selectAllCb.checked = state.selectedTradeIds.size === data.trades.length;
+      updateBulkBar();
+    });
 
     const cell = tr.querySelector(".image-cell");
     const tradeImages = (data.images || []).filter(im => im.trade_id === t.id);
@@ -490,6 +818,29 @@ async function populateDay(container, day) {
       await populateDay(container, day);
     });
   });
+
+  // .onchange/.onclick statt addEventListener: diese Elemente liegen ausserhalb
+  // von tbody und werden bei einem erneuten populateDay()-Aufruf auf demselben
+  // Container (z.B. nach Bild-Upload) nicht neu erzeugt - addEventListener
+  // wuerde sich sonst bei jedem Aufruf einen weiteren Handler dazustapeln.
+  selectAllCb.onchange = () => {
+    const checked = selectAllCb.checked;
+    tbody.querySelectorAll(".row-select").forEach(cb => { cb.checked = checked; });
+    state.selectedTradeIds = new Set(checked ? data.trades.map(t => t.id) : []);
+    updateBulkBar();
+  };
+
+  const bulkSelect = container.querySelector(".bulk-tag-select");
+  const tagsForBulk = await getTags();
+  bulkSelect.innerHTML = tagsForBulk.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+  container.querySelector(".bulk-tag-apply").onclick = async () => {
+    if (!bulkSelect.value || !state.selectedTradeIds.size) return;
+    await api("/api/trades/bulk-tag", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trade_ids: Array.from(state.selectedTradeIds), tag_id: parseInt(bulkSelect.value) }),
+    });
+    await populateDay(container, day);
+  };
 
   tbody.querySelectorAll(".row-note").forEach(inp => {
     inp.addEventListener("blur", async () => {
@@ -1173,7 +1524,9 @@ document.querySelectorAll(".nav-item").forEach(el => {
 });
 
 loadFilterState();
+loadTagFilterState();
 renderAccountFilter();
+renderTagFilter();
 openOverview();
 
 /* ---------- Newsbar (ForexFactory-Wirtschaftskalender) ---------- */

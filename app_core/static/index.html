@@ -62,6 +62,17 @@
       <div class="filter-list" id="account-filter-list"></div>
     </div>
 
+    <div class="filter-box">
+      <div class="import-label tag-filter-label">
+        <span>Tags-Filter</span>
+        <div class="tag-logic-toggle" id="tag-logic-toggle">
+          <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
+          <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
+        </div>
+      </div>
+      <div class="filter-list" id="tag-filter-list"></div>
+    </div>
+
     <div class="import-box">
       <label class="import-label" for="csv-input">CSV importieren</label>
       <select class="import-account-select" id="import-account-select">
@@ -160,6 +171,11 @@
   </div>
 </div>
 
+<div class="tag-popover" id="tag-popover" hidden>
+  <div class="tag-popover-list" id="tag-popover-list"></div>
+  <div class="tag-popover-empty" id="tag-popover-empty" hidden>Noch keine Tags angelegt - siehe Einstellungen &gt; Tags.</div>
+</div>
+
 <template id="tpl-overview">
   <section class="view">
     <header class="view-header">
@@ -195,12 +211,18 @@
 
     <div class="card">
       <div class="card-title">Trades</div>
+      <div class="bulk-tag-bar" hidden>
+        <span class="bulk-tag-count"></span>
+        <select class="bulk-tag-select"></select>
+        <button type="button" class="btn btn-secondary bulk-tag-apply">Tag zuweisen</button>
+      </div>
       <div class="table-scroll">
         <table class="table day-table">
           <thead>
             <tr>
+              <th class="col-check"><input type="checkbox" class="day-table-select-all"></th>
               <th>Entry-Zeit</th><th>Exit-Zeit</th><th>Richtung</th><th>Entry</th>
-              <th>Exit</th><th>Exit-Typ</th><th>Punkte</th><th>Netto $</th><th>Kumuliert</th><th>Notiz</th><th>Bild</th><th>Löschen</th>
+              <th>Exit</th><th>Exit-Typ</th><th>Punkte</th><th>Netto $</th><th>Kumuliert</th><th>Tags</th><th>Notiz</th><th>Bild</th><th>Löschen</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -298,6 +320,24 @@
         <button type="button" class="btn btn-danger" id="settings-account-delete-btn">Konto löschen</button>
       </div>
       <div class="account-hint" id="settings-account-hint"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Tags</div>
+      <div class="account-hint">
+        Ordne Trades in der Tagesansicht per Tag-Symbol eigene Tags zu (z. B. Strategie oder Fehler)
+        und filtere später in der Seitenleiste danach - mehrere gleichzeitig, wahlweise UND/ODER verknüpft.
+      </div>
+      <form class="tag-form" id="tag-form">
+        <input type="text" name="name" id="tag-name-input" placeholder="Tag-Name (z. B. Winner)" required>
+        <input type="text" name="tag_group" id="tag-group-input" placeholder="Gruppe (optional, z. B. Strategie)" list="tag-group-options">
+        <datalist id="tag-group-options"></datalist>
+        <div class="tag-swatch-row" id="tag-swatch-row"></div>
+        <input type="color" id="tag-color-input" value="#6c95ff" title="Eigene Farbe">
+        <button type="submit" class="btn btn-primary" id="tag-form-submit">Tag anlegen</button>
+        <button type="button" class="btn btn-secondary" id="tag-form-cancel" hidden>Abbrechen</button>
+      </form>
+      <div class="tag-list" id="tag-list"></div>
     </div>
   </section>
 </template>

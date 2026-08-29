@@ -29,6 +29,13 @@ def _parse_accounts(accounts: str | None) -> list[str] | None:
     return keys or None
 
 
+def _parse_tags(tags: str | None) -> list[str] | None:
+    if not tags:
+        return None
+    keys = [k for k in tags.split(",") if k]
+    return keys or None
+
+
 async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
     """Liest einen Upload mit harter Groessengrenze, statt beliebig grosse
     Dateien komplett in den Speicher zu laden."""
@@ -60,6 +67,21 @@ class ReassignTrades(BaseModel):
     source: str | None = None  # z.B. "ninjatrader" - None = alle nicht zugeordneten Trades
 
 
+class TagCreate(BaseModel):
+    name: str
+    color: str
+    tag_group: str = ""
+
+
+class TradeTagsUpdate(BaseModel):
+    tag_ids: list[int]
+
+
+class BulkTagAssign(BaseModel):
+    trade_ids: list[int]
+    tag_id: int
+
+
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -79,13 +101,13 @@ async def import_csv(file: UploadFile = File(...), account_id: int | None = Form
 
 
 @app.get("/api/days")
-def api_list_days(accounts: str | None = None):
-    return db.list_days(_parse_accounts(accounts))
+def api_list_days(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
+    return db.list_days(_parse_accounts(accounts), _parse_tags(tags), tag_logic)
 
 
 @app.get("/api/days/{day}")
-def api_day_detail(day: str, accounts: str | None = None):
-    trades = db.get_day_trades(day, _parse_accounts(accounts))
+def api_day_detail(day: str, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
+    trades = db.get_day_trades(day, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
     if not trades:
         raise HTTPException(404, "Kein Tag mit Trades gefunden.")
     stats = day_stats(trades)
@@ -113,9 +135,9 @@ def api_update_day_notes(day: str, payload: NotesUpdate):
 
 
 @app.get("/api/overview")
-def api_overview(accounts: str | None = None):
+def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
     keys = _parse_accounts(accounts)
-    days = db.list_days(keys)
+    days = db.list_days(keys, _parse_tags(tags), tag_logic)
 
     # Startkapital: bei einer Konto-Auswahl nur deren Startkapital summieren
     # (der Magic-Key "csv" fuer nicht zugeordnete Trades hat keins), sonst
@@ -164,13 +186,13 @@ def api_overview(accounts: str | None = None):
 
 
 @app.get("/api/week/{iso_year}/{iso_week}")
-def api_week(iso_year: int, iso_week: int, accounts: str | None = None):
-    return build_week_payload(iso_year, iso_week, _parse_accounts(accounts))
+def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
+    return build_week_payload(iso_year, iso_week, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
 
 
 @app.get("/api/month/{year}/{month}")
-def api_month(year: int, month: int, accounts: str | None = None):
-    return build_month_payload(year, month, _parse_accounts(accounts))
+def api_month(year: int, month: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
+    return build_month_payload(year, month, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
 
 
 @app.get("/api/accounts")
@@ -265,6 +287,49 @@ def api_delete_image(image_id: int):
         raise HTTPException(404, "Bild nicht gefunden.")
     db.delete_image(image_id)
     delete_image_files(image["filename"], image["thumb_filename"])
+    return {"ok": True}
+
+
+@app.get("/api/tags")
+def api_list_tags():
+    return db.list_tags()
+
+
+@app.get("/api/tag-stats")
+def api_tag_stats():
+    return db.tag_stats()
+
+
+@app.post("/api/tags")
+def api_add_tag(payload: TagCreate):
+    try:
+        tag_id = db.add_tag(payload.name, payload.color, payload.tag_group)
+    except Exception:
+        raise HTTPException(400, f"Tag '{payload.name}' existiert bereits.")
+    return {"id": tag_id}
+
+
+@app.put("/api/tags/{tag_id}")
+def api_update_tag(tag_id: int, payload: TagCreate):
+    db.update_tag(tag_id, payload.name, payload.color, payload.tag_group)
+    return {"ok": True}
+
+
+@app.delete("/api/tags/{tag_id}")
+def api_delete_tag(tag_id: int):
+    db.delete_tag(tag_id)
+    return {"ok": True}
+
+
+@app.put("/api/trades/{trade_id}/tags")
+def api_update_trade_tags(trade_id: int, payload: TradeTagsUpdate):
+    db.set_trade_tags(trade_id, payload.tag_ids)
+    return {"ok": True}
+
+
+@app.post("/api/trades/bulk-tag")
+def api_bulk_tag(payload: BulkTagAssign):
+    db.bulk_add_tag(payload.trade_ids, payload.tag_id)
     return {"ok": True}
 
 

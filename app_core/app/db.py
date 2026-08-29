@@ -58,10 +58,25 @@ CREATE TABLE IF NOT EXISTS images (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL,
+    tag_group TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS trade_tags (
+    trade_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    PRIMARY KEY (trade_id, tag_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_day ON trades(day);
 CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id);
 CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
 CREATE INDEX IF NOT EXISTS idx_images_trade ON images(trade_id);
+CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id);
 """
 
 # Versionierte Migrationen fuer bestehende Nutzer-Datenbanken (per PRAGMA user_version
@@ -74,6 +89,19 @@ MIGRATIONS: list[str] = [
     "ALTER TABLE trades ADD COLUMN account_id INTEGER",             # -> Version 2
     "ALTER TABLE broker_accounts ADD COLUMN starting_balance REAL DEFAULT 0",  # -> Version 3
     "ALTER TABLE broker_accounts ADD COLUMN synced_balance REAL",              # -> Version 4
+    """CREATE TABLE IF NOT EXISTS tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        color TEXT NOT NULL,
+        tag_group TEXT DEFAULT ''
+    )""",                                                                     # -> Version 5
+    """CREATE TABLE IF NOT EXISTS trade_tags (
+        trade_id INTEGER NOT NULL,
+        tag_id INTEGER NOT NULL,
+        PRIMARY KEY (trade_id, tag_id)
+    )""",                                                                     # -> Version 6
+    "CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id)",    # -> Version 7
+    "CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id)",  # -> Version 8
 ]
 
 
@@ -201,6 +229,7 @@ def delete_account(account_id: int):
 
 def delete_trade(trade_id: int):
     with get_conn() as conn:
+        conn.execute("DELETE FROM trade_tags WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
 
 
@@ -226,6 +255,128 @@ def _account_filter(account_keys: list[str] | None) -> tuple[str, list]:
     if not parts:
         return "1=0", []
     return "(" + " OR ".join(parts) + ")", params
+
+
+def _tag_filter(tag_keys: list[str] | None, tag_logic: str = "or") -> tuple[str, list]:
+    """Baut eine WHERE-Teilklausel fuer eine Auswahl an Tag-IDs, analog zu
+    _account_filter(). Da Tags in einer separaten Verknuepfungstabelle liegen,
+    ueber eine Subquery auf trade_tags statt einem direkten Spaltenvergleich.
+    ODER: Trade hat mindestens einen der gewaehlten Tags. UND: Trade hat alle."""
+    if not tag_keys:
+        return "", []
+    ids = [int(k) for k in tag_keys]
+    placeholders = ",".join("?" for _ in ids)
+    if tag_logic == "and":
+        clause = (
+            f"trades.id IN (SELECT trade_id FROM trade_tags WHERE tag_id IN ({placeholders}) "
+            f"GROUP BY trade_id HAVING COUNT(DISTINCT tag_id) = ?)"
+        )
+        return clause, ids + [len(ids)]
+    clause = f"trades.id IN (SELECT trade_id FROM trade_tags WHERE tag_id IN ({placeholders}))"
+    return clause, ids
+
+
+def _combine_filters(*clauses_and_params: tuple[str, list]) -> tuple[str, list]:
+    """Verknuepft mehrere unabhaengige WHERE-Fragmente (Konten-/Tag-Filter) per AND."""
+    parts, params = [], []
+    for clause, p in clauses_and_params:
+        if clause:
+            parts.append(clause)
+            params.extend(p)
+    return " AND ".join(parts), params
+
+
+def _attach_tags(trades: list[dict]) -> list[dict]:
+    """Reichert eine Liste Trades mit ihren zugewiesenen Tags an - eine
+    zusaetzliche Query statt einer pro Trade (kein N+1)."""
+    if not trades:
+        return trades
+    ids = [t["id"] for t in trades]
+    placeholders = ",".join("?" for _ in ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT trade_tags.trade_id as trade_id, tags.id, tags.name, tags.color, tags.tag_group
+               FROM trade_tags JOIN tags ON tags.id = trade_tags.tag_id
+               WHERE trade_tags.trade_id IN ({placeholders})
+               ORDER BY tags.tag_group, tags.name""",
+            ids,
+        ).fetchall()
+    by_trade: dict[int, list[dict]] = {}
+    for r in rows:
+        by_trade.setdefault(r["trade_id"], []).append(
+            dict(id=r["id"], name=r["name"], color=r["color"], tag_group=r["tag_group"])
+        )
+    for t in trades:
+        t["tags"] = by_trade.get(t["id"], [])
+    return trades
+
+
+def add_tag(name: str, color: str, tag_group: str = "") -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO tags (name, color, tag_group) VALUES (?, ?, ?)", (name, color, tag_group)
+        )
+        return cur.lastrowid
+
+
+def update_tag(tag_id: int, name: str, color: str, tag_group: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE tags SET name = ?, color = ?, tag_group = ? WHERE id = ?",
+            (name, color, tag_group, tag_id),
+        )
+
+
+def delete_tag(tag_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM trade_tags WHERE tag_id = ?", (tag_id,))
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+
+
+def list_tags() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM tags ORDER BY tag_group, name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_trade_tags(trade_id: int, tag_ids: list[int]):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM trade_tags WHERE trade_id = ?", (trade_id,))
+        conn.executemany(
+            "INSERT OR IGNORE INTO trade_tags (trade_id, tag_id) VALUES (?, ?)",
+            [(trade_id, tid) for tid in tag_ids],
+        )
+
+
+def bulk_add_tag(trade_ids: list[int], tag_id: int):
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO trade_tags (trade_id, tag_id) VALUES (?, ?)",
+            [(tid, tag_id) for tid in trade_ids],
+        )
+
+
+def tag_stats() -> list[dict]:
+    """Netto-P&L und Winrate je Tag - eine Query, kein Query pro Tag."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT tags.id, tags.name, tags.color, tags.tag_group,
+                      COUNT(trades.id) as trade_count,
+                      ROUND(COALESCE(SUM(trades.net_usd), 0), 2) as net_usd,
+                      SUM(CASE WHEN trades.net_usd > 0 THEN 1 ELSE 0 END) as wins
+               FROM tags
+               LEFT JOIN trade_tags ON trade_tags.tag_id = tags.id
+               LEFT JOIN trades ON trades.id = trade_tags.trade_id
+               GROUP BY tags.id
+               ORDER BY tags.tag_group, tags.name"""
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["winrate"] = round(100 * d["wins"] / d["trade_count"], 1) if d["trade_count"] else 0.0
+        del d["wins"]
+        result.append(d)
+    return result
 
 
 def account_net_totals() -> dict[int, float]:
@@ -275,8 +426,8 @@ def reassign_unassigned_trades(account_id: int, source: str | None = None) -> in
         return cur.rowcount
 
 
-def list_days(account_keys: list[str] | None = None) -> list[dict]:
-    clause, params = _account_filter(account_keys)
+def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
     where = f"WHERE {clause}" if clause else ""
     with get_conn() as conn:
         rows = conn.execute(
@@ -289,21 +440,21 @@ def list_days(account_keys: list[str] | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_day_trades(day: str, account_keys: list[str] | None = None) -> list[dict]:
-    clause, params = _account_filter(account_keys)
+def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
     where = f"AND {clause}" if clause else ""
     with get_conn() as conn:
         rows = conn.execute(
             f"SELECT * FROM trades WHERE day = ? {where} ORDER BY entry_time ASC",
             [day] + params,
         ).fetchall()
-    return [dict(r) for r in rows]
+    return _attach_tags([dict(r) for r in rows])
 
 
-def get_trades_in_range(start_day: str, end_day: str, account_keys: list[str] | None = None) -> list[dict]:
+def get_trades_in_range(start_day: str, end_day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
     """Ein einzelner Query fuer einen ganzen Zeitraum (Woche/Monat) statt eines
     Queries pro Tag - vermeidet bis zu 31 einzelne Connections pro Monatsansicht."""
-    clause, params = _account_filter(account_keys)
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
     where = f"AND {clause}" if clause else ""
     with get_conn() as conn:
         rows = conn.execute(
