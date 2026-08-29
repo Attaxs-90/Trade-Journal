@@ -542,6 +542,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   padding: 4px 6px;
 }
 .month-cell {
+  position: relative;   /* Anker fuer den Journal-Punkt oben rechts */
   min-height: 76px;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -1252,3 +1253,131 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   white-space: nowrap;
   min-width: 0;
 }
+
+/* ---------- Journal ---------- */
+
+.journal-new { display: flex; align-items: center; gap: 8px; }
+.journal-new input[type="date"] {
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 7px 9px; font-family: var(--font-sans); font-size: 13px;
+}
+
+.journal-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
+
+.journal-list-pane {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.journal-search {
+  width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 8px 10px; font-family: var(--font-sans); font-size: 13px;
+}
+.journal-mode-row { gap: 6px; }
+.journal-tag-filter { position: relative; }
+.journal-tag-filter .inline-filter-toggle { width: 100%; text-align: left; }
+
+.journal-list { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
+.journal-item {
+  text-align: left; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 10px; cursor: pointer; color: var(--text); font-family: var(--font-sans);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.journal-item:hover { background: var(--bg-hover); }
+.journal-item.active { border-color: var(--accent); background: var(--accent-fill); }
+.journal-item-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.journal-item-date { font-weight: 600; font-size: 13px; }
+.journal-item-net { font-size: 12px; font-weight: 600; }
+.journal-item-net.pos { color: var(--green); }
+.journal-item-net.neg { color: var(--red); }
+.journal-item-net.muted, .journal-item-preview.muted, .journal-cell .muted { color: var(--text-faint); font-weight: 400; }
+.journal-item-meta { font-size: 11px; color: var(--text-faint); }
+.journal-item-preview { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+.journal-item-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.journal-editor-pane {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  min-height: 420px;
+}
+
+.journal-metrics { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 12px; }
+.journal-metric { display: flex; align-items: center; gap: 8px; }
+.journal-metric-label { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.journal-score-row { display: flex; gap: 4px; }
+.journal-score-btn, .journal-plan-btn, .journal-score-clear {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; font-family: var(--font-sans);
+}
+.journal-score-btn:hover, .journal-plan-btn:hover, .journal-score-clear:hover { background: var(--bg-hover); color: var(--text); }
+.journal-score-btn.active, .journal-plan-btn.active {
+  background: var(--accent-fill); border-color: var(--accent); color: var(--accent); font-weight: 600;
+}
+.journal-score-clear { color: var(--text-faint); padding: 4px 7px; }
+
+.journal-templates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.journal-section-label { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.journal-tag-picker { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.journal-tag-chips { display: flex; flex-direction: column; gap: 8px; }
+
+.journal-footer { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.journal-status { font-size: 11.5px; color: var(--text-faint); }
+.journal-status.saved { color: var(--green); }
+.journal-status.pending { color: var(--text-dim); }
+.journal-status.error { color: var(--red); }
+
+.journal-marker { cursor: pointer; white-space: nowrap; }
+.cell-journal-dot {
+  position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Quill an das Theme anpassen - die Snow-Vorlage bringt eigene helle Farben mit,
+   die im Dark Mode sonst als weisser Kasten stehen bleiben. */
+.journal-quill { background: var(--bg); border-radius: 0 0 8px 8px; }
+.ql-toolbar.ql-snow {
+  border-color: var(--border) !important; background: var(--bg-elevated);
+  border-radius: 8px 8px 0 0; font-family: var(--font-sans);
+}
+.ql-container.ql-snow { border-color: var(--border) !important; font-family: var(--font-sans); font-size: 14px; }
+.ql-editor { min-height: 300px; color: var(--text); line-height: 1.6; }
+.ql-editor.ql-blank::before { color: var(--text-faint); font-style: normal; }
+.ql-snow .ql-stroke { stroke: var(--text-dim); }
+.ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--text-dim); }
+.ql-snow .ql-picker { color: var(--text-dim); }
+.ql-snow .ql-picker-options {
+  background: var(--bg-elevated); border-color: var(--border) !important; color: var(--text);
+}
+.ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-label:hover,
+.ql-snow.ql-toolbar button:hover, .ql-snow.ql-toolbar button.ql-active,
+.ql-snow .ql-picker-label.ql-active, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
+.ql-snow.ql-toolbar button:hover .ql-stroke, .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow .ql-picker-label:hover .ql-stroke, .ql-snow .ql-picker-label.ql-active .ql-stroke { stroke: var(--accent); }
+.ql-snow.ql-toolbar button:hover .ql-fill, .ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--accent); }
+.ql-snow .ql-tooltip {
+  background: var(--bg-elevated); border-color: var(--border); color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+.ql-snow .ql-tooltip input[type="text"] {
+  background: var(--bg); border-color: var(--border); color: var(--text);
+}
+.ql-editor blockquote { border-left-color: var(--border); color: var(--text-dim); }
+.ql-editor pre.ql-syntax { background: var(--bg-hover); color: var(--text); }
+.ql-editor img { max-width: 100%; border-radius: 6px; }
+
+/* Quill beschriftet die Schrift-/Groessen-Dropdowns per CSS und kennt nur seine
+   eigenen Standardwerte - fuer eine eigene Whitelist muss der Wert selbst als
+   Beschriftung herhalten, sonst steht ueberall "Sans Serif" bzw. "Normal". */
+.ql-snow .ql-picker.ql-font { width: 128px; }
+.ql-snow .ql-picker.ql-size { width: 74px; }
+.ql-snow .ql-picker.ql-font .ql-picker-label::before,
+.ql-snow .ql-picker.ql-font .ql-picker-item::before { content: 'Standard'; }
+.ql-snow .ql-picker.ql-size .ql-picker-label::before,
+.ql-snow .ql-picker.ql-size .ql-picker-item::before { content: 'Standard'; }
+.ql-snow .ql-picker.ql-font .ql-picker-label[data-value]::before,
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value]::before,
+.ql-snow .ql-picker.ql-size .ql-picker-label[data-value]::before,
+.ql-snow .ql-picker.ql-size .ql-picker-item[data-value]::before { content: attr(data-value); }
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Georgia"]::before { font-family: Georgia, serif; }
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Verdana"]::before { font-family: Verdana, sans-serif; }
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Trebuchet MS"]::before { font-family: "Trebuchet MS", sans-serif; }
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Courier New"]::before { font-family: "Courier New", monospace; }
+.ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Arial"]::before { font-family: Arial, sans-serif; }

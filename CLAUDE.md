@@ -97,6 +97,24 @@ konkreten Bugs oder Performance-Problems:
   (Chromium interpoliert Letzteres nicht zuverlässig).
 - **Layout ist in festen px gebaut** und skaliert ab 2200/3200 px Fensterbreite
   über CSS `zoom`. Neue Komponenten müssen dazu passen.
+- **Journal-Einträge** hängen an `entry_type` + `ref_key`, nicht an einer
+  `day`-Spalte — damit Wochen-/Monatsreviews (`'2026-W35'`, `'2026-08'`) ohne
+  Schema-Migration dazukommen können. `day_notes` ist der abgelöste Vorgänger:
+  Inhalte wurden per Migration übernommen, die Tabelle bleibt nur stehen, weil
+  Migrationen append-only sind und auf sie verweisen. Nicht mehr benutzen.
+- **Ein einziger Journal-Editor** (`mountJournalEditor()`) wird an zwei Stellen
+  eingehängt (Journal-Seite, Karte im Tagesview). `activeJournal` hält ihn fest,
+  damit `mountView()`, `closeModal()` und `beforeunload` noch ungespeicherten
+  Text rausschreiben können. `host.dataset.journalRef` verhindert, dass
+  `populateDay()` (läuft nach jedem Bild-Upload erneut) ihn samt Eingaben neu
+  aufbaut.
+- **Spalten-Auswahl der Übersicht speichert die _ausgeblendeten_ Spalten**
+  (`overviewHiddenColumns`), nicht die sichtbaren — sonst bliebe jede neu
+  hinzugefügte Spalte für Bestandsnutzer unsichtbar.
+
+`app_core/static/vendor/` enthält Quill (Editor) als lokale Kopie: die App muss
+ohne Netz laufen, ein CDN kommt nicht in Frage. Kein Build-Step, die Dateien
+werden direkt eingebunden und mitcommittet.
 
 ## Release
 

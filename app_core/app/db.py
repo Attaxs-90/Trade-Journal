@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS trades (
     UNIQUE(entry_order_id, exit_order_id)
 );
 
+-- Alt: Vorgaenger des Journals (Klartext-Notiz je Tag). Inhalte wurden per
+-- Migration nach journal_entries uebernommen; die Tabelle bleibt nur bestehen,
+-- weil Migrationen append-only sind und auf sie verweisen. Nicht mehr benutzen.
 CREATE TABLE IF NOT EXISTS day_notes (
     day TEXT PRIMARY KEY,
     notes TEXT DEFAULT ''
@@ -72,12 +75,48 @@ CREATE TABLE IF NOT EXISTS trade_tags (
     PRIMARY KEY (trade_id, tag_id)
 );
 
+-- Journal: ein Eintrag pro Bezugszeitraum, unabhaengig davon ob an dem Tag
+-- gehandelt wurde. entry_type/ref_key statt nur "day", damit spaeter Wochen-
+-- und Monatsreviews ohne Schema-Migration dazukommen koennen ('2026-08-29',
+-- '2026-W35', '2026-08'). plain_text ist die Textfassung von content_html und
+-- existiert nur fuer die Volltextsuche.
+CREATE TABLE IF NOT EXISTS journal_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_type TEXT NOT NULL DEFAULT 'day',
+    ref_key TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    content_html TEXT DEFAULT '',
+    plain_text TEXT DEFAULT '',
+    rating INTEGER,
+    mood INTEGER,
+    followed_plan INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(entry_type, ref_key)
+);
+
+CREATE TABLE IF NOT EXISTS journal_tags (
+    entry_id INTEGER NOT NULL,
+    tag_id INTEGER NOT NULL,
+    PRIMARY KEY (entry_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS journal_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    content_html TEXT DEFAULT '',
+    position INTEGER DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_day ON trades(day);
 CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id);
 CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
 CREATE INDEX IF NOT EXISTS idx_images_trade ON images(trade_id);
 CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id);
+CREATE INDEX IF NOT EXISTS idx_journal_ref ON journal_entries(entry_type, ref_key);
+CREATE INDEX IF NOT EXISTS idx_journal_tags_entry ON journal_tags(entry_id);
+CREATE INDEX IF NOT EXISTS idx_journal_tags_tag ON journal_tags(tag_id);
 """
 
 # Versionierte Migrationen fuer bestehende Nutzer-Datenbanken (per PRAGMA user_version
@@ -104,6 +143,60 @@ MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id)",    # -> Version 7
     "CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id)",  # -> Version 8
     "ALTER TABLE trades ADD COLUMN volume REAL",                               # -> Version 9
+    """CREATE TABLE IF NOT EXISTS journal_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_type TEXT NOT NULL DEFAULT 'day',
+        ref_key TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        content_html TEXT DEFAULT '',
+        plain_text TEXT DEFAULT '',
+        rating INTEGER,
+        mood INTEGER,
+        followed_plan INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(entry_type, ref_key)
+    )""",                                                                      # -> Version 10
+    """CREATE TABLE IF NOT EXISTS journal_tags (
+        entry_id INTEGER NOT NULL,
+        tag_id INTEGER NOT NULL,
+        PRIMARY KEY (entry_id, tag_id)
+    )""",                                                                      # -> Version 11
+    """CREATE TABLE IF NOT EXISTS journal_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        content_html TEXT DEFAULT '',
+        position INTEGER DEFAULT 0
+    )""",                                                                      # -> Version 12
+    "CREATE INDEX IF NOT EXISTS idx_journal_ref ON journal_entries(entry_type, ref_key)",  # -> Version 13
+    "CREATE INDEX IF NOT EXISTS idx_journal_tags_entry ON journal_tags(entry_id)",         # -> Version 14
+    "CREATE INDEX IF NOT EXISTS idx_journal_tags_tag ON journal_tags(tag_id)",             # -> Version 15
+    # Bestehende Tages-Notizen (Klartext) einmalig ins Journal uebernehmen: HTML
+    # escapen, CR entfernen, LF zu Absaetzen. day_notes bleibt danach unveraendert
+    # stehen (Migrationen sind append-only), wird aber nicht mehr gelesen.
+    """INSERT OR IGNORE INTO journal_entries
+       (entry_type, ref_key, content_html, plain_text, created_at, updated_at)
+       SELECT 'day', day,
+              '<p>' || replace(replace(replace(replace(replace(
+                  notes, '&', '&amp;'), '<', '&lt;'), '>', '&gt;'),
+                  char(13), ''), char(10), '</p><p>') || '</p>',
+              notes, datetime('now'), datetime('now')
+       FROM day_notes WHERE trim(notes) <> ''""",                              # -> Version 16
+    """INSERT INTO journal_templates (name, content_html, position) VALUES
+       ('Pre-Session',
+        '<h3>Bias</h3><p><br></p><h3>Key Levels</h3><ul><li><br></li></ul>'
+        || '<h3>News heute</h3><ul><li><br></li></ul>'
+        || '<h3>Geplante Setups</h3><ul><li><br></li></ul>'
+        || '<h3>Risiko / Maximalverlust</h3><p><br></p>', 1),
+       ('Post-Session',
+        '<h3>Was lief gut</h3><ul><li><br></li></ul>'
+        || '<h3>Was lief schlecht</h3><ul><li><br></li></ul>'
+        || '<h3>Fehler</h3><ul><li><br></li></ul>'
+        || '<h3>Lektion</h3><p><br></p><h3>Morgen konkret anders</h3><p><br></p>', 2),
+       ('Wochenreview',
+        '<h3>Zahlen der Woche</h3><p><br></p>'
+        || '<h3>Wiederkehrende Muster</h3><ul><li><br></li></ul>'
+        || '<h3>Disziplin</h3><p><br></p><h3>Fokus naechste Woche</h3><p><br></p>', 3)""",  # -> Version 17
 ]
 
 
@@ -351,6 +444,7 @@ def update_tag(tag_id: int, name: str, color: str, tag_group: str = ""):
 def delete_tag(tag_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM trade_tags WHERE tag_id = ?", (tag_id,))
+        conn.execute("DELETE FROM journal_tags WHERE tag_id = ?", (tag_id,))
         conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
 
 
@@ -472,6 +566,7 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
     volumes_by_day: dict[str, list[dict]] = {}
     for r in vol_rows:
         volumes_by_day.setdefault(r["day"], []).append({"source": r["source"], "total": r["total"]})
+    journal = journal_map("day")  # eine Query fuer alle Tage, nicht eine je Tag
     result = []
     for r in rows:
         d = dict(r)
@@ -479,6 +574,9 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
         d["account_ids"] = [int(x) for x in raw.split(",")] if raw else []
         d["has_unassigned"] = d.pop("unassigned_count") > 0
         d["volumes"] = volumes_by_day.get(d["day"], [])
+        entry = journal.get(d["day"])
+        d["has_journal"] = entry is not None
+        d["journal_rating"] = entry["rating"] if entry else None
         result.append(d)
     return result
 
@@ -532,21 +630,6 @@ def update_trade_notes(trade_id: int, notes: str):
         conn.execute("UPDATE trades SET notes = ? WHERE id = ?", (notes, trade_id))
 
 
-def get_day_notes(day: str) -> str:
-    with get_conn() as conn:
-        row = conn.execute("SELECT notes FROM day_notes WHERE day = ?", (day,)).fetchone()
-    return row["notes"] if row else ""
-
-
-def set_day_notes(day: str, notes: str):
-    with get_conn() as conn:
-        conn.execute(
-            """INSERT INTO day_notes (day, notes) VALUES (?, ?)
-               ON CONFLICT(day) DO UPDATE SET notes = excluded.notes""",
-            (day, notes),
-        )
-
-
 def add_image(day: str, trade_id: int | None, filename: str, thumb_filename: str) -> int:
     with get_conn() as conn:
         cur = conn.execute(
@@ -574,3 +657,243 @@ def get_image(image_id: int) -> dict | None:
 def delete_image(image_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM images WHERE id = ?", (image_id,))
+
+
+# --- Journal ---------------------------------------------------------------
+# Eintraege haengen am Datum (bzw. spaeter an Woche/Monat), nicht am Trade:
+# ein Handelstag kann einen Eintrag haben, ein Eintrag braucht keinen Trade.
+
+JOURNAL_TYPES = {"day", "week", "month"}
+
+
+def _attach_journal_tags(entries: list[dict]) -> list[dict]:
+    """Reichert Journal-Eintraege mit ihren Tags an - eine zusaetzliche Query
+    statt einer pro Eintrag (kein N+1), analog zu _attach_tags() fuer Trades.
+    Journal und Trades teilen sich bewusst dieselbe tags-Tabelle."""
+    for e in entries:
+        e["tags"] = []
+    ids = [e["id"] for e in entries if e.get("id")]
+    if not ids:
+        return entries
+    placeholders = ",".join("?" for _ in ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT journal_tags.entry_id as entry_id, tags.id, tags.name, tags.color, tags.tag_group
+               FROM journal_tags JOIN tags ON tags.id = journal_tags.tag_id
+               WHERE journal_tags.entry_id IN ({placeholders})
+               ORDER BY tags.tag_group, tags.name""",
+            ids,
+        ).fetchall()
+    by_entry: dict[int, list[dict]] = {}
+    for r in rows:
+        by_entry.setdefault(r["entry_id"], []).append(
+            dict(id=r["id"], name=r["name"], color=r["color"], tag_group=r["tag_group"])
+        )
+    for e in entries:
+        e["tags"] = by_entry.get(e.get("id"), [])
+    return entries
+
+
+def _day_totals(days: list[str]) -> dict[str, dict]:
+    """Trade-Kennzahlen fuer eine Menge Tage in einer einzigen Query."""
+    if not days:
+        return {}
+    placeholders = ",".join("?" for _ in days)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT day, COUNT(*) as trade_count,
+                      ROUND(SUM(net_usd), 2) as net_usd, ROUND(SUM(points), 2) as points
+               FROM trades WHERE day IN ({placeholders}) GROUP BY day""",
+            list(days),
+        ).fetchall()
+    return {r["day"]: dict(r) for r in rows}
+
+
+def get_journal_entry(entry_type: str, ref_key: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM journal_entries WHERE entry_type = ? AND ref_key = ?",
+            (entry_type, ref_key),
+        ).fetchone()
+    if not row:
+        return None
+    entry = _attach_journal_tags([dict(row)])[0]
+    if entry_type == "day":
+        entry["day_stats"] = _day_totals([ref_key]).get(ref_key)
+    return entry
+
+
+def delete_journal_entry(entry_type: str, ref_key: str):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM journal_entries WHERE entry_type = ? AND ref_key = ?",
+            (entry_type, ref_key),
+        ).fetchone()
+        if not row:
+            return
+        conn.execute("DELETE FROM journal_tags WHERE entry_id = ?", (row["id"],))
+        conn.execute("DELETE FROM journal_entries WHERE id = ?", (row["id"],))
+
+
+def upsert_journal_entry(entry_type: str, ref_key: str, title: str = "", content_html: str = "",
+                          plain_text: str = "", rating: int | None = None, mood: int | None = None,
+                          followed_plan: int | None = None, tag_ids: list[int] | None = None) -> dict | None:
+    """Legt einen Eintrag an oder aktualisiert ihn. Ein komplett leerer Eintrag
+    (kein Text, keine Kennzahl, kein Tag) wird geloescht statt als Karteileiche
+    stehen zu bleiben - sonst fuellt sich die Liste mit leeren Tagen, sobald man
+    den Editor nur einmal geoeffnet hat."""
+    tag_ids = tag_ids or []
+    if (not plain_text.strip() and not title.strip() and not tag_ids
+            and rating is None and mood is None and followed_plan is None):
+        delete_journal_entry(entry_type, ref_key)
+        return None
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO journal_entries
+                 (entry_type, ref_key, title, content_html, plain_text, rating, mood,
+                  followed_plan, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+               ON CONFLICT(entry_type, ref_key) DO UPDATE SET
+                 title = excluded.title, content_html = excluded.content_html,
+                 plain_text = excluded.plain_text, rating = excluded.rating,
+                 mood = excluded.mood, followed_plan = excluded.followed_plan,
+                 updated_at = excluded.updated_at""",
+            (entry_type, ref_key, title, content_html, plain_text, rating, mood, followed_plan),
+        )
+        entry_id = conn.execute(
+            "SELECT id FROM journal_entries WHERE entry_type = ? AND ref_key = ?",
+            (entry_type, ref_key),
+        ).fetchone()["id"]
+        conn.execute("DELETE FROM journal_tags WHERE entry_id = ?", (entry_id,))
+        conn.executemany(
+            "INSERT OR IGNORE INTO journal_tags (entry_id, tag_id) VALUES (?, ?)",
+            [(entry_id, tid) for tid in tag_ids],
+        )
+    return get_journal_entry(entry_type, ref_key)
+
+
+def _journal_gaps(start: str | None, end: str | None, limit: int) -> list[dict]:
+    """Handelstage ohne Journal-Eintrag, als virtuelle Eintraege (id=None).
+    Macht Luecken in der Journal-Disziplin sichtbar, statt sie zu verstecken."""
+    parts = ["day NOT IN (SELECT ref_key FROM journal_entries WHERE entry_type = 'day')"]
+    params: list = []
+    if start:
+        parts.append("day >= ?")
+        params.append(start)
+    if end:
+        parts.append("day <= ?")
+        params.append(end)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT day, COUNT(*) as trade_count,
+                      ROUND(SUM(net_usd), 2) as net_usd, ROUND(SUM(points), 2) as points
+               FROM trades WHERE {' AND '.join(parts)}
+               GROUP BY day ORDER BY day DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+    return [
+        dict(id=None, entry_type="day", ref_key=r["day"], title="", content_html="", plain_text="",
+             rating=None, mood=None, followed_plan=None, created_at=None, updated_at=None,
+             tags=[], day_stats=dict(r))
+        for r in rows
+    ]
+
+
+def list_journal_entries(entry_type: str = "day", start: str | None = None, end: str | None = None,
+                          query: str | None = None, tag_keys: list[str] | None = None,
+                          mode: str = "all", limit: int = 300) -> list[dict]:
+    """Journal-Liste mit Zeitraum-, Volltext- und Tag-Filter. mode steuert den
+    Bezug zu den Trades: 'with_trades'/'without_trades' filtern die Eintraege,
+    'gaps' zeigt umgekehrt Handelstage, zu denen noch kein Eintrag existiert.
+    Der globale Konten-/Tag-Filter der Auswertungsseiten greift hier bewusst
+    nicht - ein Journal-Eintrag gehoert zum Kalendertag, nicht zu einem Konto."""
+    if entry_type not in JOURNAL_TYPES:
+        entry_type = "day"
+    if mode == "gaps" and entry_type == "day":
+        return _journal_gaps(start, end, limit)
+
+    parts = ["entry_type = ?"]
+    params: list = [entry_type]
+    if start:
+        parts.append("ref_key >= ?")
+        params.append(start)
+    if end:
+        parts.append("ref_key <= ?")
+        params.append(end)
+    if query:
+        parts.append("(plain_text LIKE ? OR title LIKE ?)")
+        params += [f"%{query}%", f"%{query}%"]
+    if tag_keys:
+        ids = [int(k) for k in tag_keys]
+        placeholders = ",".join("?" for _ in ids)
+        parts.append(f"id IN (SELECT entry_id FROM journal_tags WHERE tag_id IN ({placeholders}))")
+        params += ids
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT * FROM journal_entries WHERE {' AND '.join(parts)}
+               ORDER BY ref_key DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+    entries = [dict(r) for r in rows]
+    if entry_type == "day":
+        totals = _day_totals([e["ref_key"] for e in entries])
+        for e in entries:
+            e["day_stats"] = totals.get(e["ref_key"])
+        if mode == "with_trades":
+            entries = [e for e in entries if e["day_stats"]]
+        elif mode == "without_trades":
+            entries = [e for e in entries if not e["day_stats"]]
+    return _attach_journal_tags(entries)
+
+
+def journal_map(entry_type: str = "day", start: str | None = None, end: str | None = None) -> dict[str, dict]:
+    """ref_key -> {rating} fuer vorhandene Eintraege. Eine Query, damit Uebersicht
+    und Monatsgrid ihre Journal-Marker ohne Zusatzabfrage pro Tag setzen koennen."""
+    parts = ["entry_type = ?"]
+    params: list = [entry_type]
+    if start:
+        parts.append("ref_key >= ?")
+        params.append(start)
+    if end:
+        parts.append("ref_key <= ?")
+        params.append(end)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT ref_key, rating FROM journal_entries WHERE {' AND '.join(parts)}", params
+        ).fetchall()
+    return {r["ref_key"]: {"rating": r["rating"]} for r in rows}
+
+
+def list_journal_templates() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM journal_templates ORDER BY position, id"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_journal_template(name: str, content_html: str = "", position: int = 0) -> int:
+    """Ohne explizite Position landet die Vorlage hinten - sonst draengt sich
+    jede neue Vorlage mit position 0 vor die vorhandenen."""
+    with get_conn() as conn:
+        if not position:
+            row = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 as next FROM journal_templates").fetchone()
+            position = row["next"]
+        cur = conn.execute(
+            "INSERT INTO journal_templates (name, content_html, position) VALUES (?, ?, ?)",
+            (name, content_html, position),
+        )
+        return cur.lastrowid
+
+
+def update_journal_template(template_id: int, name: str, content_html: str, position: int = 0):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE journal_templates SET name = ?, content_html = ?, position = ? WHERE id = ?",
+            (name, content_html, position, template_id),
+        )
+
+
+def delete_journal_template(template_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM journal_templates WHERE id = ?", (template_id,))

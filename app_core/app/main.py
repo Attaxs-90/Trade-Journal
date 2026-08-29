@@ -86,6 +86,22 @@ class BulkTagAssign(BaseModel):
     tag_id: int
 
 
+class JournalEntryUpdate(BaseModel):
+    title: str = ""
+    content_html: str = ""
+    plain_text: str = ""      # Textfassung von content_html, nur fuer die Volltextsuche
+    rating: int | None = None
+    mood: int | None = None
+    followed_plan: int | None = None
+    tag_ids: list[int] = []
+
+
+class JournalTemplateUpdate(BaseModel):
+    name: str
+    content_html: str = ""
+    position: int = 0
+
+
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -127,9 +143,8 @@ def api_day_detail(day: str, accounts: str | None = None, tags: str | None = Non
     if not trades:
         raise HTTPException(404, "Kein Tag mit Trades gefunden.")
     stats = day_stats(trades)
-    note = db.get_day_notes(day)
     images = db.get_images_for_day(day)
-    return {"trades": trades, "stats": stats, "note": note, "images": images}
+    return {"trades": trades, "stats": stats, "images": images}
 
 
 @app.put("/api/trades/{trade_id}/notes")
@@ -141,12 +156,6 @@ def api_update_trade_notes(trade_id: int, payload: NotesUpdate):
 @app.delete("/api/trades/{trade_id}")
 def api_delete_trade(trade_id: int):
     db.delete_trade(trade_id)
-    return {"ok": True}
-
-
-@app.put("/api/days/{day}/notes")
-def api_update_day_notes(day: str, payload: NotesUpdate):
-    db.set_day_notes(day, payload.notes)
     return {"ok": True}
 
 
@@ -357,6 +366,87 @@ def api_update_trade_tags(trade_id: int, payload: TradeTagsUpdate):
 @app.post("/api/trades/bulk-tag")
 def api_bulk_tag(payload: BulkTagAssign):
     db.bulk_add_tag(payload.trade_ids, payload.tag_id)
+    return {"ok": True}
+
+
+def _check_journal_ref(entry_type: str, ref_key: str) -> tuple[str, str]:
+    """Validiert Typ und Schluessel eines Journal-Eintrags. Beim Tagestyp muss
+    der Schluessel ein ISO-Datum sein - sonst landen ueber die URL beliebige
+    Schluessel in der Tabelle und tauchen nie wieder in einer Ansicht auf."""
+    if entry_type not in db.JOURNAL_TYPES:
+        raise HTTPException(400, "Unbekannter Journal-Typ.")
+    if entry_type == "day":
+        try:
+            datetime.strptime(ref_key, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, "Datum muss im Format JJJJ-MM-TT vorliegen.")
+    return entry_type, ref_key
+
+
+def _clamp_score(value: int | None) -> int | None:
+    """Bewertung/Verfassung sind 1-5 - alles andere wird als 'nicht gesetzt' gewertet."""
+    if value is None:
+        return None
+    return value if 1 <= value <= 5 else None
+
+
+@app.get("/api/journal")
+def api_list_journal(type: str = "day", start: str | None = None, end: str | None = None,
+                      q: str | None = None, tags: str | None = None, mode: str = "all"):
+    return {"entries": db.list_journal_entries(
+        type, start, end, (q or "").strip() or None, _parse_tags(tags), mode
+    )}
+
+
+@app.get("/api/journal/{entry_type}/{ref_key}")
+def api_get_journal(entry_type: str, ref_key: str):
+    entry_type, ref_key = _check_journal_ref(entry_type, ref_key)
+    return {"entry": db.get_journal_entry(entry_type, ref_key)}
+
+
+@app.put("/api/journal/{entry_type}/{ref_key}")
+def api_save_journal(entry_type: str, ref_key: str, payload: JournalEntryUpdate):
+    entry_type, ref_key = _check_journal_ref(entry_type, ref_key)
+    entry = db.upsert_journal_entry(
+        entry_type, ref_key, payload.title, payload.content_html, payload.plain_text,
+        _clamp_score(payload.rating), _clamp_score(payload.mood),
+        payload.followed_plan, payload.tag_ids,
+    )
+    return {"entry": entry}
+
+
+@app.delete("/api/journal/{entry_type}/{ref_key}")
+def api_delete_journal(entry_type: str, ref_key: str):
+    entry_type, ref_key = _check_journal_ref(entry_type, ref_key)
+    db.delete_journal_entry(entry_type, ref_key)
+    return {"ok": True}
+
+
+@app.get("/api/journal-templates")
+def api_list_journal_templates():
+    return db.list_journal_templates()
+
+
+@app.post("/api/journal-templates")
+def api_add_journal_template(payload: JournalTemplateUpdate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    return {"id": db.add_journal_template(name, payload.content_html, payload.position)}
+
+
+@app.put("/api/journal-templates/{template_id}")
+def api_update_journal_template(template_id: int, payload: JournalTemplateUpdate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    db.update_journal_template(template_id, name, payload.content_html, payload.position)
+    return {"ok": True}
+
+
+@app.delete("/api/journal-templates/{template_id}")
+def api_delete_journal_template(template_id: int):
+    db.delete_journal_template(template_id)
     return {"ok": True}
 
 

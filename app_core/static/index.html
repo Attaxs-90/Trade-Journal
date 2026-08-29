@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade Journal</title>
+<link rel="stylesheet" href="vendor/quill.snow.css">
 <link rel="stylesheet" href="style.css">
 <script>
   (function () {
@@ -46,6 +47,10 @@
       <button class="nav-item" data-view="trades" title="Trades">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="7" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg></span>
         <span class="nav-label">Trades</span>
+      </button>
+      <button class="nav-item" data-view="journal" title="Journal">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><line x1="8" y1="2" x2="8" y2="22"/><line x1="11.5" y1="7" x2="15.5" y2="7"/><line x1="11.5" y1="11" x2="15.5" y2="11"/></svg></span>
+        <span class="nav-label">Journal</span>
       </button>
       <button class="nav-item" data-view="month" title="Monatsübersicht">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
@@ -191,6 +196,7 @@
           <tr>
             <th data-col="date">Datum</th><th data-col="account">Konto</th><th data-col="volume">Größe</th>
             <th data-col="trades">Trades</th><th data-col="points">Punkte</th><th data-col="net">Netto $</th>
+            <th data-col="journal">Journal</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -274,9 +280,38 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Journal-Notiz (Tag)</div>
-      <textarea class="notes-area day-note" placeholder="Notizen zum Handelstag…"></textarea>
-      <div class="save-hint">Wird beim Verlassen des Felds automatisch gespeichert.</div>
+      <div class="card-title">Journal</div>
+      <div class="journal-editor-host day-journal"></div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-journal">
+  <section class="view">
+    <header class="view-header">
+      <h1>Journal</h1>
+      <div class="journal-new">
+        <input type="date" id="journal-new-date">
+        <button type="button" class="btn btn-primary" id="journal-new-btn">+ Eintrag</button>
+      </div>
+    </header>
+
+    <div class="journal-layout">
+      <aside class="journal-list-pane">
+        <input type="search" id="journal-search" class="journal-search" placeholder="Volltextsuche…">
+        <div class="newsbar-chip-row journal-mode-row" id="journal-mode-chips"></div>
+        <div class="inline-filter journal-tag-filter">
+          <button type="button" class="inline-filter-toggle" id="journal-tag-toggle">
+            Tags <span class="inline-filter-count" id="journal-tag-count"></span>
+          </button>
+          <div class="inline-filter-panel" id="journal-tag-panel" hidden></div>
+        </div>
+        <div class="journal-list" id="journal-list"></div>
+      </aside>
+
+      <div class="journal-editor-pane">
+        <div class="journal-editor-host" id="journal-page-host"></div>
+      </div>
     </div>
   </section>
 </template>
@@ -368,10 +403,26 @@
       </form>
       <div class="tag-list" id="tag-list"></div>
     </div>
+
+    <div class="card">
+      <div class="card-title">Journal-Vorlagen</div>
+      <div class="account-hint">
+        Vorlagen fügst du im Journal mit einem Klick in den Eintrag ein. Bearbeite sie so,
+        dass sie zu deinem Ablauf passen – die Struktur ist der halbe Journal-Erfolg.
+      </div>
+      <form class="tag-form" id="journal-tpl-form">
+        <input type="text" id="journal-tpl-name" placeholder="Name (z. B. Pre-Session)" required>
+        <button type="submit" class="btn btn-primary" id="journal-tpl-submit">Vorlage anlegen</button>
+        <button type="button" class="btn btn-secondary" id="journal-tpl-cancel" hidden>Abbrechen</button>
+      </form>
+      <div class="journal-tpl-editor-host" id="journal-tpl-editor"></div>
+      <div class="tag-list" id="journal-tpl-list"></div>
+    </div>
   </section>
 </template>
 
 
+<script src="vendor/quill.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
