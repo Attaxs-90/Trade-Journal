@@ -20,19 +20,26 @@ bewusst **nie** überschrieben. Details und Begründung stehen in
 Nur einmal nötig, danach läuft die Verteilung über `gh release create`.
 
 1. **GitHub-Konto** anlegen, falls noch nicht vorhanden: https://github.com/signup
-2. **Privates Repository** anlegen (z. B. `Attaxs-90/Trade-Journal`) — dient
-   nur der Release-Verteilung, nicht zwingend derselbe Ort wie dieser
-   Code-Ordner.
+2. **Repository** anlegen (z. B. `Attaxs-90/Trade-Journal`) — dient sowohl als
+   Code-Spiegel als auch als Release-Ablage.
 3. **GitHub CLI** installieren: https://cli.github.com, danach im Terminal
    einmalig `gh auth login` (öffnet den Browser zum Einloggen).
-4. **Fine-grained Personal Access Token** erzeugen für den *automatischen
-   Update-Check* der App (getrennt vom `gh`-Login):
-   github.com → Settings → Developer settings → Personal access tokens →
-   Fine-grained tokens → "Generate new token" → Repository access nur auf
-   `Trade-Journal` beschränken → unter Permissions nur **Contents:
-   Read-only**. Den erzeugten Token-String in eine Datei `github_token.txt`
-   im Projekt-Root speichern (neben `start.bat`, **nicht** in `app_core/`) —
-   die Datei ist in `.gitignore` und wird nie mitverteilt.
+
+**Öffentliches Repo (aktuell so eingerichtet):** `update_check.ps1` fragt die
+GitHub-API unauthentifiziert ab — kein Token nötig, Nutzer/Beta-Tester
+brauchen keinen eigenen GitHub-Account. `github_token.txt` bleibt optional
+ungenutzt.
+
+**Falls das Repo stattdessen privat sein soll:** dann zusätzlich pro
+Tester/Nutzer ein **Fine-grained Personal Access Token** erzeugen (getrennt
+vom `gh`-Login): github.com → Settings → Developer settings → Personal
+access tokens → Fine-grained tokens → "Generate new token" → Repository
+access nur auf `Trade-Journal` beschränken → unter Permissions nur
+**Contents: Read-only**. Der Nutzer legt den Token-String in eine Datei
+`github_token.txt` im Projekt-Root ab (neben `start.bat`, **nicht** in
+`app_core/`) — die Datei ist in `.gitignore` und wird nie mitverteilt, jeder
+Empfänger braucht dann seinen eigenen Token plus Collaborator-Zugriff aufs
+private Repo.
 
 ## Update bauen und verteilen — Skript-Reihenfolge
 

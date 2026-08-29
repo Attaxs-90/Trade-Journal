@@ -24,7 +24,7 @@ komplette Code liegt in `app_core/` und wird bei Updates ersetzt:
 trade-journal/
 ├── start.bat          <- duenner, kaum aenderbarer Einstiegspunkt
 ├── data/, config.json <- Nutzerdaten, siehe unten
-├── github_token.txt   <- Zugriffstoken fuers Release-Repo, niemals committen
+├── github_token.txt   <- optional, nur falls das Release-Repo mal privat wird
 └── app_core/          <- kompletter Code, wird bei Updates ersetzt
     ├── app/, static/, run.py, requirements.txt, VERSION, CHANGELOG.md
     ├── update_check.ps1   <- Versionscheck beim Start, siehe "Release"
@@ -119,8 +119,10 @@ werden direkt eingebunden und mitcommittet.
 ## Release
 
 `VERSION` hochzählen, `CHANGELOG.md` ergänzen, `app_core/build_release.ps1`
-baut `update.zip`. Verteilung läuft über ein privates GitHub-Release
-(`gh release create`) — `app_core/update_check.ps1` prüft das beim Start
+baut `update.zip`. Verteilung läuft über ein öffentliches GitHub-Release
+(`gh release create`, Repo `Attaxs-90/Trade-Journal` — bewusst öffentlich,
+damit Beta-Tester ohne eigenen GitHub-Account Code ansehen und Updates
+beziehen können) — `app_core/update_check.ps1` prüft das beim Start
 automatisch und fragt vor dem Einspielen nach. Exakter Ablauf inkl.
 Skript-Reihenfolge und einmaliger GitHub-Einrichtung steht in
 `app_core/README_DEV.md`; Update-Anleitung für Nutzer steht in
