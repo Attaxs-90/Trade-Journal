@@ -6,6 +6,7 @@ const state = {
   // Journal hat einen eigenen Tag-Filter: er filtert Journal-Eintraege, nicht
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
   journalMode: "all", journalQuery: "", journalTagKeys: [], journalRefKey: null,
+  journalSelectedKeys: new Set(),
 };
 
 /* ---------- Konten-Filter ---------- */
@@ -424,6 +425,18 @@ async function openSettings() {
   await renderJournalTemplatesSettings();
 }
 
+/* Springt aus dem Journal-Editor direkt zur Vorlagenverwaltung in den
+   Einstellungen und hebt die Karte kurz hervor, damit sie sofort auffindbar
+   ist statt in der Seite gesucht werden zu muessen. */
+async function goToJournalTemplateSettings() {
+  await flushJournal();
+  await openSettings();
+  const card = document.getElementById("journal-templates-card");
+  card?.scrollIntoView({ behavior: "smooth", block: "start" });
+  card?.classList.add("settings-card-highlight");
+  setTimeout(() => card?.classList.remove("settings-card-highlight"), 1600);
+}
+
 /* ---------- Journal-Vorlagen (Einstellungen) ---------- */
 
 async function renderJournalTemplatesSettings() {
@@ -833,7 +846,12 @@ function attachOutsideClose(overlayEl, closeFn) {
 
 /* ---------- Zweistufiger Loesch-Dialog ---------- */
 
-function confirmDelete(message) {
+/* requireTyping steuert die dritte Stufe (Eintippen von "Löschen"): fuer
+   folgenreiche Loeschungen (Konto, Vorlage) bleibt sie an, fuer den Journal-
+   Eintrag reicht ein einfacher Ja-Klick, weil der Inhalt selbst der einzige
+   Verlust ist und die zwei Klicks (Loeschen-Button + Ja) schon vor
+   Versehentlichem schuetzen. */
+function confirmDelete(message, requireTyping = true) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay visible";
@@ -855,6 +873,7 @@ function confirmDelete(message) {
 
     overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(false));
     overlay.querySelector(".confirm-yes").addEventListener("click", () => {
+      if (!requireTyping) { cleanup(true); return; }
       const card = overlay.querySelector(".modal-card");
       card.innerHTML = `
         <div class="confirm-message">Zum endgültigen Bestätigen bitte "Löschen" eintippen:</div>
@@ -1296,6 +1315,28 @@ async function saveJournal(force = false) {
   }
 }
 
+/* Loescht den Eintrag nach Bestaetigung (Loeschen-Button + Ja/Nein-Dialog =
+   zwei Klicks, wie gewuenscht). Setzt den Editor danach leer statt ihn
+   zu schliessen, damit sofort weitergeschrieben werden kann. */
+async function deleteJournalEntry() {
+  const j = activeJournal;
+  if (!j) return;
+  const label = fmtDate(j.refKey);
+  if (!await confirmDelete(`Journal-Eintrag vom ${label} wirklich löschen?`, false)) return;
+  clearTimeout(j.timer);
+  j.dirty = false;
+  await api(`/api/journal/day/${j.refKey}`, { method: "DELETE" });
+  j.quill.setContents([]);
+  j.rating = null;
+  j.mood = null;
+  j.followedPlan = null;
+  j.tagIds.clear();
+  j.host.querySelectorAll(".journal-score-btn.active, .journal-plan-btn.active").forEach(b => b.classList.remove("active"));
+  j.host.querySelectorAll(".tag-chip-filter.active").forEach(c => c.classList.remove("active"));
+  journalStatus("Gelöscht", "saved");
+  if (j.onSaved) j.onSaved(null);
+}
+
 /* Vor jedem Wechsel der Ansicht aufrufen - sonst geht der letzte, noch nicht
    automatisch gespeicherte Absatz verloren. */
 async function flushJournal() {
@@ -1359,6 +1400,7 @@ async function mountJournalEditor(host, refKey, opts = {}) {
       </div>
       <div class="journal-footer">
         <button type="button" class="btn btn-primary journal-save-btn">Speichern</button>
+        <button type="button" class="btn btn-danger journal-delete-btn">Eintrag löschen</button>
         <span class="journal-status"></span>
       </div>
     </div>`;
@@ -1450,8 +1492,12 @@ async function mountJournalEditor(host, refKey, opts = {}) {
   }
 
   const tplWrap = host.querySelector(".journal-templates");
+  tplWrap.innerHTML = "";
   if (templates.length) {
-    tplWrap.innerHTML = `<span class="journal-section-label">Vorlage einfügen:</span>`;
+    const label = document.createElement("span");
+    label.className = "journal-section-label";
+    label.textContent = "Vorlage einfügen:";
+    tplWrap.appendChild(label);
     for (const tpl of templates) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -1467,9 +1513,21 @@ async function mountJournalEditor(host, refKey, opts = {}) {
       });
       tplWrap.appendChild(btn);
     }
+  } else {
+    const hint = document.createElement("span");
+    hint.className = "journal-section-label";
+    hint.textContent = "Noch keine Vorlagen angelegt.";
+    tplWrap.appendChild(hint);
   }
+  const manageLink = document.createElement("button");
+  manageLink.type = "button";
+  manageLink.className = "journal-tpl-manage-link";
+  manageLink.textContent = "Vorlagen verwalten →";
+  manageLink.addEventListener("click", () => goToJournalTemplateSettings());
+  tplWrap.appendChild(manageLink);
 
   host.querySelector(".journal-save-btn").addEventListener("click", () => saveJournal(true));
+  host.querySelector(".journal-delete-btn").addEventListener("click", () => deleteJournalEntry());
   quill.root.addEventListener("blur", () => { if (activeJournal && activeJournal.dirty) saveJournal(); });
 }
 
@@ -1515,7 +1573,35 @@ async function renderJournalList() {
     listEl.innerHTML = `<div class="empty-state">Keine Einträge für diese Auswahl.</div>`;
     return;
   }
+  // Auswahl auf tatsaechlich geladene, existierende Eintraege begrenzen -
+  // virtuelle "Luecken"-Zeilen (mode=gaps, id=null) haben nichts zu loeschen.
+  const existingKeys = new Set(entries.filter(e => e.id).map(e => e.ref_key));
+  for (const key of [...state.journalSelectedKeys]) {
+    if (!existingKeys.has(key)) state.journalSelectedKeys.delete(key);
+  }
+
   for (const entry of entries) {
+    const row = document.createElement("div");
+    row.className = "journal-item-row";
+
+    if (entry.id) {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "journal-item-checkbox";
+      checkbox.checked = state.journalSelectedKeys.has(entry.ref_key);
+      checkbox.addEventListener("click", (e) => e.stopPropagation());
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.journalSelectedKeys.add(entry.ref_key);
+        else state.journalSelectedKeys.delete(entry.ref_key);
+        updateJournalBulkBar();
+      });
+      row.appendChild(checkbox);
+    } else {
+      const spacer = document.createElement("span");
+      spacer.className = "journal-item-checkbox-spacer";
+      row.appendChild(spacer);
+    }
+
     const item = document.createElement("button");
     item.type = "button";
     item.className = "journal-item" + (entry.ref_key === state.journalRefKey ? " active" : "");
@@ -1535,8 +1621,44 @@ async function renderJournalList() {
       <div class="journal-item-preview${entry.id ? "" : " muted"}">${escapeHtml(journalPreview(entry))}</div>
       <div class="journal-item-tags">${entry.tags.map(tagChipHtml).join("")}</div>`;
     item.addEventListener("click", () => selectJournalEntry(entry.ref_key));
-    listEl.appendChild(item);
+    row.appendChild(item);
+    listEl.appendChild(row);
   }
+  updateJournalBulkBar();
+}
+
+/* Zeigt/versteckt die Sammelleiste je nach Auswahlgroesse und haelt die
+   Zaehl-Anzeige aktuell - wird nach jeder Auswahlaenderung aufgerufen. */
+function updateJournalBulkBar() {
+  const bar = document.getElementById("journal-bulk-bar");
+  if (!bar) return;
+  const n = state.journalSelectedKeys.size;
+  bar.hidden = n === 0;
+  const countEl = document.getElementById("journal-bulk-count");
+  if (countEl) countEl.textContent = n === 1 ? "1 Eintrag ausgewählt" : `${n} Einträge ausgewählt`;
+}
+
+async function bulkDeleteJournalEntries() {
+  const keys = [...state.journalSelectedKeys];
+  if (!keys.length) return;
+  const label = keys.length === 1
+    ? `den Journal-Eintrag vom ${fmtDate(keys[0])}`
+    : `${keys.length} Journal-Einträge`;
+  if (!await confirmDelete(`Soll ${label} wirklich gelöscht werden?`, false)) return;
+  await api("/api/journal/day/bulk-delete", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ref_keys: keys }),
+  });
+  if (keys.includes(state.journalRefKey)) {
+    // Der offene Eintrag wurde mitgeloescht - Editor leeren statt auf
+    // gespeicherte, jetzt nicht mehr existente Daten zu verweisen.
+    activeJournal = null;
+    const host = document.getElementById("journal-page-host");
+    if (host) { host.innerHTML = ""; host.dataset.journalRef = ""; }
+    state.journalRefKey = null;
+  }
+  state.journalSelectedKeys.clear();
+  await renderJournalList();
 }
 
 async function selectJournalEntry(refKey) {
@@ -1581,6 +1703,13 @@ async function openJournal() {
   setActiveNav("journal");
 
   const content = await mountView("tpl-journal");
+  state.journalSelectedKeys.clear();
+
+  document.querySelector(".journal-bulk-clear").addEventListener("click", () => {
+    state.journalSelectedKeys.clear();
+    renderJournalList();
+  });
+  document.querySelector(".journal-bulk-delete").addEventListener("click", () => bulkDeleteJournalEntries());
 
   const modeRow = document.getElementById("journal-mode-chips");
   for (const mode of JOURNAL_MODES) {
@@ -2444,25 +2573,32 @@ function renderNewsSections() {
   const mondayOffset = (today0.getDay() + 6) % 7;
   const monday0 = new Date(today0); monday0.setDate(monday0.getDate() - mondayOffset);
   const saturday0 = new Date(monday0); saturday0.setDate(saturday0.getDate() + 5);
+  // Naechste Woche direkt daran anschliessend - der Feed liefert sowohl
+  // ff_calendar_thisweek als auch ff_calendar_nextweek (siehe news.py).
+  const nextMonday0 = new Date(saturday0); nextMonday0.setDate(nextMonday0.getDate() + 2);
+  const nextSaturday0 = new Date(nextMonday0); nextSaturday0.setDate(nextSaturday0.getDate() + 5);
 
   const filtered = newsEvents.filter(e =>
     newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type)
   );
 
-  const week = [], hot = [], history = [];
+  const week = [], nextWeek = [], hot = [], history = [];
   for (const e of filtered) {
     const t = new Date(e.time);
     const day0 = startOfDay(t);
     if (day0 >= monday0 && day0 < saturday0) week.push(e);
+    else if (day0 >= nextMonday0 && day0 < nextSaturday0) nextWeek.push(e);
     if (day0.getTime() === today0.getTime() && t < now) hot.push(e);
     else if (day0 < monday0) history.push(e);
   }
   week.sort((a, b) => new Date(a.time) - new Date(b.time));
+  nextWeek.sort((a, b) => new Date(a.time) - new Date(b.time));
   hot.sort((a, b) => new Date(b.time) - new Date(a.time));
   history.sort((a, b) => new Date(b.time) - new Date(a.time));
 
   const emptyMsg = newsLoadFailed && !newsEvents.length ? "Kalender aktuell nicht erreichbar." : "Keine Termine.";
   fillNewsList("news-upcoming", week, emptyMsg);
+  fillNewsList("news-nextweek", nextWeek, emptyMsg);
   fillNewsList("news-hot", hot.slice(0, 30), emptyMsg);
   fillNewsList("news-history", history.slice(0, 60), emptyMsg);
 }
@@ -2497,22 +2633,30 @@ function initNewsbar() {
     }
   });
 
+  // Ein-/ausklappbare Newsbar-Sektion (Historie, Naechste Woche). defaultCollapsed
+  // greift nur, solange der Nutzer noch keine eigene Wahl gespeichert hat.
+  function initNewsSectionCollapse(toggleId, listId, storageKey, defaultCollapsed) {
+    const toggle = document.getElementById(toggleId);
+    const list = document.getElementById(listId);
+    const apply = (collapsed) => {
+      list.classList.toggle("collapsed", collapsed);
+      toggle.classList.toggle("collapsed", collapsed);
+    };
+    const saved = localStorage.getItem(storageKey);
+    apply(saved === null ? defaultCollapsed : saved === "true");
+    toggle.addEventListener("click", () => {
+      const next = !list.classList.contains("collapsed");
+      localStorage.setItem(storageKey, String(next));
+      apply(next);
+    });
+  }
+
   const filterBtn = document.getElementById("newsbar-filter-btn");
   const panel = document.getElementById("newsbar-filter-panel");
   filterBtn.addEventListener("click", () => { panel.hidden = !panel.hidden; });
 
-  const historyToggle = document.getElementById("news-history-toggle");
-  const historyList = document.getElementById("news-history");
-  const applyHistoryCollapsed = (collapsed) => {
-    historyList.classList.toggle("collapsed", collapsed);
-    historyToggle.classList.toggle("collapsed", collapsed);
-  };
-  applyHistoryCollapsed(localStorage.getItem("newsHistoryCollapsed") === "true");
-  historyToggle.addEventListener("click", () => {
-    const next = !historyList.classList.contains("collapsed");
-    localStorage.setItem("newsHistoryCollapsed", String(next));
-    applyHistoryCollapsed(next);
-  });
+  initNewsSectionCollapse("news-history-toggle", "news-history", "newsHistoryCollapsed", true);
+  initNewsSectionCollapse("news-nextweek-toggle", "news-nextweek", "newsNextWeekCollapsed", false);
 
   loadNewsFilterState();
   renderNewsFilters();

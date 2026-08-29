@@ -96,6 +96,10 @@ class JournalEntryUpdate(BaseModel):
     tag_ids: list[int] = []
 
 
+class JournalBulkDelete(BaseModel):
+    ref_keys: list[str]
+
+
 class JournalTemplateUpdate(BaseModel):
     name: str
     content_html: str = ""
@@ -420,6 +424,15 @@ def api_delete_journal(entry_type: str, ref_key: str):
     entry_type, ref_key = _check_journal_ref(entry_type, ref_key)
     db.delete_journal_entry(entry_type, ref_key)
     return {"ok": True}
+
+
+@app.post("/api/journal/day/bulk-delete")
+def api_bulk_delete_journal(payload: JournalBulkDelete):
+    ref_keys = [k for k in payload.ref_keys if k]
+    for k in ref_keys:
+        _check_journal_ref("day", k)
+    deleted = db.bulk_delete_journal_entries("day", ref_keys)
+    return {"deleted": deleted}
 
 
 @app.get("/api/journal-templates")

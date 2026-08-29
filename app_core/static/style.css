@@ -1274,14 +1274,31 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 }
 .journal-mode-row { gap: 6px; }
 .journal-tag-filter { position: relative; }
-.journal-tag-filter .inline-filter-toggle { width: 100%; text-align: left; }
+.journal-tag-filter .inline-filter-toggle {
+  /* .inline-filter-toggle setzt "all: unset", das box-sizing auf content-box
+     zuruecksetzt - width:100% wuerde sonst Padding/Rahmen oben drauf addieren
+     und den Button ueber den Container hinausragen lassen. */
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  text-align: left;
+}
 
 .journal-list { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
+.journal-item-row { display: flex; align-items: flex-start; gap: 6px; }
+.journal-item-checkbox { margin-top: 13px; flex-shrink: 0; cursor: pointer; }
+.journal-item-checkbox-spacer { width: 13px; flex-shrink: 0; }
 .journal-item {
+  flex: 1; min-width: 0;
   text-align: left; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   padding: 9px 10px; cursor: pointer; color: var(--text); font-family: var(--font-sans);
   display: flex; flex-direction: column; gap: 4px;
 }
+.journal-bulk-bar {
+  display: flex; align-items: center; gap: 8px; background: var(--accent-fill);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 7px 10px;
+}
+.journal-bulk-count { font-size: 12.5px; color: var(--text); font-weight: 600; flex: 1; }
 .journal-item:hover { background: var(--bg-hover); }
 .journal-item.active { border-color: var(--accent); background: var(--accent-fill); }
 .journal-item-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -1299,9 +1316,14 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   min-height: 420px;
 }
 
-.journal-metrics { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 12px; }
-.journal-metric { display: flex; align-items: center; gap: 8px; }
-.journal-metric-label { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+/* Liste statt Reihe: Tagesbewertung, Verfassung und Plan befolgt untereinander,
+   Label und Punkte je Zeile auf gleicher Hoehe. */
+.journal-metrics {
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;
+  padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.journal-metric { display: flex; align-items: center; gap: 12px; }
+.journal-metric-label { flex: 0 0 96px; font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
 .journal-score-row { display: flex; gap: 4px; }
 .journal-score-btn, .journal-plan-btn, .journal-score-clear {
   background: var(--bg); border: 1px solid var(--border); color: var(--text-dim);
@@ -1314,6 +1336,17 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-score-clear { color: var(--text-faint); padding: 4px 7px; }
 
 .journal-templates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.journal-tpl-manage-link {
+  all: unset; cursor: pointer; margin-left: auto; font-size: 11.5px; color: var(--accent);
+}
+.journal-tpl-manage-link:hover { text-decoration: underline; }
+
+/* Kurzes Aufblitzen, wenn von "Vorlagen verwalten" im Editor hierher gesprungen wird. */
+.settings-card-highlight { animation: settings-card-flash 1.6s ease; }
+@keyframes settings-card-flash {
+  0% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: none; }
+}
 .journal-section-label { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
 .journal-tag-picker { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
 .journal-tag-chips { display: flex; flex-direction: column; gap: 8px; }

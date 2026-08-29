@@ -122,6 +122,15 @@
         <div class="newsbar-list" id="news-upcoming"></div>
       </div>
       <div class="newsbar-section">
+        <div class="newsbar-section-title newsbar-section-title-toggle">
+          <span>Nächste Woche (Mo–Fr)</span>
+          <button type="button" class="newsbar-section-toggle" id="news-nextweek-toggle" title="Nächste Woche ein-/ausblenden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+        <div class="newsbar-list" id="news-nextweek"></div>
+      </div>
+      <div class="newsbar-section">
         <div class="newsbar-section-title">Bereits veröffentlicht heute</div>
         <div class="newsbar-list" id="news-hot"></div>
       </div>
@@ -306,6 +315,11 @@
           </button>
           <div class="inline-filter-panel" id="journal-tag-panel" hidden></div>
         </div>
+        <div class="journal-bulk-bar" id="journal-bulk-bar" hidden>
+          <span class="journal-bulk-count" id="journal-bulk-count"></span>
+          <button type="button" class="btn btn-secondary journal-bulk-clear">Auswahl aufheben</button>
+          <button type="button" class="btn btn-danger journal-bulk-delete">Löschen</button>
+        </div>
         <div class="journal-list" id="journal-list"></div>
       </aside>
 
@@ -404,7 +418,7 @@
       <div class="tag-list" id="tag-list"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="journal-templates-card">
       <div class="card-title">Journal-Vorlagen</div>
       <div class="account-hint">
         Vorlagen fügst du im Journal mit einem Klick in den Eintrag ein. Bearbeite sie so,

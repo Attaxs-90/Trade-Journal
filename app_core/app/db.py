@@ -735,6 +735,25 @@ def delete_journal_entry(entry_type: str, ref_key: str):
         conn.execute("DELETE FROM journal_entries WHERE id = ?", (row["id"],))
 
 
+def bulk_delete_journal_entries(entry_type: str, ref_keys: list[str]) -> int:
+    """Loescht mehrere Eintraege in einem Rutsch (Mehrfachauswahl in der
+    Journal-Liste) - ein Query statt einer Schleife aus Einzel-Deletes."""
+    if not ref_keys:
+        return 0
+    placeholders = ",".join("?" for _ in ref_keys)
+    with get_conn() as conn:
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT id FROM journal_entries WHERE entry_type = ? AND ref_key IN ({placeholders})",
+            [entry_type] + list(ref_keys),
+        ).fetchall()]
+        if not ids:
+            return 0
+        id_placeholders = ",".join("?" for _ in ids)
+        conn.execute(f"DELETE FROM journal_tags WHERE entry_id IN ({id_placeholders})", ids)
+        conn.execute(f"DELETE FROM journal_entries WHERE id IN ({id_placeholders})", ids)
+    return len(ids)
+
+
 def upsert_journal_entry(entry_type: str, ref_key: str, title: str = "", content_html: str = "",
                           plain_text: str = "", rating: int | None = None, mood: int | None = None,
                           followed_plan: int | None = None, tag_ids: list[int] | None = None) -> dict | None:
