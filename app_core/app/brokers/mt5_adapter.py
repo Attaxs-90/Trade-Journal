@@ -123,6 +123,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                     exit_price=exit_deal.price,
                     exit_type=("Teilausstieg" if len(exits) > 1 else "Close"),
                     points=round(points, 5),
+                    volume=round(exit_deal.volume, 2),
                     gross_usd=round(exit_deal.profit, 2),
                     commission_usd=round(-costs, 2),
                     net_usd=round(net, 2),

@@ -52,15 +52,79 @@ function withFilter(url) {
   return url + (url.includes("?") ? "&" : "?") + parts.join("&");
 }
 
+/* ---------- Spalten-Auswahl "Tage im Ueberblick" (Uebersicht) ---------- */
+
+/* Neue Spalte hinzufuegen: hier eintragen (key = data-col-Wert in der
+   <th>/<td> im HTML), dann die passende <th data-col="..."> im tpl-overview-
+   Template und die <td data-col="..."> beim Bauen der Zeile in openOverview()
+   ergaenzen - der Toggle-Mechanismus selbst muss dafuer nicht angefasst werden. */
+const OVERVIEW_COLUMNS = [
+  { key: "account", label: "Konto" },
+  { key: "volume", label: "Größe" },
+  { key: "trades", label: "Trades" },
+  { key: "points", label: "Punkte" },
+  { key: "net", label: "Netto $" },
+];
+
+function loadOverviewColumnsState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("overviewColumns") || "null");
+    if (Array.isArray(saved)) return new Set(saved);
+  } catch (e) { /* ignore */ }
+  return new Set(OVERVIEW_COLUMNS.map(c => c.key));
+}
+function saveOverviewColumnsState(visible) {
+  localStorage.setItem("overviewColumns", JSON.stringify([...visible]));
+}
+
+function applyOverviewColumnVisibility(visible) {
+  document.querySelectorAll("#ov-days-table [data-col]").forEach(el => {
+    const key = el.dataset.col;
+    el.hidden = key !== "date" && !visible.has(key);
+  });
+}
+
+function renderOverviewColumnToggle() {
+  const panel = document.getElementById("ov-columns-panel");
+  if (!panel) return;
+  const visible = loadOverviewColumnsState();
+  panel.innerHTML = `<div class="newsbar-chip-row"></div>`;
+  const row = panel.querySelector(".newsbar-chip-row");
+  for (const col of OVERVIEW_COLUMNS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "newsbar-chip" + (visible.has(col.key) ? " active" : "");
+    chip.textContent = col.label;
+    chip.addEventListener("click", () => {
+      if (visible.has(col.key)) visible.delete(col.key); else visible.add(col.key);
+      chip.classList.toggle("active");
+      saveOverviewColumnsState(visible);
+      applyOverviewColumnVisibility(visible);
+    });
+    row.appendChild(chip);
+  }
+  applyOverviewColumnVisibility(visible);
+}
+
+async function getAccountOptions() {
+  return api("/api/account-options");
+}
+
+/* Rendert den Konten-Filter in das Inline-Panel der Uebersicht. Kein-Op, wenn
+   das Panel gerade nicht im DOM ist (Uebersicht nicht aktive View). */
 async function renderAccountFilter() {
-  const options = await api("/api/account-options");
-  const list = document.getElementById("account-filter-list");
-  list.innerHTML = "";
+  const panel = document.getElementById("ov-account-filter-panel");
+  if (!panel) return;
+  const options = await getAccountOptions();
+  panel.innerHTML = "";
+
+  const countBadge = document.getElementById("ov-account-filter-count");
+  if (countBadge) countBadge.textContent = state.filterMode === "selected" && state.filterKeys.length ? `(${state.filterKeys.length})` : "";
 
   const masterLabel = document.createElement("label");
   masterLabel.className = "filter-item master";
   masterLabel.innerHTML = `<input type="checkbox" id="filter-all"> Alle Konten`;
-  list.appendChild(masterLabel);
+  panel.appendChild(masterLabel);
   const masterInput = masterLabel.querySelector("input");
   masterInput.checked = state.filterMode === "all";
   masterInput.addEventListener("change", () => {
@@ -76,7 +140,7 @@ async function renderAccountFilter() {
     hint.className = "empty-state";
     hint.style.padding = "6px 0";
     hint.textContent = "Noch keine Konten/Importe.";
-    list.appendChild(hint);
+    panel.appendChild(hint);
     return;
   }
 
@@ -87,7 +151,7 @@ async function renderAccountFilter() {
     const input = label.querySelector("input");
     input.checked = state.filterMode === "selected" && state.filterKeys.includes(opt.key);
     input.addEventListener("change", () => {
-      const checked = Array.from(list.querySelectorAll("input[data-key]:checked")).map(i => i.dataset.key);
+      const checked = Array.from(panel.querySelectorAll("input[data-key]:checked")).map(i => i.dataset.key);
       if (!checked.length) {
         state.filterMode = "all";
         state.filterKeys = [];
@@ -99,9 +163,23 @@ async function renderAccountFilter() {
       renderAccountFilter();
       refreshCurrentView();
     });
-    list.appendChild(label);
+    panel.appendChild(label);
   }
 }
+
+/* Schliesst ein Inline-Filter-Panel (Konten-Filter, Spalten-Auswahl, ...) bei
+   Klick ausserhalb - ein Listener fuer alle .inline-filter-panel-Paare statt
+   einem eigenen pro Panel. */
+function initInlineFilterToggles() {
+  document.addEventListener("click", (e) => {
+    document.querySelectorAll(".inline-filter-panel").forEach(panel => {
+      if (panel.hidden) return;
+      const toggle = panel.previousElementSibling;
+      if (!panel.contains(e.target) && e.target !== toggle && !toggle?.contains(e.target)) panel.hidden = true;
+    });
+  });
+}
+initInlineFilterToggles();
 
 let cachedTags = null;
 async function getTags(force = false) {
@@ -110,56 +188,75 @@ async function getTags(force = false) {
 }
 function invalidateTagsCache() { cachedTags = null; }
 
+/* Tag-Filter als Klick-Chips gruppiert nach tag_group, Vorbild die
+   Marktnews-Filterchips (.newsbar-chip) statt Checkboxen. */
 async function renderTagFilter() {
+  const wrap = document.getElementById("trades-tag-filter-list");
+  if (!wrap) return;
   const tags = await getTags();
-  const list = document.getElementById("tag-filter-list");
-  list.innerHTML = "";
+  wrap.innerHTML = "";
 
-  const masterLabel = document.createElement("label");
-  masterLabel.className = "filter-item master";
-  masterLabel.innerHTML = `<input type="checkbox" id="tag-filter-all"> Alle Tags`;
-  list.appendChild(masterLabel);
-  const masterInput = masterLabel.querySelector("input");
-  masterInput.checked = state.tagFilterMode === "all";
-  masterInput.addEventListener("change", () => {
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.className = "tag-filter-all-chip" + (state.tagFilterMode === "all" ? " active" : "");
+  allBtn.textContent = "Alle Tags";
+  allBtn.addEventListener("click", () => {
     state.tagFilterMode = "all";
     state.tagFilterKeys = [];
     saveTagFilterState();
     renderTagFilter();
     refreshCurrentView();
   });
+  wrap.appendChild(allBtn);
 
   if (!tags.length) {
     const hint = document.createElement("div");
     hint.className = "empty-state";
     hint.style.padding = "6px 0";
     hint.textContent = "Noch keine Tags angelegt.";
-    list.appendChild(hint);
+    wrap.appendChild(hint);
   } else {
-    for (const tag of tags) {
-      const label = document.createElement("label");
-      label.className = "filter-item";
-      label.innerHTML = `<input type="checkbox" data-key="${tag.id}"><span class="filter-item-dot" style="background:${tag.color}"></span>${escapeHtml(tag.name)}`;
-      const input = label.querySelector("input");
-      input.checked = state.tagFilterMode === "selected" && state.tagFilterKeys.includes(String(tag.id));
-      input.addEventListener("change", () => {
-        const checked = Array.from(list.querySelectorAll("input[data-key]:checked")).map(i => i.dataset.key);
-        if (!checked.length) {
-          state.tagFilterMode = "all";
-          state.tagFilterKeys = [];
-        } else {
-          state.tagFilterMode = "selected";
-          state.tagFilterKeys = checked;
-        }
-        saveTagFilterState();
-        renderTagFilter();
-        refreshCurrentView();
-      });
-      list.appendChild(label);
+    const byGroup = new Map();
+    for (const t of tags) {
+      const g = t.tag_group || "Ohne Gruppe";
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(t);
+    }
+    for (const [group, groupTags] of byGroup) {
+      const block = document.createElement("div");
+      block.className = "tag-filter-group";
+      block.innerHTML = `<div class="tag-filter-group-title">${escapeHtml(group)}</div><div class="newsbar-chip-row"></div>`;
+      const row = block.querySelector(".newsbar-chip-row");
+      for (const tag of groupTags) {
+        const active = state.tagFilterMode === "selected" && state.tagFilterKeys.includes(String(tag.id));
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "tag-chip-filter" + (active ? " active" : "");
+        chip.dataset.key = tag.id;
+        chip.style.setProperty("--tag-color", tag.color);
+        chip.style.setProperty("--tag-chip-text", tagTextColor(tag.color));
+        chip.textContent = tag.name;
+        chip.addEventListener("click", () => {
+          const current = new Set(state.tagFilterMode === "selected" ? state.tagFilterKeys : []);
+          if (current.has(String(tag.id))) current.delete(String(tag.id)); else current.add(String(tag.id));
+          if (!current.size) {
+            state.tagFilterMode = "all";
+            state.tagFilterKeys = [];
+          } else {
+            state.tagFilterMode = "selected";
+            state.tagFilterKeys = [...current];
+          }
+          saveTagFilterState();
+          renderTagFilter();
+          refreshCurrentView();
+        });
+        row.appendChild(chip);
+      }
+      wrap.appendChild(block);
     }
   }
 
-  document.querySelectorAll("#tag-logic-toggle .tag-logic-btn").forEach(btn => {
+  document.querySelectorAll("#trades-tag-logic-toggle .tag-logic-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.logic === state.tagFilterLogic);
     btn.onclick = () => {
       state.tagFilterLogic = btn.dataset.logic;
@@ -171,8 +268,8 @@ async function renderTagFilter() {
 }
 
 function refreshCurrentView() {
-  refreshDayList();
   if (state.view === "overview") openOverview();
+  else if (state.view === "trades") openTrades(state.tradesPage || 1);
   else if (state.view === "month") renderMonth();
   else if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
 }
@@ -242,7 +339,6 @@ function initGlobalSync() {
       btn.title = failed
         ? `${inserted} neue Trades importiert, ${failed} Konto(en) fehlgeschlagen.`
         : `${inserted} neue Trades importiert.`;
-      await refreshDayList();
       await renderAccountFilter();
       refreshCurrentView();
       if (state.view === "accounts") await renderAccounts();
@@ -296,7 +392,6 @@ async function openSettings() {
   state.view = "settings";
   state.currentDay = null;
   setActiveNav("settings");
-  refreshDayList();
 
   const content = document.getElementById("content");
   content.innerHTML = "";
@@ -487,7 +582,46 @@ function fmtDuration(sec) {
 }
 function cls(n) { return n >= 0 ? "pos" : "neg"; }
 
+/* CFDs (MT5) werden in Lots gehandelt, Futures (NinjaTrader-Import) in
+   Kontrakten - die Herkunft (source) entscheidet automatisch, welche
+   Einheit angezeigt wird. Aeltere Trades ohne gespeicherte Groesse (vor
+   Einfuehrung dieses Felds) zeigen "-". */
+function fmtVolume(trade) {
+  if (trade.volume === null || trade.volume === undefined) return "–";
+  if (trade.source === "ninjatrader") {
+    const n = Math.round(trade.volume);
+    return `${n} Kontrakt${n === 1 ? "" : "e"}`;
+  }
+  return `${fmtNum(trade.volume, 2)} Lot${trade.volume === 1 ? "" : "s"}`;
+}
+
+/* Tagesaggregat aus db.list_days() - eine Liste {source, total}, weil ein Tag
+   Trades aus mehreren Quellen (Lots UND Kontrakte) enthalten kann. */
+function fmtVolumeAgg(volumes) {
+  if (!volumes || !volumes.length) return "–";
+  return volumes.map(v => v.source === "ninjatrader"
+    ? `${Math.round(v.total)} Kontrakt${Math.round(v.total) === 1 ? "" : "e"}`
+    : `${fmtNum(v.total, 2)} Lot${v.total === 1 ? "" : "s"}`
+  ).join(", ");
+}
+
 /* ---------- Tag-Chips & Popover (Tagesansicht) ---------- */
+
+/* <optgroup> je tag_group fuer <select>-Elemente (z. B. Mehrfach-Tagging) -
+   sonst ist bei vielen Tags nicht erkennbar, welcher Tag zu welcher Gruppe gehoert. */
+function groupedTagOptionsHtml(tags) {
+  const byGroup = new Map();
+  for (const t of tags) {
+    const g = t.tag_group || "Ohne Gruppe";
+    if (!byGroup.has(g)) byGroup.set(g, []);
+    byGroup.get(g).push(t);
+  }
+  return [...byGroup].map(([group, groupTags]) => `
+    <optgroup label="${escapeHtml(group)}">
+      ${groupTags.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
+    </optgroup>
+  `).join("");
+}
 
 function tagTextColor(hex) {
   const c = (hex || "#6c95ff").replace("#", "");
@@ -496,7 +630,9 @@ function tagTextColor(hex) {
   return luminance > 0.6 ? "#1a1d21" : "#ffffff";
 }
 function tagChipHtml(tag) {
-  return `<span class="tag-chip" style="background:${tag.color};color:${tagTextColor(tag.color)}">${escapeHtml(tag.name)}</span>`;
+  const groupHtml = tag.tag_group ? `<span class="tag-chip-group">${escapeHtml(tag.tag_group)}</span>` : "";
+  const title = tag.tag_group ? `${escapeHtml(tag.tag_group)} - ${escapeHtml(tag.name)}` : escapeHtml(tag.name);
+  return `<span class="tag-chip" style="background:${tag.color};color:${tagTextColor(tag.color)}" title="${title}">${groupHtml}${escapeHtml(tag.name)}</span>`;
 }
 
 function renderTradeTagCell(cell, trade) {
@@ -644,25 +780,6 @@ async function api(path, opts) {
   return res.json();
 }
 
-/* ---------- Sidebar / Day list ---------- */
-
-async function refreshDayList() {
-  const days = await api(withFilter("/api/days"));
-  const list = document.getElementById("day-list");
-  list.innerHTML = "";
-  if (!days.length) {
-    list.innerHTML = `<div class="empty-state">Noch keine Daten.<br>CSV importieren.</div>`;
-    return;
-  }
-  for (const d of days) {
-    const btn = document.createElement("button");
-    btn.className = "day-row" + (state.currentDay === d.day ? " active" : "");
-    btn.innerHTML = `<span class="d-date">${d.day}</span><span class="d-net ${cls(d.net_usd)}">${fmtSigned(d.net_usd)} $</span>`;
-    btn.addEventListener("click", () => openDay(d.day));
-    list.appendChild(btn);
-  }
-}
-
 /* ---------- Views ---------- */
 
 function setActiveNav(view) {
@@ -673,13 +790,29 @@ async function openOverview() {
   state.view = "overview";
   state.currentDay = null;
   setActiveNav("overview");
-  refreshDayList();
 
   const content = document.getElementById("content");
   content.innerHTML = "";
   content.appendChild(document.getElementById("tpl-overview").content.cloneNode(true));
 
-  const data = await api(withFilter("/api/overview"));
+  const toggleBtn = document.getElementById("ov-account-filter-toggle");
+  const panel = document.getElementById("ov-account-filter-panel");
+  toggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.hidden = !panel.hidden;
+  });
+  await renderAccountFilter();
+
+  const columnsToggleBtn = document.getElementById("ov-columns-toggle");
+  const columnsPanel = document.getElementById("ov-columns-panel");
+  columnsToggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    columnsPanel.hidden = !columnsPanel.hidden;
+  });
+  renderOverviewColumnToggle();
+
+  const [data, accountOptions] = await Promise.all([api(withFilter("/api/overview")), getAccountOptions()]);
+  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
 
   const statGrid = document.getElementById("ov-stats");
   statGrid.innerHTML = tile("Startkapital", fmtNum(data.start_balance) + " $")
@@ -705,21 +838,93 @@ async function openOverview() {
   for (const d of data.days) {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
-    tr.innerHTML = `<td>${d.day}</td><td>${d.trade_count}</td><td>${fmtSigned(d.points, 2)}</td><td class="${cls(d.net_usd)}">${fmtSigned(d.net_usd)} $</td>`;
+    const names = (d.account_ids || []).map(id => accountNames.get(String(id)) || `Konto ${id}`);
+    if (d.has_unassigned) names.push("CSV / ohne Konto");
+    let accountCell;
+    if (names.length === 0) accountCell = "–";
+    else if (names.length === 1) accountCell = escapeHtml(names[0]);
+    else accountCell = `<span title="${escapeHtml(names.join(", "))}">Mehrere</span>`;
+    tr.innerHTML = `
+      <td data-col="date">${d.day}</td>
+      <td data-col="account">${accountCell}</td>
+      <td data-col="volume">${fmtVolumeAgg(d.volumes)}</td>
+      <td data-col="trades">${d.trade_count}</td>
+      <td data-col="points">${fmtSigned(d.points, 2)}</td>
+      <td data-col="net" class="${cls(d.net_usd)}">${fmtSigned(d.net_usd)} $</td>
+    `;
     tr.addEventListener("click", () => openDay(d.day));
     tbody.appendChild(tr);
   }
+  applyOverviewColumnVisibility(loadOverviewColumnsState());
 }
 
 function tile(label, value, extraClass = "") {
   return `<div class="stat-tile"><div class="label">${label}</div><div class="value ${extraClass}">${value}</div></div>`;
 }
 
+const TRADES_PAGE_SIZE = 50;
+
+async function openTrades(page = 1) {
+  state.view = "trades";
+  state.currentDay = null;
+  state.tradesPage = page;
+  setActiveNav("trades");
+
+  const content = document.getElementById("content");
+  content.innerHTML = "";
+  content.appendChild(document.getElementById("tpl-trades").content.cloneNode(true));
+
+  await renderTagFilter();
+
+  const [result, accountOptions] = await Promise.all([
+    api(withFilter(`/api/trades?page=${page}&page_size=${TRADES_PAGE_SIZE}`)),
+    getAccountOptions(),
+  ]);
+  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
+
+  const tbody = document.getElementById("trades-tbody");
+  tbody.innerHTML = "";
+  if (!result.trades.length) {
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+  }
+  for (const t of result.trades) {
+    const accountName = t.account_id ? (accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto";
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.innerHTML = `
+      <td>${t.day}</td>
+      <td>${escapeHtml(accountName)}</td>
+      <td>${fmtTime(t.entry_time)}</td>
+      <td>${t.direction}</td>
+      <td>${fmtVolume(t)}</td>
+      <td>${fmtNum(t.entry_price)}</td>
+      <td>${fmtNum(t.exit_price)}</td>
+      <td>${fmtSigned(t.points, 2)}</td>
+      <td class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</td>
+      <td class="tag-cell"></td>
+    `;
+    tr.addEventListener("click", () => openDay(t.day));
+    const tagCell = tr.querySelector(".tag-cell");
+    tagCell.addEventListener("click", (e) => e.stopPropagation());
+    renderTradeTagCell(tagCell, t);
+    tbody.appendChild(tr);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(result.total / TRADES_PAGE_SIZE));
+  const pagination = document.getElementById("trades-pagination");
+  pagination.innerHTML = `
+    <button type="button" class="btn btn-secondary trades-page-prev" ${page <= 1 ? "disabled" : ""}>← Zurück</button>
+    <span class="pagination-label">Seite ${page} von ${totalPages} (${result.total} Trade(s))</span>
+    <button type="button" class="btn btn-secondary trades-page-next" ${page >= totalPages ? "disabled" : ""}>Weiter →</button>
+  `;
+  pagination.querySelector(".trades-page-prev").addEventListener("click", () => openTrades(page - 1));
+  pagination.querySelector(".trades-page-next").addEventListener("click", () => openTrades(page + 1));
+}
+
 async function openDay(day) {
   state.view = "day";
   state.currentDay = day;
   setActiveNav("");
-  refreshDayList();
 
   const content = document.getElementById("content");
   content.innerHTML = "";
@@ -769,6 +974,7 @@ async function populateDay(container, day) {
       <td>${fmtTime(t.entry_time)}</td>
       <td>${fmtTime(t.exit_time)}</td>
       <td class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</td>
+      <td>${fmtVolume(t)}</td>
       <td>${fmtNum(t.entry_price)}</td>
       <td>${fmtNum(t.exit_price)}</td>
       <td>${t.exit_type || ""}</td>
@@ -805,7 +1011,6 @@ async function populateDay(container, day) {
         // GET /api/days/{day} liefert 404. Statt populateDay() erneut
         // aufzurufen (wuerde dort abbrechen und die alte Zeile stehen
         // lassen), die Ansicht verlassen, die es nicht mehr gibt.
-        refreshDayList();
         if (container.closest("#modal-overlay")) {
           closeModal();
           if (state.view === "month") renderMonth();
@@ -832,7 +1037,7 @@ async function populateDay(container, day) {
 
   const bulkSelect = container.querySelector(".bulk-tag-select");
   const tagsForBulk = await getTags();
-  bulkSelect.innerHTML = tagsForBulk.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+  bulkSelect.innerHTML = groupedTagOptionsHtml(tagsForBulk);
   container.querySelector(".bulk-tag-apply").onclick = async () => {
     if (!bulkSelect.value || !state.selectedTradeIds.size) return;
     await api("/api/trades/bulk-tag", {
@@ -1045,7 +1250,6 @@ async function openMonth() {
   state.view = "month";
   state.currentDay = null;
   setActiveNav("month");
-  refreshDayList();
 
   const now = new Date();
   if (!state.monthYear) state.monthYear = now.getFullYear();
@@ -1304,7 +1508,6 @@ async function openAccounts() {
   state.view = "accounts";
   state.currentDay = null;
   setActiveNav("accounts");
-  refreshDayList();
 
   const content = document.getElementById("content");
   content.innerHTML = "";
@@ -1373,7 +1576,17 @@ async function renderAccounts() {
     const lastSync = acc.last_sync ? fmtDateTime(acc.last_sync) : "noch nie";
     row.innerHTML = `
       <div class="account-info">
-        <div class="account-name">${acc.name}</div>
+        <div class="account-name-row">
+          <div class="account-name">${escapeHtml(acc.name)}</div>
+          <button type="button" class="account-name-edit-btn" title="Konto umbenennen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>
+        </div>
+        <form class="account-name-edit-form" hidden>
+          <input type="text" class="acc-name-input" value="${escapeHtml(acc.name)}" required>
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <button type="button" class="btn btn-secondary acc-name-cancel">Abbrechen</button>
+        </form>
         <div class="account-meta">${platformName}${isManual ? "" : ` · Login ${acc.login} · Server ${acc.server}`}</div>
         <div class="account-meta">${isManual ? "Zuordnung per CSV-Import" : `Letzter Sync: ${lastSync}`}</div>
         ${acc.synced_balance !== null
@@ -1393,6 +1606,48 @@ async function renderAccounts() {
       <div class="account-status"></div>
     `;
     const statusEl = row.querySelector(".account-status");
+
+    const nameRow = row.querySelector(".account-name-row");
+    const nameForm = row.querySelector(".account-name-edit-form");
+    const nameInput = row.querySelector(".acc-name-input");
+    row.querySelector(".account-name-edit-btn").addEventListener("click", () => {
+      nameRow.hidden = true;
+      nameForm.hidden = false;
+      nameInput.focus();
+      nameInput.select();
+    });
+    row.querySelector(".acc-name-cancel").addEventListener("click", () => {
+      nameInput.value = acc.name;
+      nameForm.hidden = true;
+      nameRow.hidden = false;
+    });
+    nameForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const newName = nameInput.value.trim();
+      if (!newName || newName === acc.name) {
+        nameForm.hidden = true;
+        nameRow.hidden = false;
+        return;
+      }
+      try {
+        await api(`/api/accounts/${acc.id}/name`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: newName }),
+        });
+        acc.name = newName;
+        row.querySelector(".account-name").textContent = newName;
+        nameForm.hidden = true;
+        nameRow.hidden = false;
+        statusEl.className = "account-status ok";
+        statusEl.textContent = "Konto umbenannt.";
+        await renderAccountFilter();
+        await renderImportAccountSelect();
+        if (state.view === "overview" || state.view === "trades") refreshCurrentView();
+      } catch (err) {
+        statusEl.className = "account-status err";
+        statusEl.textContent = err.message;
+      }
+    });
 
     const balanceSaveBtn = row.querySelector(".acc-balance-save");
     if (balanceSaveBtn) balanceSaveBtn.addEventListener("click", async () => {
@@ -1419,7 +1674,6 @@ async function renderAccounts() {
         const res = await api(`/api/accounts/${acc.id}/sync${full ? "?full=true" : ""}`, { method: "POST" });
         statusEl.className = "account-status ok";
         statusEl.textContent = `${res.inserted} neue Trades importiert (${res.parsed} gefunden).`;
-        await refreshDayList();
         await renderAccountFilter();
       } catch (err) {
         statusEl.className = "account-status err";
@@ -1451,7 +1705,6 @@ async function renderAccounts() {
           });
           statusEl.className = "account-status ok";
           statusEl.textContent = `${res.updated} Trade(s) zugeordnet.`;
-          await refreshDayList();
           await renderAccountFilter();
         } catch (err) {
           statusEl.className = "account-status err";
@@ -1501,7 +1754,6 @@ document.getElementById("csv-input").addEventListener("change", async (e) => {
     const res = await api("/api/import", { method: "POST", body: form });
     statusEl.className = "import-status ok";
     statusEl.textContent = `${res.inserted} von ${res.parsed} Trades importiert.`;
-    await refreshDayList();
     await renderAccountFilter();
     if (state.view === "overview") openOverview();
     if (res.days && res.days.length) openDay(res.days[res.days.length - 1]);
@@ -1517,6 +1769,7 @@ document.getElementById("csv-input").addEventListener("change", async (e) => {
 document.querySelectorAll(".nav-item").forEach(el => {
   el.addEventListener("click", () => {
     if (el.dataset.view === "overview") openOverview();
+    if (el.dataset.view === "trades") openTrades();
     if (el.dataset.view === "month") openMonth();
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
@@ -1525,8 +1778,6 @@ document.querySelectorAll(".nav-item").forEach(el => {
 
 loadFilterState();
 loadTagFilterState();
-renderAccountFilter();
-renderTagFilter();
 openOverview();
 
 /* ---------- Newsbar (ForexFactory-Wirtschaftskalender) ---------- */

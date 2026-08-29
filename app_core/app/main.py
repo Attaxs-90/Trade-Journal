@@ -62,6 +62,10 @@ class StartingBalanceUpdate(BaseModel):
     starting_balance: float
 
 
+class AccountRename(BaseModel):
+    name: str
+
+
 class ReassignTrades(BaseModel):
     account_id: int
     source: str | None = None  # z.B. "ninjatrader" - None = alle nicht zugeordneten Trades
@@ -103,6 +107,18 @@ async def import_csv(file: UploadFile = File(...), account_id: int | None = Form
 @app.get("/api/days")
 def api_list_days(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
     return db.list_days(_parse_accounts(accounts), _parse_tags(tags), tag_logic)
+
+
+@app.get("/api/trades")
+def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                     page: int = 1, page_size: int = 50, sort: str = "day", dir: str = "desc"):
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 200)
+    trades, total = db.list_trades(
+        _parse_accounts(accounts), _parse_tags(tags), tag_logic,
+        offset=(page - 1) * page_size, limit=page_size, sort=sort, direction=dir,
+    )
+    return {"trades": trades, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/days/{day}")
@@ -225,6 +241,17 @@ def api_update_starting_balance(account_id: int, payload: StartingBalanceUpdate)
     if not db.get_account(account_id):
         raise HTTPException(404, "Konto nicht gefunden.")
     db.set_starting_balance(account_id, payload.starting_balance)
+    return {"ok": True}
+
+
+@app.put("/api/accounts/{account_id}/name")
+def api_rename_account(account_id: int, payload: AccountRename):
+    if not db.get_account(account_id):
+        raise HTTPException(404, "Konto nicht gefunden.")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    db.rename_account(account_id, name)
     return {"ok": True}
 
 

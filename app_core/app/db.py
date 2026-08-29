@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS trades (
     notes TEXT DEFAULT '',
     source TEXT DEFAULT 'import',
     account_id INTEGER,
+    volume REAL,
     UNIQUE(entry_order_id, exit_order_id)
 );
 
@@ -102,6 +103,7 @@ MIGRATIONS: list[str] = [
     )""",                                                                     # -> Version 6
     "CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id)",    # -> Version 7
     "CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id)",  # -> Version 8
+    "ALTER TABLE trades ADD COLUMN volume REAL",                               # -> Version 9
 ]
 
 
@@ -163,24 +165,38 @@ def init_db():
 
 
 def insert_trades(trades: list[dict], source: str = "import", account_id: int | None = None) -> int:
+    """INSERT OR IGNORE ueber (entry_order_id, exit_order_id) - bereits vorhandene
+    Trades werden beim erneuten Sync/Import nicht neu angelegt. Wurde ein Trade
+    dabei ignoriert, aber die eingehenden Daten liefern eine volume, die in der
+    DB noch fehlt (z. B. Trades von vor Einfuehrung des volume-Felds), wird sie
+    per UPDATE nachgetragen - so heilt ein erneuter Sync/Import fehlende Lots/
+    Kontrakte, ohne bestehende Zeilen zu duplizieren oder sonst zu veraendern."""
     inserted = 0
     with get_conn() as conn:
         for t in trades:
             row = dict(t)
             row.setdefault("source", source)
             row.setdefault("account_id", account_id)
+            row.setdefault("volume", None)
             cur = conn.execute(
                 """INSERT OR IGNORE INTO trades
                 (day, instrument, direction, entry_time, exit_time, entry_price, exit_price,
                  exit_type, points, gross_usd, commission_usd, net_usd, entry_order_id, exit_order_id,
-                 source, account_id)
+                 source, account_id, volume)
                 VALUES (:day, :instrument, :direction, :entry_time, :exit_time, :entry_price, :exit_price,
                  :exit_type, :points, :gross_usd, :commission_usd, :net_usd, :entry_order_id, :exit_order_id,
-                 :source, :account_id)""",
+                 :source, :account_id, :volume)""",
                 row,
             )
             if cur.rowcount:
                 inserted += 1
+            elif row["volume"] is not None:
+                conn.execute(
+                    """UPDATE trades SET volume = :volume
+                       WHERE entry_order_id = :entry_order_id AND exit_order_id = :exit_order_id
+                       AND volume IS NULL""",
+                    row,
+                )
     return inserted
 
 
@@ -211,6 +227,11 @@ def add_account(name: str, platform: str, login: str, password: str, server: str
 def set_starting_balance(account_id: int, starting_balance: float):
     with get_conn() as conn:
         conn.execute("UPDATE broker_accounts SET starting_balance = ? WHERE id = ?", (starting_balance, account_id))
+
+
+def rename_account(account_id: int, name: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE broker_accounts SET name = ? WHERE id = ?", (name, account_id))
 
 
 def set_synced_balance(account_id: int, balance: float):
@@ -429,15 +450,57 @@ def reassign_unassigned_trades(account_id: int, source: str | None = None) -> in
 def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
     clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
     where = f"WHERE {clause}" if clause else ""
+    # Groesse (Lots/Kontrakte) haengt an der Herkunft (source) - deshalb separat
+    # je Tag UND source aufsummiert, nicht in der Haupt-Query mitgezogen (dort
+    # waere je Tag nur eine einzelne Zahl moeglich, auch bei gemischten Quellen).
+    vol_clause = f"{clause} AND volume IS NOT NULL" if clause else "volume IS NOT NULL"
     with get_conn() as conn:
         rows = conn.execute(
             f"""SELECT day, COUNT(*) as trade_count,
                       ROUND(SUM(points), 2) as points,
-                      ROUND(SUM(net_usd), 2) as net_usd
+                      ROUND(SUM(net_usd), 2) as net_usd,
+                      GROUP_CONCAT(DISTINCT account_id) as account_ids_raw,
+                      SUM(CASE WHEN account_id IS NULL THEN 1 ELSE 0 END) as unassigned_count
                FROM trades {where} GROUP BY day ORDER BY day DESC""",
             params,
         ).fetchall()
-    return [dict(r) for r in rows]
+        vol_rows = conn.execute(
+            f"""SELECT day, source, ROUND(SUM(volume), 2) as total
+               FROM trades WHERE {vol_clause} GROUP BY day, source""",
+            params,
+        ).fetchall()
+    volumes_by_day: dict[str, list[dict]] = {}
+    for r in vol_rows:
+        volumes_by_day.setdefault(r["day"], []).append({"source": r["source"], "total": r["total"]})
+    result = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("account_ids_raw")
+        d["account_ids"] = [int(x) for x in raw.split(",")] if raw else []
+        d["has_unassigned"] = d.pop("unassigned_count") > 0
+        d["volumes"] = volumes_by_day.get(d["day"], [])
+        result.append(d)
+    return result
+
+
+TRADE_SORT_COLUMNS = {"day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd"}
+
+
+def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or",
+                 offset: int = 0, limit: int = 50, sort: str = "day", direction: str = "desc") -> tuple[list[dict], int]:
+    """Paginierte Liste aller Trades ueber alle Tage hinweg, fuer die Trades-Uebersicht."""
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    where = f"WHERE {clause}" if clause else ""
+    sort_col = TRADE_SORT_COLUMNS.get(sort, "day")
+    sort_dir = "ASC" if direction == "asc" else "DESC"
+    with get_conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) as n FROM trades {where}", params).fetchone()["n"]
+        rows = conn.execute(
+            f"""SELECT * FROM trades {where}
+               ORDER BY {sort_col} {sort_dir}, entry_time {sort_dir} LIMIT ? OFFSET ?""",
+            params + [limit, offset],
+        ).fetchall()
+    return _attach_tags([dict(r) for r in rows]), total
 
 
 def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:

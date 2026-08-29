@@ -43,6 +43,10 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="20" x2="4" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="20" y1="20" x2="20" y2="14"/></svg></span>
         <span class="nav-label">Übersicht</span>
       </button>
+      <button class="nav-item" data-view="trades" title="Trades">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="7" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg></span>
+        <span class="nav-label">Trades</span>
+      </button>
       <button class="nav-item" data-view="month" title="Monatsübersicht">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
         <span class="nav-label">Monatsübersicht</span>
@@ -57,22 +61,6 @@
       </button>
     </nav>
 
-    <div class="filter-box">
-      <div class="import-label">Konten-Filter</div>
-      <div class="filter-list" id="account-filter-list"></div>
-    </div>
-
-    <div class="filter-box">
-      <div class="import-label tag-filter-label">
-        <span>Tags-Filter</span>
-        <div class="tag-logic-toggle" id="tag-logic-toggle">
-          <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
-          <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
-        </div>
-      </div>
-      <div class="filter-list" id="tag-filter-list"></div>
-    </div>
-
     <div class="import-box">
       <label class="import-label" for="csv-input">CSV importieren</label>
       <select class="import-account-select" id="import-account-select">
@@ -81,11 +69,6 @@
       <input type="file" id="csv-input" accept=".csv" hidden>
       <button class="btn btn-primary" id="import-btn">Datei wählen</button>
       <div class="import-status" id="import-status"></div>
-    </div>
-
-    <div class="day-list-wrap">
-      <div class="day-list-title">Tage</div>
-      <div class="day-list" id="day-list"></div>
     </div>
   </aside>
 
@@ -190,13 +173,59 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Tage im Überblick</div>
+      <div class="card-title-row">
+        <div class="card-title">Tage im Überblick</div>
+        <div class="card-title-actions">
+          <div class="inline-filter" id="ov-columns-filter">
+            <button type="button" class="inline-filter-toggle" id="ov-columns-toggle">Spalten</button>
+            <div class="inline-filter-panel" id="ov-columns-panel" hidden></div>
+          </div>
+          <div class="inline-filter" id="ov-account-filter">
+            <button type="button" class="inline-filter-toggle" id="ov-account-filter-toggle">Konten-Filter <span class="inline-filter-count" id="ov-account-filter-count"></span></button>
+            <div class="inline-filter-panel" id="ov-account-filter-panel" hidden></div>
+          </div>
+        </div>
+      </div>
       <table class="table" id="ov-days-table">
         <thead>
-          <tr><th>Datum</th><th>Trades</th><th>Punkte</th><th>Netto $</th></tr>
+          <tr>
+            <th data-col="date">Datum</th><th data-col="account">Konto</th><th data-col="volume">Größe</th>
+            <th data-col="trades">Trades</th><th data-col="points">Punkte</th><th data-col="net">Netto $</th>
+          </tr>
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-trades">
+  <section class="view">
+    <header class="view-header">
+      <h1>Trades</h1>
+    </header>
+
+    <div class="card">
+      <div class="card-title-row">
+        <div class="card-title">Alle Trades</div>
+        <div class="tag-logic-toggle" id="trades-tag-logic-toggle">
+          <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
+          <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
+        </div>
+      </div>
+      <div class="filter-list filter-list-inline" id="trades-tag-filter-list"></div>
+      <div class="table-scroll">
+        <table class="table trades-table">
+          <thead>
+            <tr>
+              <th>Datum</th><th>Konto</th><th>Entry-Zeit</th><th>Richtung</th><th>Größe</th><th>Entry</th>
+              <th>Exit</th><th>Punkte</th><th>Netto $</th><th>Tags</th>
+            </tr>
+          </thead>
+          <tbody id="trades-tbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="trades-pagination"></div>
     </div>
   </section>
 </template>
@@ -221,7 +250,7 @@
           <thead>
             <tr>
               <th class="col-check"><input type="checkbox" class="day-table-select-all"></th>
-              <th>Entry-Zeit</th><th>Exit-Zeit</th><th>Richtung</th><th>Entry</th>
+              <th>Entry-Zeit</th><th>Exit-Zeit</th><th>Richtung</th><th>Größe</th><th>Entry</th>
               <th>Exit</th><th>Exit-Typ</th><th>Punkte</th><th>Netto $</th><th>Kumuliert</th><th>Tags</th><th>Notiz</th><th>Bild</th><th>Löschen</th>
             </tr>
           </thead>
@@ -326,7 +355,7 @@
       <div class="card-title">Tags</div>
       <div class="account-hint">
         Ordne Trades in der Tagesansicht per Tag-Symbol eigene Tags zu (z. B. Strategie oder Fehler)
-        und filtere später in der Seitenleiste danach - mehrere gleichzeitig, wahlweise UND/ODER verknüpft.
+        und filtere später auf der Trades-Seite danach - mehrere gleichzeitig, wahlweise UND/ODER verknüpft.
       </div>
       <form class="tag-form" id="tag-form">
         <input type="text" name="name" id="tag-name-input" placeholder="Tag-Name (z. B. Winner)" required>

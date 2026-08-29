@@ -89,6 +89,7 @@ def pair_trades(fills: list[dict]) -> list[dict]:
                         entry_order_id=entry["order_id"],
                         exit_order_id=f["order_id"],
                         source="ninjatrader",
+                        volume=1,  # Fills werden oben je Kontrakt einzeln aufgeteilt (siehe open_entries)
                     ))
 
     trades.sort(key=lambda t: t["entry_time"])
