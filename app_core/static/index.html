@@ -56,6 +56,14 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
         <span class="nav-label">Monatsübersicht</span>
       </button>
+      <button class="nav-item" data-view="strategy" title="Strategie">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg></span>
+        <span class="nav-label">Strategie</span>
+      </button>
+      <button class="nav-item" data-view="backtesting" title="Backtesting">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>
+        <span class="nav-label">Backtesting</span>
+      </button>
       <button class="nav-item" data-view="accounts" title="Konten &amp; Sync">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
         <span class="nav-label">Konten &amp; Sync</span>
@@ -65,16 +73,6 @@
         <span class="nav-label">Einstellungen</span>
       </button>
     </nav>
-
-    <div class="import-box">
-      <label class="import-label" for="csv-input">CSV importieren</label>
-      <select class="import-account-select" id="import-account-select">
-        <option value="">Kein Konto (freier Import)</option>
-      </select>
-      <input type="file" id="csv-input" accept=".csv" hidden>
-      <button class="btn btn-primary" id="import-btn">Datei wählen</button>
-      <div class="import-status" id="import-status"></div>
-    </div>
   </aside>
 
   <main class="content" id="content">
@@ -187,34 +185,16 @@
     <div class="stat-grid" id="ov-stats"></div>
 
     <div class="card">
-      <div class="card-title">Equity-Kurve (kumuliert, alle Tage)</div>
-      <div class="chart-wrap" id="ov-chart"></div>
-    </div>
-
-    <div class="card">
       <div class="card-title-row">
-        <div class="card-title">Tage im Überblick</div>
+        <div class="card-title">Equity-Kurve (kumuliert, alle Tage)</div>
         <div class="card-title-actions">
-          <div class="inline-filter" id="ov-columns-filter">
-            <button type="button" class="inline-filter-toggle" id="ov-columns-toggle">Spalten</button>
-            <div class="inline-filter-panel" id="ov-columns-panel" hidden></div>
-          </div>
           <div class="inline-filter" id="ov-account-filter">
             <button type="button" class="inline-filter-toggle" id="ov-account-filter-toggle">Konten-Filter <span class="inline-filter-count" id="ov-account-filter-count"></span></button>
             <div class="inline-filter-panel" id="ov-account-filter-panel" hidden></div>
           </div>
         </div>
       </div>
-      <table class="table" id="ov-days-table">
-        <thead>
-          <tr>
-            <th data-col="date">Datum</th><th data-col="account">Konto</th><th data-col="volume">Größe</th>
-            <th data-col="trades">Trades</th><th data-col="points">Punkte</th><th data-col="net">Netto $</th>
-            <th data-col="journal">Journal</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <div class="chart-wrap" id="ov-chart"></div>
     </div>
   </section>
 </template>
@@ -228,24 +208,67 @@
     <div class="card">
       <div class="card-title-row">
         <div class="card-title">Alle Trades</div>
-        <div class="tag-logic-toggle" id="trades-tag-logic-toggle">
-          <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
-          <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
+        <div class="card-title-actions">
+          <div class="inline-filter trades-field-order-filter">
+            <button type="button" class="inline-filter-toggle" id="trades-field-order-toggle">Feldreihenfolge</button>
+            <div class="inline-filter-panel trades-field-order-panel" id="trades-field-order-panel" hidden></div>
+          </div>
+          <div class="tag-logic-toggle" id="trades-tag-logic-toggle">
+            <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
+            <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
+          </div>
         </div>
       </div>
       <div class="filter-list filter-list-inline" id="trades-tag-filter-list"></div>
       <div class="table-scroll">
         <table class="table trades-table">
-          <thead>
-            <tr>
-              <th>Datum</th><th>Konto</th><th>Entry-Zeit</th><th>Richtung</th><th>Größe</th><th>Entry</th>
-              <th>Exit</th><th>Punkte</th><th>Netto $</th><th>Tags</th>
-            </tr>
-          </thead>
+          <thead><tr id="trades-thead-row"></tr></thead>
           <tbody id="trades-tbody"></tbody>
         </table>
       </div>
       <div class="pagination" id="trades-pagination"></div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-trade">
+  <section class="view">
+    <header class="view-header trade-header">
+      <div class="trade-nav">
+        <button type="button" class="btn btn-secondary trade-nav-btn trade-prev" title="Vorheriger Trade (Pfeiltaste links)">←</button>
+        <h1 class="trade-title">Trade</h1>
+        <button type="button" class="btn btn-secondary trade-nav-btn trade-next" title="Nächster Trade (Pfeiltaste rechts)">→</button>
+      </div>
+      <div class="trade-header-links">
+        <button type="button" class="btn btn-secondary trade-back-to-list">← Zurück zu Trades</button>
+        <button type="button" class="btn btn-secondary trade-back-to-day">Ganzer Tag →</button>
+      </div>
+    </header>
+
+    <div class="stat-grid trade-stats"></div>
+
+    <div class="card">
+      <div class="card-title">Tags</div>
+      <div class="tag-cell trade-tag-cell"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Notiz</div>
+      <textarea class="trade-note-input" placeholder="Notiz zu diesem Trade…" rows="3"></textarea>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Bilder</div>
+      <div class="image-strip trade-images"></div>
+      <label class="btn btn-secondary image-upload-btn">
+        + Bild hinzufügen
+        <input type="file" accept="image/*" class="trade-image-input" hidden>
+      </label>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Bewertung &amp; Review</div>
+      <div class="journal-editor-host trade-journal"></div>
     </div>
   </section>
 </template>
@@ -352,6 +375,20 @@
       <div class="card-title">Tage</div>
       <div class="month-grid"></div>
     </div>
+
+    <div class="card">
+      <div class="card-title">Alle Tage des Monats</div>
+      <div class="table-scroll">
+        <table class="table" id="month-days-table">
+          <thead>
+            <tr>
+              <th>Datum</th><th>Trades</th><th>Punkte</th><th>Netto $</th><th>Journal</th><th>Bild</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -379,9 +416,39 @@
     </div>
 
     <div class="card">
+      <div class="card-title">CSV importieren</div>
+      <div class="import-box">
+        <select class="import-account-select" id="import-account-select">
+          <option value="">Kein Konto (freier Import)</option>
+        </select>
+        <input type="file" id="csv-input" accept=".csv" hidden>
+        <button type="button" class="btn btn-primary" id="import-btn">Datei wählen</button>
+        <div class="import-status" id="import-status"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Verbundene Konten</div>
       <div class="account-list" id="account-list"></div>
     </div>
+  </section>
+</template>
+
+<template id="tpl-strategy">
+  <section class="view">
+    <header class="view-header">
+      <h1>Strategie</h1>
+    </header>
+    <div class="empty-state">Work in Progress – hier kommt bald mehr.</div>
+  </section>
+</template>
+
+<template id="tpl-backtesting">
+  <section class="view">
+    <header class="view-header">
+      <h1>Backtesting</h1>
+    </header>
+    <div class="empty-state">Work in Progress – hier kommt bald mehr.</div>
   </section>
 </template>
 

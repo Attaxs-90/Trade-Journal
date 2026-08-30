@@ -92,7 +92,13 @@ html, body {
   display: grid;
   grid-template-columns: auto 1fr auto;
   grid-template-rows: minmax(0, 1fr);
-  height: 100vh;
+  /* height:100% statt 100vh: unter dem CSS-Zoom weiter oben (ab 2200px/3200px
+     Fensterbreite) berechnet Chrome 100vh falsch (Faktor = zoom-Stufe) und
+     macht die App zu hoch - der Ueberschuss wurde unten von html/body
+     abgeschnitten, unabhaengig von jedem Padding in .content. height:100%
+     bezieht sich stattdessen korrekt auf html/body, die bereits height:100%
+     haben. */
+  height: 100%;
 }
 
 /* Sidebar - Breite direkt am Element animiert (statt am Grid-Track: Chromium
@@ -197,8 +203,7 @@ html[data-sidebar="collapsed"] .app .sidebar { padding-left: 12px; padding-right
 html[data-sidebar="collapsed"] .app .brand-text,
 html[data-sidebar="collapsed"] .app .theme-toggle,
 html[data-sidebar="collapsed"] .app .sync-btn,
-html[data-sidebar="collapsed"] .app .nav-label,
-html[data-sidebar="collapsed"] .app .import-box {
+html[data-sidebar="collapsed"] .app .nav-label {
   display: none;
 }
 html[data-sidebar="collapsed"] .app .brand { justify-content: center; }
@@ -207,12 +212,10 @@ html[data-sidebar="collapsed"] .app .nav-item { justify-content: center; }
 html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { transform: rotate(180deg); }
 
 .import-box {
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: flex-start;
 }
 
 .filter-list {
@@ -295,12 +298,6 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 }
 .pagination-label { font-size: 12.5px; color: var(--text-dim); }
 
-.import-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-faint);
-}
 .import-account-select {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -322,7 +319,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .content {
   overflow-y: auto;
   min-height: 0;
-  padding: 32px 40px;
+  padding: 32px 40px 72px;
 }
 
 .view { display: flex; flex-direction: column; gap: 20px; max-width: 1100px; }
@@ -558,6 +555,11 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 .month-cell.has-trades:hover { transform: translateY(-2px); box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.25); }
+/* Tage ohne Trades, aber mit Bild/Journal - gleiche Klick-Anzeige wie
+   has-trades, aber ohne dessen Gruen/Rot-Einfaerbung (die haengt an einem
+   Netto-Ergebnis, das es hier nicht gibt). */
+.month-cell.clickable { cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.month-cell.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.25); }
 .month-cell .cell-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
 .month-cell .cell-net { font-family: var(--font-mono); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 .month-cell .cell-count { font-size: 10.5px; color: var(--text-faint); }
@@ -875,6 +877,9 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .col-check { width: 30px; }
 .table td.col-check, .table th.col-check { text-align: center; }
 .table .tag-cell { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 220px; }
+/* Basisvariante ohne .table-Vorfahren - fuer die Tags-Karte auf der
+   Einzel-Trade-Seite (kein <table> dort). */
+.tag-cell { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .tag-add-btn {
   all: unset;
   cursor: pointer;
@@ -967,10 +972,36 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 }
 .image-thumb:hover { border-color: var(--accent); }
 
+/* Direkter Loeschen-Button auf der Miniatur - erst beim Hover eingeblendet,
+   damit die Bilder im Ruhezustand nicht mit einem roten Kreuz zugepflastert
+   wirken. opacity statt display:none, damit die Transition greift. */
+.image-thumb-delete {
+  all: unset;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.image-thumb:hover .image-thumb-delete { opacity: 1; }
+.image-thumb-delete:hover { background: var(--red); }
+
 .image-upload-btn { display: inline-flex; cursor: pointer; }
 
 .table .image-cell { display: flex; gap: 4px; align-items: center; }
 .table .image-thumb-sm {
+  position: relative;
   width: 28px;
   height: 28px;
   border-radius: 5px;
@@ -980,6 +1011,8 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   flex-shrink: 0;
 }
 .table .image-thumb-sm img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.table .image-thumb-sm .image-thumb-delete { width: 16px; height: 16px; top: 0; right: 0; font-size: 11px; border-radius: 0 0 0 5px; }
+.table .image-thumb-sm:hover .image-thumb-delete { opacity: 1; }
 .table .image-add {
   all: unset;
   width: 28px;
@@ -1365,10 +1398,12 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-status.error { color: var(--red); }
 
 .journal-marker { cursor: pointer; white-space: nowrap; }
-.cell-journal-dot {
-  position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent);
-}
+.cell-icons { position: absolute; top: 6px; right: 8px; display: flex; align-items: center; gap: 4px; }
+.cell-journal-icon, .cell-image-icon { font-size: 11px; line-height: 1; }
+.cell-journal-icon { cursor: pointer; border-radius: 4px; padding: 1px; }
+.cell-journal-icon:hover { background: var(--bg-hover); }
+.cell-journal-icon-empty { opacity: 0.28; filter: grayscale(1); }
+.cell-journal-icon-empty:hover { opacity: 0.6; }
 
 /* Quill an das Theme anpassen - die Snow-Vorlage bringt eigene helle Farben mit,
    die im Dark Mode sonst als weisser Kasten stehen bleiben. */
@@ -1421,3 +1456,41 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Trebuchet MS"]::before { font-family: "Trebuchet MS", sans-serif; }
 .ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Courier New"]::before { font-family: "Courier New", monospace; }
 .ql-snow .ql-picker.ql-font .ql-picker-item[data-value="Arial"]::before { font-family: Arial, sans-serif; }
+
+/* ---------- Trades-Uebersicht: Notiz/Foto-Badges + Feldreihenfolge ---------- */
+.table .col-badges { width: 44px; white-space: nowrap; }
+.trade-card-badge { font-size: 13px; margin-right: 4px; }
+
+.trades-field-order-panel { width: 220px; }
+.trade-field-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: grab;
+  user-select: none;
+}
+.trade-field-order-row:hover { background: var(--bg-hover); }
+.trade-field-order-row.dragging { opacity: 0.4; }
+.trade-field-order-handle { color: var(--text-faint); }
+
+/* ---------- Einzel-Trade-Seite ---------- */
+.trade-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+.trade-nav { display: flex; align-items: center; gap: 12px; }
+.trade-nav-btn { padding: 6px 12px; }
+.trade-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.trade-title { font-size: 18px; font-weight: 600; margin: 0; white-space: nowrap; }
+.trade-header-links { display: flex; gap: 8px; }
+.trade-note-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  resize: vertical;
+}

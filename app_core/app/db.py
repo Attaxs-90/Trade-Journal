@@ -219,7 +219,14 @@ def get_conn():
 BACKUP_KEEP = 10  # aelteste Backups jenseits dieser Anzahl werden geloescht
 
 
-def _backup_db() -> Path:
+def _backup_db(conn: sqlite3.Connection) -> Path:
+    # Im WAL-Modus koennen zuletzt geschriebene Transaktionen noch in der
+    # trades.db-wal-Datei stehen statt in trades.db selbst. Ein reines
+    # shutil.copy2(DB_PATH) wuerde diese Datei nicht mitnehmen und so ein
+    # Backup erzeugen, dem die juengsten Trades fehlen. TRUNCATE-Checkpoint
+    # schreibt alles Ausstehende in die Hauptdatei und leert die WAL-Datei,
+    # damit die Kopie danach wirklich vollstaendig und in sich konsistent ist.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = BACKUP_DIR / f"trades_pre_update_{ts}.db"
     shutil.copy2(DB_PATH, dest)
@@ -248,12 +255,20 @@ def init_db():
 
         if current_version < target_version:
             if not is_new_db:
-                _backup_db()
+                _backup_db(conn)
             for stmt in MIGRATIONS[current_version:]:
                 try:
                     conn.execute(stmt)
-                except sqlite3.OperationalError:
-                    pass  # Spalte/Tabelle existiert bereits (z.B. frische DB via SCHEMA)
+                except sqlite3.OperationalError as e:
+                    # Erwartet nur, wenn Spalte/Tabelle schon existiert (z.B. frische
+                    # DB via SCHEMA, die diese Migration inhaltlich vorwegnimmt).
+                    # Jeder andere Fehler (z.B. Tippfehler in einer neuen Migration)
+                    # soll den Start hart abbrechen statt user_version trotzdem
+                    # hochzuzaehlen - sonst laeuft die betroffene Migration nie wieder,
+                    # obwohl sie nie ausgefuehrt wurde, und die DB bleibt inkonsistent.
+                    msg = str(e).lower()
+                    if "already exists" not in msg and "duplicate column" not in msg:
+                        raise
             conn.execute(f"PRAGMA user_version = {target_version}")
 
 
@@ -358,7 +373,10 @@ def _account_filter(account_keys: list[str] | None) -> tuple[str, list]:
     CSV-Importe ohne verknuepftes Konto (account_id IS NULL). None/leer = keine Einschraenkung."""
     if not account_keys:
         return "", []
-    ids = [int(k) for k in account_keys if k != "csv"]
+    # Ungueltige Schluessel (z.B. veraltete/manipulierte Werte aus dem
+    # localStorage-Filterzustand) werden ignoriert statt die Anfrage mit
+    # einem unbehandelten ValueError abstuerzen zu lassen.
+    ids = [int(k) for k in account_keys if k != "csv" and k.lstrip("-").isdigit()]
     include_csv = "csv" in account_keys
     parts, params = [], []
     if ids:
@@ -378,7 +396,9 @@ def _tag_filter(tag_keys: list[str] | None, tag_logic: str = "or") -> tuple[str,
     ODER: Trade hat mindestens einen der gewaehlten Tags. UND: Trade hat alle."""
     if not tag_keys:
         return "", []
-    ids = [int(k) for k in tag_keys]
+    ids = [int(k) for k in tag_keys if k.lstrip("-").isdigit()]
+    if not ids:
+        return "1=0", []
     placeholders = ",".join("?" for _ in ids)
     if tag_logic == "and":
         clause = (
@@ -584,6 +604,23 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
 TRADE_SORT_COLUMNS = {"day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd"}
 
 
+def _attach_image_flags(trades: list[dict]) -> list[dict]:
+    """Setzt has_image je Trade - eine zusaetzliche Query statt einer pro Trade
+    (kein N+1), analog zu _attach_tags()."""
+    if not trades:
+        return trades
+    ids = [t["id"] for t in trades]
+    placeholders = ",".join("?" for _ in ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT trade_id FROM images WHERE trade_id IN ({placeholders})", ids
+        ).fetchall()
+    with_image = {r["trade_id"] for r in rows}
+    for t in trades:
+        t["has_image"] = t["id"] in with_image
+    return trades
+
+
 def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or",
                  offset: int = 0, limit: int = 50, sort: str = "day", direction: str = "desc") -> tuple[list[dict], int]:
     """Paginierte Liste aller Trades ueber alle Tage hinweg, fuer die Trades-Uebersicht."""
@@ -598,7 +635,56 @@ def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | Non
                ORDER BY {sort_col} {sort_dir}, entry_time {sort_dir} LIMIT ? OFFSET ?""",
             params + [limit, offset],
         ).fetchall()
-    return _attach_tags([dict(r) for r in rows]), total
+    trades = _attach_tags([dict(r) for r in rows])
+    return _attach_image_flags(trades), total
+
+
+def get_trade(trade_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
+    if not row:
+        return None
+    trades = _attach_image_flags(_attach_tags([dict(row)]))
+    return trades[0]
+
+
+def get_images_for_trade(trade_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM images WHERE trade_id = ? ORDER BY created_at ASC", (trade_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = None,
+                       tag_keys: list[str] | None = None, tag_logic: str = "or",
+                       sort: str = "day", direction: str = "desc") -> int | None:
+    """Naechster/vorheriger Trade in genau der Reihenfolge, die list_trades() fuer
+    dieselben Filter/Sortierung liefern wuerde - per Tupel-Vergleich (Sortierspalte,
+    entry_time) statt Offset, damit der Sprung auch ueber Seitengrenzen der
+    paginierten Trades-Uebersicht hinweg korrekt bleibt."""
+    current = get_trade(trade_id)
+    if not current:
+        return None
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    where = f"AND {clause}" if clause else ""
+    sort_col = TRADE_SORT_COLUMNS.get(sort, "day")
+    sort_dir = "ASC" if direction == "asc" else "DESC"
+    # "naechster" folgt der Anzeige-Reihenfolge (sort_dir); "vorheriger" ist deren
+    # Umkehrung - beides zusammen mit dem passenden Tupel-Vergleich, damit
+    # Eintraege mit gleichem Sortierwert (z.B. gleicher Tag) ueber entry_time
+    # als Tie-Breaker korrekt und ohne Dopplung/Ueberspringen durchlaufen werden.
+    forward = (to == "next") == (sort_dir == "ASC")
+    op = ">" if forward else "<"
+    query_dir = "ASC" if forward else "DESC"
+    with get_conn() as conn:
+        row = conn.execute(
+            f"""SELECT id FROM trades
+               WHERE ({sort_col}, entry_time) {op} (?, ?) {where}
+               ORDER BY {sort_col} {query_dir}, entry_time {query_dir} LIMIT 1""",
+            [current[sort_col], current["entry_time"]] + params,
+        ).fetchone()
+    return row["id"] if row else None
 
 
 def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
@@ -648,6 +734,17 @@ def get_images_for_day(day: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def days_with_images(start: str, end: str) -> set[str]:
+    """Tage im Zeitraum, die mindestens ein Bild haben - Tages- UND Trade-Bilder
+    zusammen (images.day ist bei beiden gesetzt), eine Query fuer den ganzen
+    Zeitraum statt einer pro Tag."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT day FROM images WHERE day BETWEEN ? AND ?", (start, end)
+        ).fetchall()
+    return {r["day"] for r in rows}
+
+
 def get_image(image_id: int) -> dict | None:
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM images WHERE id = ?", (image_id,)).fetchone()
@@ -663,7 +760,7 @@ def delete_image(image_id: int):
 # Eintraege haengen am Datum (bzw. spaeter an Woche/Monat), nicht am Trade:
 # ein Handelstag kann einen Eintrag haben, ein Eintrag braucht keinen Trade.
 
-JOURNAL_TYPES = {"day", "week", "month"}
+JOURNAL_TYPES = {"day", "week", "month", "trade"}
 
 
 def _attach_journal_tags(entries: list[dict]) -> list[dict]:
@@ -843,10 +940,11 @@ def list_journal_entries(entry_type: str = "day", start: str | None = None, end:
         parts.append("(plain_text LIKE ? OR title LIKE ?)")
         params += [f"%{query}%", f"%{query}%"]
     if tag_keys:
-        ids = [int(k) for k in tag_keys]
-        placeholders = ",".join("?" for _ in ids)
-        parts.append(f"id IN (SELECT entry_id FROM journal_tags WHERE tag_id IN ({placeholders}))")
-        params += ids
+        ids = [int(k) for k in tag_keys if k.lstrip("-").isdigit()]
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            parts.append(f"id IN (SELECT entry_id FROM journal_tags WHERE tag_id IN ({placeholders}))")
+            params += ids
     with get_conn() as conn:
         rows = conn.execute(
             f"""SELECT * FROM journal_entries WHERE {' AND '.join(parts)}

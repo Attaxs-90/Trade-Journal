@@ -144,10 +144,13 @@ def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_lo
 @app.get("/api/days/{day}")
 def api_day_detail(day: str, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
     trades = db.get_day_trades(day, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
-    if not trades:
-        raise HTTPException(404, "Kein Tag mit Trades gefunden.")
-    stats = day_stats(trades)
     images = db.get_images_for_day(day)
+    # Auch ohne Trades erreichbar, wenn es an dem Tag ein Bild oder einen
+    # Journal-Eintrag gibt (z.B. ueber den Quill-Editor eingebettetes Bild an
+    # einem Tag ohne Handel) - sonst liesse sich das von nirgendwo oeffnen.
+    if not trades and not images and not db.get_journal_entry("day", day):
+        raise HTTPException(404, "Kein Tag mit Trades, Bildern oder Journal-Eintrag gefunden.")
+    stats = day_stats(trades)
     return {"trades": trades, "stats": stats, "images": images}
 
 
@@ -161,6 +164,31 @@ def api_update_trade_notes(trade_id: int, payload: NotesUpdate):
 def api_delete_trade(trade_id: int):
     db.delete_trade(trade_id)
     return {"ok": True}
+
+
+@app.get("/api/trades/{trade_id}")
+def api_get_trade(trade_id: int):
+    trade = db.get_trade(trade_id)
+    if not trade:
+        raise HTTPException(404, "Trade nicht gefunden.")
+    return trade
+
+
+@app.get("/api/trades/{trade_id}/images")
+def api_trade_images(trade_id: int):
+    return db.get_images_for_trade(trade_id)
+
+
+@app.get("/api/trades/{trade_id}/neighbor")
+def api_trade_neighbor(trade_id: int, to: str = "next", accounts: str | None = None,
+                        tags: str | None = None, tag_logic: str = "or",
+                        sort: str = "day", dir: str = "desc"):
+    if to not in ("next", "prev"):
+        raise HTTPException(400, "to muss 'next' oder 'prev' sein.")
+    neighbor_id = db.adjacent_trade_id(
+        trade_id, to, _parse_accounts(accounts), _parse_tags(tags), tag_logic, sort, dir
+    )
+    return {"id": neighbor_id}
 
 
 @app.get("/api/overview")
@@ -384,6 +412,8 @@ def _check_journal_ref(entry_type: str, ref_key: str) -> tuple[str, str]:
             datetime.strptime(ref_key, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(400, "Datum muss im Format JJJJ-MM-TT vorliegen.")
+    elif entry_type == "trade" and not ref_key.isdigit():
+        raise HTTPException(400, "Trade-Bewertung braucht eine numerische Trade-ID.")
     return entry_type, ref_key
 
 

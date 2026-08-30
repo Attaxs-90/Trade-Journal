@@ -143,8 +143,10 @@ def build_month_payload(year: int, month: int, account_keys: list[str] | None = 
     end = date(year, month, days_in_month)
     trades_by_day = _group_by_day(db.get_trades_in_range(str(start), str(end), account_keys, tag_keys, tag_logic))
 
-    # Journal-Marker fuer den ganzen Monat in einer Query, nicht je Tag.
+    # Journal-Marker und Bild-Tage fuer den ganzen Monat in je einer Query,
+    # nicht je Tag.
     journal = db.journal_map("day", str(start), str(end))
+    image_days = db.days_with_images(str(start), str(end))
 
     day_rows = []
     for day_num in range(1, days_in_month + 1):
@@ -158,6 +160,7 @@ def build_month_payload(year: int, month: int, account_keys: list[str] | None = 
         entry = journal.get(str(d))
         row["has_journal"] = entry is not None
         row["journal_rating"] = entry["rating"] if entry else None
+        row["has_image"] = str(d) in image_days
         day_rows.append(row)
 
     traded = [d for d in day_rows if d["trades"] > 0]

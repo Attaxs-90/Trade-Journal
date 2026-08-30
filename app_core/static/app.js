@@ -56,68 +56,6 @@ function withFilter(url) {
   return url + (url.includes("?") ? "&" : "?") + parts.join("&");
 }
 
-/* ---------- Spalten-Auswahl "Tage im Ueberblick" (Uebersicht) ---------- */
-
-/* Neue Spalte hinzufuegen: hier eintragen (key = data-col-Wert in der
-   <th>/<td> im HTML), dann die passende <th data-col="..."> im tpl-overview-
-   Template und die <td data-col="..."> beim Bauen der Zeile in openOverview()
-   ergaenzen - der Toggle-Mechanismus selbst muss dafuer nicht angefasst werden.
-   Neue Spalten sind automatisch sichtbar, siehe loadOverviewColumnsState(). */
-const OVERVIEW_COLUMNS = [
-  { key: "account", label: "Konto" },
-  { key: "volume", label: "Größe" },
-  { key: "trades", label: "Trades" },
-  { key: "points", label: "Punkte" },
-  { key: "net", label: "Netto $" },
-  { key: "journal", label: "Journal" },
-];
-
-/* Gespeichert werden die AUSGEBLENDETEN Spalten, nicht die sichtbaren: eine
-   spaeter dazukommende Spalte ist damit automatisch sichtbar. Wuerden wir die
-   sichtbaren merken, bliebe jede neue Spalte fuer alle Bestandsnutzer
-   unsichtbar - sie steht ja in keiner alten Auswahl. */
-function loadOverviewColumnsState() {
-  const visible = new Set(OVERVIEW_COLUMNS.map(c => c.key));
-  try {
-    const hidden = JSON.parse(localStorage.getItem("overviewHiddenColumns") || "null");
-    if (Array.isArray(hidden)) hidden.forEach(key => visible.delete(key));
-  } catch (e) { /* ignore */ }
-  return visible;
-}
-function saveOverviewColumnsState(visible) {
-  const hidden = OVERVIEW_COLUMNS.map(c => c.key).filter(key => !visible.has(key));
-  localStorage.setItem("overviewHiddenColumns", JSON.stringify(hidden));
-}
-
-function applyOverviewColumnVisibility(visible) {
-  document.querySelectorAll("#ov-days-table [data-col]").forEach(el => {
-    const key = el.dataset.col;
-    el.hidden = key !== "date" && !visible.has(key);
-  });
-}
-
-function renderOverviewColumnToggle() {
-  const panel = document.getElementById("ov-columns-panel");
-  if (!panel) return;
-  const visible = loadOverviewColumnsState();
-  panel.innerHTML = `<div class="newsbar-chip-row"></div>`;
-  const row = panel.querySelector(".newsbar-chip-row");
-  for (const col of OVERVIEW_COLUMNS) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "newsbar-chip" + (visible.has(col.key) ? " active" : "");
-    chip.textContent = col.label;
-    chip.addEventListener("click", () => {
-      if (visible.has(col.key)) visible.delete(col.key); else visible.add(col.key);
-      chip.classList.toggle("active");
-      saveOverviewColumnsState(visible);
-      applyOverviewColumnVisibility(visible);
-    });
-    row.appendChild(chip);
-  }
-  applyOverviewColumnVisibility(visible);
-}
-
 async function getAccountOptions() {
   return api("/api/account-options");
 }
@@ -738,16 +676,6 @@ function fmtVolume(trade) {
   return `${fmtNum(trade.volume, 2)} Lot${trade.volume === 1 ? "" : "s"}`;
 }
 
-/* Tagesaggregat aus db.list_days() - eine Liste {source, total}, weil ein Tag
-   Trades aus mehreren Quellen (Lots UND Kontrakte) enthalten kann. */
-function fmtVolumeAgg(volumes) {
-  if (!volumes || !volumes.length) return "–";
-  return volumes.map(v => v.source === "ninjatrader"
-    ? `${Math.round(v.total)} Kontrakt${Math.round(v.total) === 1 ? "" : "e"}`
-    : `${fmtNum(v.total, 2)} Lot${v.total === 1 ? "" : "s"}`
-  ).join(", ");
-}
-
 /* ---------- Tag-Chips & Popover (Tagesansicht) ---------- */
 
 /* <optgroup> je tag_group fuer <select>-Elemente (z. B. Mehrfach-Tagging) -
@@ -905,6 +833,33 @@ function confirmDelete(message, requireTyping = true) {
   });
 }
 
+/* Einfacher Ja/Nein-Dialog fuer nicht-destruktive Entscheidungen (z.B.
+   "trotzdem weiter, obwohl ungespeichert?") - wie confirmDelete(msg, false),
+   aber mit einem regulaeren statt rot eingefaerbten Bestaetigen-Button, damit
+   eine haeufige, harmlose Aktion nicht wie eine Loeschung aussieht. */
+function confirmContinue(message, yesLabel = "Weiter") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    overlay.innerHTML = `
+      <div class="modal-card confirm-card">
+        <div class="confirm-message">${message}</div>
+        <div class="confirm-actions">
+          <button class="btn btn-secondary confirm-no">Abbrechen</button>
+          <button class="btn btn-primary confirm-yes">${escapeHtml(yesLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    function cleanup(result) {
+      overlay.remove();
+      resolve(result);
+    }
+    attachOutsideClose(overlay, () => cleanup(false));
+    overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(false));
+    overlay.querySelector(".confirm-yes").addEventListener("click", () => cleanup(true));
+  });
+}
+
 /* Gemeinsamer Ablauf fuer Konto-Loeschung, aufgerufen sowohl von der
    Konten-Seite als auch von den Einstellungen - vermeidet doppelte
    Confirm-/Request-/Refresh-Logik an zwei Stellen. */
@@ -962,16 +917,7 @@ async function openOverview() {
   });
   await renderAccountFilter();
 
-  const columnsToggleBtn = document.getElementById("ov-columns-toggle");
-  const columnsPanel = document.getElementById("ov-columns-panel");
-  columnsToggleBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    columnsPanel.hidden = !columnsPanel.hidden;
-  });
-  renderOverviewColumnToggle();
-
-  const [data, accountOptions] = await Promise.all([api(withFilter("/api/overview")), getAccountOptions()]);
-  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
+  const data = await api(withFilter("/api/overview"));
 
   const statGrid = document.getElementById("ov-stats");
   statGrid.innerHTML = tile("Startkapital", fmtNum(data.start_balance) + " $")
@@ -992,37 +938,6 @@ async function openOverview() {
     chartWrap.innerHTML = `<div class="empty-state">Mindestens 2 Tage nötig für eine Kurve.</div>`;
   }
 
-  const tbody = document.querySelector("#ov-days-table tbody");
-  tbody.innerHTML = "";
-  for (const d of data.days) {
-    const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
-    const names = (d.account_ids || []).map(id => accountNames.get(String(id)) || `Konto ${id}`);
-    if (d.has_unassigned) names.push("CSV / ohne Konto");
-    let accountCell;
-    if (names.length === 0) accountCell = "–";
-    else if (names.length === 1) accountCell = escapeHtml(names[0]);
-    else accountCell = `<span title="${escapeHtml(names.join(", "))}">Mehrere</span>`;
-    tr.innerHTML = `
-      <td data-col="date">${d.day}</td>
-      <td data-col="account">${accountCell}</td>
-      <td data-col="volume">${fmtVolumeAgg(d.volumes)}</td>
-      <td data-col="trades">${d.trade_count}</td>
-      <td data-col="points">${fmtSigned(d.points, 2)}</td>
-      <td data-col="net" class="${cls(d.net_usd)}">${fmtSigned(d.net_usd)} $</td>
-      <td data-col="journal" class="journal-cell">${d.has_journal
-        ? `<span class="journal-marker" title="Journal-Eintrag vorhanden${d.journal_rating ? " – Bewertung " + d.journal_rating + "/5" : ""}">📝${d.journal_rating ? ` ${d.journal_rating}/5` : ""}</span>`
-        : `<span class="muted">–</span>`}</td>
-    `;
-    tr.querySelector(".journal-cell").addEventListener("click", (e) => {
-      e.stopPropagation();
-      state.journalRefKey = d.day;
-      openJournal();
-    });
-    tr.addEventListener("click", () => openDay(d.day));
-    tbody.appendChild(tr);
-  }
-  applyOverviewColumnVisibility(loadOverviewColumnsState());
 }
 
 function tile(label, value, extraClass = "") {
@@ -1030,6 +945,114 @@ function tile(label, value, extraClass = "") {
 }
 
 const TRADES_PAGE_SIZE = 50;
+
+/* Spalten der Trades-Tabelle - "render" liefert den Zellinhalt fuer alle
+   Spalten ausser "tags" (das braucht echtes DOM fuer den Tag-Zuweisen-Button
+   und wird in renderTradesTable() separat behandelt). Neue Spalte hinzufuegen:
+   hier eintragen, TRADE_CARD_FIELD_KEYS zieht die Keys automatisch nach - der
+   per Drag & Drop einstellbare Reihenfolge-Mechanismus selbst muss dafuer
+   nicht angefasst werden. */
+const TRADE_CARD_FIELDS = [
+  { key: "day", label: "Datum", render: (t) => t.day },
+  { key: "account", label: "Konto", render: (t, ctx) => t.account_id ? escapeHtml(ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto" },
+  { key: "entry_time", label: "Entry-Zeit", render: (t) => fmtTime(t.entry_time) },
+  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</span>` },
+  { key: "volume", label: "Größe", render: (t) => fmtVolume(t) },
+  { key: "entry_price", label: "Entry", render: (t) => fmtNum(t.entry_price) },
+  { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
+  { key: "points", label: "Punkte", render: (t) => `<span class="${cls(t.points)}">${fmtSigned(t.points, 2)}</span>` },
+  { key: "net_usd", label: "Netto $", render: (t) => `<span class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>` },
+  { key: "tags", label: "Tags", render: null },
+];
+const TRADE_CARD_FIELD_KEYS = TRADE_CARD_FIELDS.map(f => f.key);
+
+/* Reihenfolge gilt global fuer jede Trade-Karte (nicht pro Sitzung) - deshalb
+   in localStorage statt in state, analog zu overviewHiddenColumns. */
+function loadTradeFieldOrder() {
+  const saved = JSON.parse(localStorage.getItem("tradeFieldOrder") || "null");
+  if (!Array.isArray(saved)) return [...TRADE_CARD_FIELD_KEYS];
+  // Unbekannte/entfernte Keys rausfiltern, neu hinzugekommene Felder hinten anhaengen -
+  // sonst verschwindet ein neues Feld fuer Bestandsnutzer mit gespeicherter Reihenfolge.
+  const known = saved.filter(k => TRADE_CARD_FIELD_KEYS.includes(k));
+  for (const k of TRADE_CARD_FIELD_KEYS) if (!known.includes(k)) known.push(k);
+  return known;
+}
+function saveTradeFieldOrder(order) {
+  localStorage.setItem("tradeFieldOrder", JSON.stringify(order));
+}
+
+function renderTradeFieldOrderPanel() {
+  const panel = document.getElementById("trades-field-order-panel");
+  const order = loadTradeFieldOrder();
+  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren</div>`
+    + order.map(key => {
+      const field = TRADE_CARD_FIELDS.find(f => f.key === key);
+      return `<div class="trade-field-order-row" draggable="true" data-key="${key}">
+        <span class="trade-field-order-handle">⠿</span>${escapeHtml(field.label)}
+      </div>`;
+    }).join("");
+
+  let dragKey = null;
+  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
+    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const dragging = panel.querySelector(".dragging");
+      if (!dragging || dragging === row) return;
+      const rect = row.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
+      saveTradeFieldOrder(newOrder);
+      renderTradesTable();
+    });
+  });
+}
+
+let tradesTableData = { trades: [], accountNames: new Map() };
+
+function renderTradesTable() {
+  const theadRow = document.getElementById("trades-thead-row");
+  const tbody = document.getElementById("trades-tbody");
+  const { trades, accountNames } = tradesTableData;
+  const order = loadTradeFieldOrder();
+
+  // Badges-Spalte ist fix (nicht Teil der einstellbaren Reihenfolge) - sie
+  // markiert nur, ob eine Notiz/ein Bild vorhanden ist, ist also kein
+  // eigenstaendiger Datenwert wie die uebrigen Spalten.
+  theadRow.innerHTML = `<th class="col-badges"></th>` + order.map(key => {
+    const field = TRADE_CARD_FIELDS.find(f => f.key === key);
+    return `<th>${escapeHtml(field.label)}</th>`;
+  }).join("");
+
+  tbody.innerHTML = "";
+  if (!trades.length) {
+    tbody.innerHTML = `<tr><td colspan="${order.length + 1}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    return;
+  }
+  for (const t of trades) {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    const badges = (t.notes && t.notes.trim() ? `<span class="trade-card-badge" title="Notiz vorhanden">📝</span>` : "")
+      + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">📷</span>` : "");
+    tr.innerHTML = `<td class="col-badges">${badges}</td>` + order.map(key => {
+      if (key === "tags") return `<td class="tag-cell"></td>`;
+      const field = TRADE_CARD_FIELDS.find(f => f.key === key);
+      return `<td>${field.render(t, { accountNames })}</td>`;
+    }).join("");
+    tr.addEventListener("click", () => openTrade(t.id));
+    const tagCell = tr.querySelector(".tag-cell");
+    if (tagCell) {
+      tagCell.addEventListener("click", (e) => e.stopPropagation());
+      renderTradeTagCell(tagCell, t);
+    }
+    tbody.appendChild(tr);
+  }
+}
 
 async function openTrades(page = 1) {
   state.view = "trades";
@@ -1045,35 +1068,19 @@ async function openTrades(page = 1) {
     api(withFilter(`/api/trades?page=${page}&page_size=${TRADES_PAGE_SIZE}`)),
     getAccountOptions(),
   ]);
-  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
+  tradesTableData = {
+    trades: result.trades,
+    accountNames: new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name])),
+  };
+  renderTradesTable();
 
-  const tbody = document.getElementById("trades-tbody");
-  tbody.innerHTML = "";
-  if (!result.trades.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
-  }
-  for (const t of result.trades) {
-    const accountName = t.account_id ? (accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto";
-    const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
-    tr.innerHTML = `
-      <td>${t.day}</td>
-      <td>${escapeHtml(accountName)}</td>
-      <td>${fmtTime(t.entry_time)}</td>
-      <td>${t.direction}</td>
-      <td>${fmtVolume(t)}</td>
-      <td>${fmtNum(t.entry_price)}</td>
-      <td>${fmtNum(t.exit_price)}</td>
-      <td>${fmtSigned(t.points, 2)}</td>
-      <td class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</td>
-      <td class="tag-cell"></td>
-    `;
-    tr.addEventListener("click", () => openDay(t.day));
-    const tagCell = tr.querySelector(".tag-cell");
-    tagCell.addEventListener("click", (e) => e.stopPropagation());
-    renderTradeTagCell(tagCell, t);
-    tbody.appendChild(tr);
-  }
+  const toggle = document.getElementById("trades-field-order-toggle");
+  const panel = document.getElementById("trades-field-order-panel");
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    if (panel.hidden) renderTradeFieldOrderPanel();
+    panel.hidden = !panel.hidden;
+  };
 
   const totalPages = Math.max(1, Math.ceil(result.total / TRADES_PAGE_SIZE));
   const pagination = document.getElementById("trades-pagination");
@@ -1085,6 +1092,128 @@ async function openTrades(page = 1) {
   pagination.querySelector(".trades-page-prev").addEventListener("click", () => openTrades(page - 1));
   pagination.querySelector(".trades-page-next").addEventListener("click", () => openTrades(page + 1));
 }
+
+/* ---------- Einzel-Trade-Seite ---------- */
+
+let activeTradeNote = null;
+
+async function saveActiveTradeNote() {
+  const n = activeTradeNote;
+  if (!n || !n.dirty) return;
+  n.dirty = false;
+  await api(`/api/trades/${n.tradeId}/notes`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: n.input.value }),
+  });
+}
+
+/* Vor jedem Verlassen der Trade-Seite (Pfeile, Buttons, Zurueck-Links) geprueft -
+   listet konkret auf, was noch nicht gespeichert ist, statt nur pauschal zu warnen.
+   Bestaetigung speichert die Aenderungen (kein Datenverlust), lehnt der Nutzer ab
+   bleibt er auf der Seite. */
+async function confirmLeaveTradePage() {
+  const reasons = [];
+  if (activeJournal && activeJournal.dirty) reasons.push("Bewertung/Review-Text");
+  if (activeTradeNote && activeTradeNote.dirty) reasons.push("Notiz zu diesem Trade");
+  if (!reasons.length) return true;
+  const ok = await confirmContinue(
+    `Es gibt noch ungespeicherte Änderungen (${reasons.join(", ")}). Trotzdem weiter? Die Änderungen werden dabei gespeichert.`
+  );
+  if (ok) {
+    if (activeJournal && activeJournal.dirty) await saveJournal();
+    await saveActiveTradeNote();
+  }
+  return ok;
+}
+
+async function openTrade(tradeId, opts = {}) {
+  if (!opts.skipGuard && state.view === "trade" && !(await confirmLeaveTradePage())) return;
+  state.view = "trade";
+  state.currentDay = null;
+  state.currentTradeId = tradeId;
+  setActiveNav("");
+
+  const content = await mountView("tpl-trade");
+  await populateTrade(content, tradeId);
+}
+
+async function populateTrade(container, tradeId) {
+  const [trade, images] = await Promise.all([
+    api(`/api/trades/${tradeId}`),
+    api(`/api/trades/${tradeId}/images`),
+  ]);
+
+  container.querySelector(".trade-title").textContent =
+    `${fmtDate(trade.day)} · ${fmtTime(trade.entry_time)} · ${trade.direction} ${trade.instrument}`;
+
+  container.querySelector(".trade-stats").innerHTML =
+    tile("Richtung", trade.direction, trade.direction === "Long" ? "pos" : "neg")
+    + tile("Größe", fmtVolume(trade))
+    + tile("Entry", fmtNum(trade.entry_price))
+    + tile("Exit", fmtNum(trade.exit_price))
+    + tile("Punkte", fmtSigned(trade.points, 2), cls(trade.points))
+    + tile("Netto", fmtSigned(trade.net_usd) + " $", cls(trade.net_usd))
+    + tile("Entry-Zeit", fmtTime(trade.entry_time))
+    + tile("Exit-Zeit", fmtTime(trade.exit_time))
+    + tile("Exit-Typ", trade.exit_type || "–");
+
+  renderTradeTagCell(container.querySelector(".trade-tag-cell"), trade);
+
+  const noteInput = container.querySelector(".trade-note-input");
+  noteInput.value = trade.notes || "";
+  activeTradeNote = { tradeId: trade.id, input: noteInput, dirty: false };
+  noteInput.oninput = () => { activeTradeNote.dirty = true; };
+  noteInput.onblur = () => saveActiveTradeNote();
+
+  const imgStrip = container.querySelector(".trade-images");
+  imgStrip.innerHTML = "";
+  images.forEach(img => imgStrip.appendChild(imageThumbEl(img, "image-thumb", () => populateTrade(container, tradeId))));
+  const imgInput = container.querySelector(".trade-image-input");
+  imgInput.value = "";
+  imgInput.onchange = async () => {
+    const file = imgInput.files[0];
+    if (!file) return;
+    await uploadImage(trade.day, file, trade.id);
+    await populateTrade(container, tradeId);
+  };
+
+  container.querySelector(".trade-back-to-list").onclick = async () => {
+    if (!(await confirmLeaveTradePage())) return;
+    openTrades(state.tradesPage || 1);
+  };
+  container.querySelector(".trade-back-to-day").onclick = async () => {
+    if (!(await confirmLeaveTradePage())) return;
+    openDay(trade.day);
+  };
+
+  const prevBtn = container.querySelector(".trade-prev");
+  const nextBtn = container.querySelector(".trade-next");
+  const [prevRes, nextRes] = await Promise.all([
+    api(withFilter(`/api/trades/${tradeId}/neighbor?to=prev&sort=day&dir=desc`)),
+    api(withFilter(`/api/trades/${tradeId}/neighbor?to=next&sort=day&dir=desc`)),
+  ]);
+  prevBtn.disabled = !prevRes.id;
+  nextBtn.disabled = !nextRes.id;
+  prevBtn.onclick = async () => {
+    if (prevRes.id && await confirmLeaveTradePage()) openTrade(prevRes.id, { skipGuard: true });
+  };
+  nextBtn.onclick = async () => {
+    if (nextRes.id && await confirmLeaveTradePage()) openTrade(nextRes.id, { skipGuard: true });
+  };
+
+  await mountJournalEditor(container.querySelector(".trade-journal"), String(trade.id), {
+    entryType: "trade", imageDay: trade.day,
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (state.view !== "trade") return;
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  const active = document.activeElement;
+  if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+  const btn = document.querySelector(e.key === "ArrowLeft" ? ".trade-prev" : ".trade-next");
+  if (btn && !btn.disabled) btn.click();
+});
 
 async function openDay(day) {
   state.view = "day";
@@ -1110,7 +1239,9 @@ async function populateDay(container, day) {
     + tile("Peak-to-Valley Drawdown", fmtSigned(s.max_drawdown) + " $");
 
   const tbody = container.querySelector(".day-table tbody");
-  tbody.innerHTML = "";
+  tbody.innerHTML = data.trades.length
+    ? ""
+    : `<tr><td colspan="14"><div class="empty-state">Keine Trades an diesem Tag.</div></td></tr>`;
   let cum = 0;
   const cumVals = data.trades.map(t => (cum += t.net_usd));
   const highIdx = cumVals.indexOf(Math.max(...cumVals));
@@ -1162,7 +1293,7 @@ async function populateDay(container, day) {
 
     const cell = tr.querySelector(".image-cell");
     const tradeImages = (data.images || []).filter(im => im.trade_id === t.id);
-    tradeImages.forEach(img => cell.appendChild(imageThumbEl(img, "image-thumb-sm")));
+    tradeImages.forEach(img => cell.appendChild(imageThumbEl(img, "image-thumb-sm", () => populateDay(container, day))));
     cell.appendChild(imageAddButton(day, t.id, container));
 
     tr.querySelector(".row-delete").addEventListener("click", async () => {
@@ -1221,13 +1352,21 @@ async function populateDay(container, day) {
 
   renderDayImages(container, day, data.images || []);
 
-  container.querySelector(".day-observations").innerHTML =
-    obsTile("Ø Haltedauer", fmtDuration(s.avg_duration_sec))
-    + obsTile("Größte Pause zw. Trades", fmtDuration(s.max_gap_sec))
-    + obsTile("Richtung", `${s.long_count}x Long / ${s.short_count}x Short`)
-    + obsTile("Preisspanne", `${fmtNum(s.price_low)} – ${fmtNum(s.price_high)}`)
-    + obsTile("Erster Trade", fmtTime(data.trades[0].entry_time))
-    + obsTile("Letzter Trade", fmtTime(data.trades[data.trades.length - 1].exit_time));
+  const obsCard = container.querySelector(".day-observations").closest(".card");
+  if (data.trades.length) {
+    obsCard.hidden = false;
+    container.querySelector(".day-observations").innerHTML =
+      obsTile("Ø Haltedauer", fmtDuration(s.avg_duration_sec))
+      + obsTile("Größte Pause zw. Trades", fmtDuration(s.max_gap_sec))
+      + obsTile("Richtung", `${s.long_count}x Long / ${s.short_count}x Short`)
+      + obsTile("Preisspanne", `${fmtNum(s.price_low)} – ${fmtNum(s.price_high)}`)
+      + obsTile("Erster Trade", fmtTime(data.trades[0].entry_time))
+      + obsTile("Letzter Trade", fmtTime(data.trades[data.trades.length - 1].exit_time));
+  } else {
+    // Beobachtungen sind reine Trade-Kennzahlen - an einem Tag ohne Trades
+    // (nur Bild und/oder Journal) gibt es hier nichts sinnvoll zu zeigen.
+    obsCard.hidden = true;
+  }
 
   // mountJournalEditor() steigt selbst aus, wenn der Editor fuer diesen Tag
   // schon steht - populateDay() laeuft nach jedem Bild-Upload erneut und wuerde
@@ -1314,7 +1453,7 @@ async function saveJournal(force = false) {
     tag_ids: [...j.tagIds],
   };
   try {
-    const res = await api(`/api/journal/day/${j.refKey}`, {
+    const res = await api(`/api/journal/${j.entryType}/${j.refKey}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -1332,11 +1471,11 @@ async function saveJournal(force = false) {
 async function deleteJournalEntry() {
   const j = activeJournal;
   if (!j) return;
-  const label = fmtDate(j.refKey);
-  if (!await confirmDelete(`Journal-Eintrag vom ${label} wirklich löschen?`, false)) return;
+  const label = j.entryType === "trade" ? `zu Trade #${j.refKey}` : `vom ${fmtDate(j.refKey)}`;
+  if (!await confirmDelete(`Journal-Eintrag ${label} wirklich löschen?`, false)) return;
   clearTimeout(j.timer);
   j.dirty = false;
-  await api(`/api/journal/day/${j.refKey}`, { method: "DELETE" });
+  await api(`/api/journal/${j.entryType}/${j.refKey}`, { method: "DELETE" });
   j.quill.setContents([]);
   j.rating = null;
   j.mood = null;
@@ -1382,18 +1521,21 @@ async function mountJournalEditor(host, refKey, opts = {}) {
   await flushJournal();
   initQuillFormats();
   host.dataset.journalRef = refKey;
+  const entryType = opts.entryType || "day";
+  const imageDay = opts.imageDay || refKey;
 
   const [res, tags, templates] = await Promise.all([
-    api(`/api/journal/day/${refKey}`),
+    api(`/api/journal/${entryType}/${refKey}`),
     getTags(),
     getJournalTemplates(),
   ]);
   const entry = res.entry;
 
+  const isTrade = entryType === "trade";
   host.innerHTML = `
     <div class="journal-editor">
       <div class="journal-metrics">
-        ${journalScoreRow("Tagesbewertung", "rating", entry ? entry.rating : null, RATING_LABELS)}
+        ${journalScoreRow(isTrade ? "Trade-Bewertung" : "Tagesbewertung", "rating", entry ? entry.rating : null, RATING_LABELS)}
         ${journalScoreRow("Verfassung", "mood", entry ? entry.mood : null, MOOD_LABELS)}
         <div class="journal-metric" data-metric="plan">
           <span class="journal-metric-label">Plan befolgt</span>
@@ -1406,7 +1548,7 @@ async function mountJournalEditor(host, refKey, opts = {}) {
       <div class="journal-templates"></div>
       <div class="journal-quill"></div>
       <div class="journal-tag-picker">
-        <div class="journal-section-label">Tags für diesen Tag</div>
+        <div class="journal-section-label">${isTrade ? "Tags für diesen Trade" : "Tags für diesen Tag"}</div>
         <div class="journal-tag-chips"></div>
       </div>
       <div class="journal-footer">
@@ -1418,13 +1560,13 @@ async function mountJournalEditor(host, refKey, opts = {}) {
 
   const quill = new Quill(host.querySelector(".journal-quill"), {
     theme: "snow",
-    placeholder: "Was ist heute passiert? Was hast du gelernt?",
+    placeholder: isTrade ? "Wie ist dieser Trade gelaufen? Was hast du gelernt?" : "Was ist heute passiert? Was hast du gelernt?",
     modules: { toolbar: { container: JOURNAL_TOOLBAR } },
   });
   if (entry && entry.content_html) quill.clipboard.dangerouslyPasteHTML(entry.content_html);
 
   activeJournal = {
-    refKey, quill, host,
+    refKey, quill, host, entryType, imageDay,
     dirty: false, timer: null,
     rating: entry ? entry.rating : null,
     mood: entry ? entry.mood : null,
@@ -1448,7 +1590,8 @@ async function mountJournalEditor(host, refKey, opts = {}) {
       if (!input.files || !input.files[0]) return;
       const fd = new FormData();
       fd.append("file", input.files[0]);
-      const img = await api(`/api/days/${refKey}/images`, { method: "POST", body: fd });
+      if (isTrade) fd.append("trade_id", refKey);
+      const img = await api(`/api/days/${imageDay}/images`, { method: "POST", body: fd });
       const range = quill.getSelection(true);
       quill.insertEmbed(range.index, "image", `/media/${img.filename}`, "user");
       quill.setSelection(range.index + 1);
@@ -1767,11 +1910,28 @@ async function openJournal() {
 
 /* ---------- Bilder & Lightbox ---------- */
 
-function imageThumbEl(img, sizeClass) {
+/* onDeleted (optional): Callback zum Neuladen der jeweiligen Ansicht nach dem
+   Loeschen - direkter Loeschen-Button auf der Miniatur selbst, damit man
+   dafuer nicht erst durch die Lightbox (Klick zum Vergroessern) muss. */
+function imageThumbEl(img, sizeClass, onDeleted) {
   const div = document.createElement("div");
   div.className = sizeClass;
   div.innerHTML = `<img src="/media/${img.thumb_filename}" alt="" loading="lazy">`;
   div.addEventListener("click", () => openLightbox(img));
+  if (onDeleted) {
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "image-thumb-delete";
+    delBtn.title = "Bild löschen";
+    delBtn.textContent = "×";
+    delBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm("Bild wirklich löschen?")) return;
+      await api(`/api/images/${img.id}`, { method: "DELETE" });
+      await onDeleted();
+    });
+    div.appendChild(delBtn);
+  }
   return div;
 }
 
@@ -1804,7 +1964,7 @@ function renderDayImages(container, day, images) {
   const strip = container.querySelector(".day-images");
   strip.innerHTML = "";
   images.filter(im => im.trade_id === null).forEach(img => {
-    strip.appendChild(imageThumbEl(img, "image-thumb"));
+    strip.appendChild(imageThumbEl(img, "image-thumb", () => populateDay(container, day)));
   });
 
   const input = container.querySelector(".day-image-input");
@@ -1925,6 +2085,8 @@ document.getElementById("lightbox-delete").addEventListener("click", async () =>
     await populateDay(document.getElementById("modal-body"), lightboxOpenDay);
   } else if (state.view === "day" && state.currentDay) {
     await populateDay(document.getElementById("content"), state.currentDay);
+  } else if (state.view === "trade" && state.currentTradeId) {
+    await populateTrade(document.getElementById("content"), state.currentTradeId);
   }
 });
 
@@ -1984,13 +2146,62 @@ async function renderMonth() {
     const el = document.createElement("div");
     const dayNum = parseInt(d.date.split("-")[2], 10);
     const hasTrades = d.trades > 0;
+    // Auch ohne Trades oeffenbar, wenn es dort ein Bild oder einen Journal-
+    // Eintrag gibt - sonst laesst sich das von der Zelle aus nicht erreichen
+    // (die farbige has-trades-Klasse bleibt bewusst an echte Trades gebunden,
+    // sonst wuerde ein trade-loser Tag faelschlich gruen/rot eingefaerbt).
+    const openable = hasTrades || d.has_image || d.has_journal;
     const isWeekend = [0, 6].includes(new Date(d.date + "T00:00:00").getDay());
-    el.className = "month-cell" + (isWeekend ? " weekend" : "") + (hasTrades ? " has-trades " + (d.net >= 0 ? "cell-pos" : "cell-neg") : "");
+    el.className = "month-cell" + (isWeekend ? " weekend" : "")
+      + (hasTrades ? " has-trades " + (d.net >= 0 ? "cell-pos" : "cell-neg") : "")
+      + (openable && !hasTrades ? " clickable" : "");
     el.innerHTML = `<div class="cell-date">${dayNum}</div>`
-      + (d.has_journal ? `<span class="cell-journal-dot" title="Journal-Eintrag vorhanden"></span>` : "")
+      + `<div class="cell-icons">`
+      + `<span class="cell-journal-icon${d.has_journal ? "" : " cell-journal-icon-empty"}" title="${d.has_journal ? "Journal-Eintrag vorhanden - anzeigen" : "Noch kein Journal-Eintrag - anlegen"}">📝</span>`
+      + (d.has_image ? `<span class="cell-image-icon" title="Bild vorhanden">📷</span>` : "")
+      + `</div>`
       + (hasTrades ? `<div class="cell-net">${fmtSigned(d.net)} $</div><div class="cell-count">${d.trades} Trades</div>` : "");
-    if (hasTrades) el.addEventListener("click", () => openDayModal(d.date));
+    // Icon oeffnet immer den Journal-Eintrag des Tages (auch zum Neuanlegen an
+    // Tagen ohne Trade) - eigener Klick-Handler, damit er unabhaengig vom
+    // Zellen-Klick (der nur bei Handelstagen das Tagesdetail oeffnet) funktioniert.
+    el.querySelector(".cell-journal-icon").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openJournalModal(d.date);
+    });
+    if (openable) el.addEventListener("click", () => openDayModal(d.date));
     grid.appendChild(el);
+  }
+
+  const tbody = content.querySelector("#month-days-table tbody");
+  tbody.innerHTML = "";
+  // Nur Tage mit Trade, Journal-Eintrag oder Bild - reine Nicht-Handelstage
+  // ohne jede Notiz/Bild haben hier nichts zu zeigen und wuerden die Liste
+  // nur mit Leerzeilen fuellen.
+  const relevantDays = data.days.filter(d => d.trades > 0 || d.has_journal || d.has_image);
+  if (!relevantDays.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">Keine Trades, Journal-Einträge oder Bilder in diesem Monat.</div></td></tr>`;
+  }
+  for (const d of relevantDays) {
+    const hasTrades = d.trades > 0;
+    const openable = hasTrades || d.has_image || d.has_journal;
+    const tr = document.createElement("tr");
+    if (openable) tr.style.cursor = "pointer";
+    tr.innerHTML = `
+      <td>${d.date}</td>
+      <td>${hasTrades ? d.trades : "–"}</td>
+      <td class="${hasTrades ? cls(d.points) : ""}">${hasTrades ? fmtSigned(d.points, 2) : "–"}</td>
+      <td class="${hasTrades ? cls(d.net) : ""}">${hasTrades ? fmtSigned(d.net) + " $" : "–"}</td>
+      <td class="journal-cell">${d.has_journal
+        ? `<span class="journal-marker" title="Journal-Eintrag vorhanden${d.journal_rating ? " – Bewertung " + d.journal_rating + "/5" : ""}">📝${d.journal_rating ? ` ${d.journal_rating}/5` : ""}</span>`
+        : `<span class="muted">–</span>`}</td>
+      <td>${d.has_image ? `<span title="Bild vorhanden">📷</span>` : `<span class="muted">–</span>`}</td>
+    `;
+    tr.querySelector(".journal-cell").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openJournalModal(d.date);
+    });
+    if (openable) tr.addEventListener("click", () => openDayModal(d.date));
+    tbody.appendChild(tr);
   }
 }
 
@@ -2012,10 +2223,39 @@ async function openDayModal(day) {
   await populateDay(body, day);
 }
 
-function closeModal() {
-  // Der Journal-Editor im Modal wird gleich unsichtbar - vorher rausschreiben.
-  flushJournal();
+/* Journal-Eintrag eines Tages in einem Fenster statt auf der Journal-Seite -
+   fuer die Monatsuebersicht: Eintrag machen, Fenster schliessen, direkt mit
+   dem naechsten Tag im Kalender weitermachen, ohne die Seite zu verlassen. */
+async function openJournalModal(day) {
+  await flushJournal();
+  activeJournal = null;
+  const overlay = document.getElementById("modal-overlay");
+  const body = document.getElementById("modal-body");
+  body.innerHTML = `
+    <section class="view">
+      <header class="view-header"><h1>${fmtDate(day)}</h1></header>
+      <div class="journal-editor-host" id="journal-modal-host"></div>
+    </section>`;
+  overlay.classList.add("visible");
+  // Nach dem Schliessen die Monatsuebersicht neu laden, damit ein frisch
+  // angelegter/geloeschter Eintrag sofort im Icon/in der Liste auftaucht.
+  modalOnClose = () => { if (state.view === "month") renderMonth(); };
+  await mountJournalEditor(document.getElementById("journal-modal-host"), day);
+}
+
+let modalOnClose = null;
+
+async function closeModal() {
+  // Der Journal-Editor im Modal wird gleich unsichtbar - vorher rausschreiben,
+  // und zwar abgewartet statt nur angestossen, damit ein anschliessendes
+  // Neuladen (modalOnClose) die gespeicherten Daten schon sieht.
+  await flushJournal();
   document.getElementById("modal-overlay").classList.remove("visible");
+  if (modalOnClose) {
+    const cb = modalOnClose;
+    modalOnClose = null;
+    cb();
+  }
 }
 
 document.getElementById("modal-close").addEventListener("click", closeModal);
@@ -2191,6 +2431,20 @@ async function getPlatforms() {
   return cachedPlatforms;
 }
 
+async function openStrategy() {
+  state.view = "strategy";
+  state.currentDay = null;
+  setActiveNav("strategy");
+  await mountView("tpl-strategy");
+}
+
+async function openBacktesting() {
+  state.view = "backtesting";
+  state.currentDay = null;
+  setActiveNav("backtesting");
+  await mountView("tpl-backtesting");
+}
+
 async function openAccounts() {
   state.view = "accounts";
   state.currentDay = null;
@@ -2213,7 +2467,7 @@ async function openAccounts() {
     const manual = platform && platform.manual;
     credentialFields.forEach(f => { f.hidden = manual; f.required = !manual; });
     hint.textContent = manual
-      ? "Dieses Konto hat keine automatische Sync-Anbindung. Trades ordnest du ihm beim CSV-Import in der Sidebar zu (Dropdown über \"Datei wählen\")."
+      ? "Dieses Konto hat keine automatische Sync-Anbindung. Trades ordnest du ihm weiter unten beim CSV-Import zu (Dropdown über \"Datei wählen\")."
       : "Nutze ausschließlich das Investor-/Read-Only-Passwort. Zugangsdaten werden nur lokal in deiner SQLite-Datenbank gespeichert und nie an Dritte übertragen.";
   };
   platformSelect.addEventListener("change", updateFormForPlatform);
@@ -2241,6 +2495,34 @@ async function openAccounts() {
   });
 
   await renderAccounts();
+  await renderImportAccountSelect();
+
+  document.getElementById("import-btn").addEventListener("click", () => {
+    document.getElementById("csv-input").click();
+  });
+
+  document.getElementById("csv-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const accountId = document.getElementById("import-account-select").value;
+    const statusEl = document.getElementById("import-status");
+    statusEl.className = "import-status";
+    statusEl.textContent = "Importiere…";
+    const form = new FormData();
+    form.append("file", file);
+    if (accountId) form.append("account_id", accountId);
+    try {
+      const res = await api("/api/import", { method: "POST", body: form });
+      statusEl.className = "import-status ok";
+      statusEl.textContent = `${res.inserted} von ${res.parsed} Trades importiert.`;
+      await renderAccountFilter();
+      if (res.days && res.days.length) openDay(res.days[res.days.length - 1]);
+    } catch (err) {
+      statusEl.className = "import-status err";
+      statusEl.textContent = err.message;
+    }
+    e.target.value = "";
+  });
 }
 
 async function renderAccounts() {
@@ -2411,44 +2693,19 @@ function fmtDateTime(iso) {
 
 /* ---------- Import ---------- */
 
+/* Existiert nur, waehrend die Konten-Seite gemountet ist (Karte "CSV
+   importieren") - wird aber auch von der Konto-Loeschung in den
+   Einstellungen aus aufgerufen, deshalb hier bewusst ein No-Op statt
+   Crash, wenn das Element gerade nicht im DOM ist. */
 async function renderImportAccountSelect() {
   const select = document.getElementById("import-account-select");
+  if (!select) return;
   const current = select.value;
   const accounts = await api("/api/accounts");
   select.innerHTML = '<option value="">Kein Konto (freier Import)</option>'
     + accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join("");
   if (accounts.some(a => String(a.id) === current)) select.value = current;
 }
-renderImportAccountSelect();
-
-document.getElementById("import-btn").addEventListener("click", () => {
-  document.getElementById("csv-input").click();
-});
-
-document.getElementById("csv-input").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const accountId = document.getElementById("import-account-select").value;
-  const statusEl = document.getElementById("import-status");
-  statusEl.className = "import-status";
-  statusEl.textContent = "Importiere…";
-  const form = new FormData();
-  form.append("file", file);
-  if (accountId) form.append("account_id", accountId);
-  try {
-    const res = await api("/api/import", { method: "POST", body: form });
-    statusEl.className = "import-status ok";
-    statusEl.textContent = `${res.inserted} von ${res.parsed} Trades importiert.`;
-    await renderAccountFilter();
-    if (state.view === "overview") openOverview();
-    if (res.days && res.days.length) openDay(res.days[res.days.length - 1]);
-  } catch (err) {
-    statusEl.className = "import-status err";
-    statusEl.textContent = err.message;
-  }
-  e.target.value = "";
-});
-
 /* ---------- Nav ---------- */
 
 document.querySelectorAll(".nav-item").forEach(el => {
@@ -2460,6 +2717,8 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "trades") openTrades();
     if (el.dataset.view === "journal") openJournal();
     if (el.dataset.view === "month") openMonth();
+    if (el.dataset.view === "strategy") openStrategy();
+    if (el.dataset.view === "backtesting") openBacktesting();
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
   });
