@@ -1,5 +1,9 @@
 # Trade Journal
 
+> 🤖 **Dieses Programm ist zu 100 % "vibe gecoded"** — der gesamte Code wurde
+> mit [Claude](https://claude.com) (Anthropic) geschrieben, ohne manuell
+> getippte Zeilen.
+
 Ein lokales Handels-Tagebuch: importiert Trades aus CSV-Dateien oder direkt
 aus MetaTrader 5, zeigt Übersichten pro Tag/Woche/Monat und speichert Notizen
 und Bilder zu jedem Handelstag. Läuft komplett lokal auf deinem Rechner unter
