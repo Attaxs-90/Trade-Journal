@@ -216,6 +216,59 @@ html[data-sidebar="collapsed"] .app .brand-actions { margin-left: 0; }
 html[data-sidebar="collapsed"] .app .nav-item { justify-content: center; }
 html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { transform: rotate(180deg); }
 
+/* Globaler Konten-Filter-Status, unten in der Sidebar (margin-top:auto
+   schiebt ihn ans Ende des Flex-Containers) - auf jeder Seite sichtbar, weil
+   die Sidebar bei jedem View-Wechsel bestehen bleibt (nur #content wird
+   ersetzt). Klick fuehrt zur Uebersicht, wo der Filter geaendert werden kann. */
+.sidebar-account-status {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.sidebar-account-status:hover { background: var(--bg-hover); border-color: var(--text-faint); }
+.sidebar-account-status-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+}
+.sidebar-account-status-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sidebar-account-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-fill);
+  color: var(--accent);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-account-status-chip.muted {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.sidebar-account-status-chip-more { background: var(--bg-hover); color: var(--text-faint); }
+html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
+
+/* Konten-Filter der Uebersicht: Klick-Chips statt Dropdown-Panel, damit alle
+   gesyncten Konten direkt sichtbar und ohne Zwischenschritt anwaehlbar sind.
+   Wiederverwendet .tag-chip-filter (identische Optik zum Tag-Filter der
+   Trades-Seite) mit --tag-color auf --accent gesetzt statt einer Tag-Farbe. */
+.account-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.account-chip-row-empty { font-size: 12px; color: var(--text-faint); }
+
 .import-box {
   display: flex;
   flex-direction: column;

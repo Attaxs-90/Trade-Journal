@@ -22,6 +22,7 @@ function loadFilterState() {
 }
 function saveFilterState() {
   localStorage.setItem("accountFilter", JSON.stringify({ mode: state.filterMode, keys: state.filterKeys }));
+  renderSidebarAccountStatus();
 }
 function accountsQS() {
   if (state.filterMode !== "selected" || !state.filterKeys.length) return "";
@@ -117,6 +118,97 @@ async function renderAccountFilter(panelId = "ov-account-filter-panel", countId 
       refreshCurrentView();
     });
     panel.appendChild(label);
+  }
+}
+
+/* Konten-Filter der Uebersicht als direkt sichtbare Klick-Chips statt eines
+   Dropdown-Panels - alle gesyncten Konten stehen sofort da, ein Klick waehlt
+   an/ab. Baut auf demselben --tag-color-Mechanismus wie .tag-chip-filter auf
+   (siehe style.css), nur mit --accent statt einer Tag-Farbe. */
+function accountChipEl(label, active, onClick) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "tag-chip-filter" + (active ? " active" : "");
+  chip.style.setProperty("--tag-color", "var(--accent)");
+  chip.style.setProperty("--tag-chip-text", "#fff");
+  chip.textContent = label;
+  chip.addEventListener("click", onClick);
+  return chip;
+}
+
+async function renderAccountChipRow(containerId) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  const options = await getAccountOptions();
+  wrap.innerHTML = "";
+  const rerender = () => renderAccountChipRow(containerId);
+
+  wrap.appendChild(accountChipEl("Alle Konten", state.filterMode === "all", () => {
+    state.filterMode = "all";
+    state.filterKeys = [];
+    saveFilterState();
+    rerender();
+    refreshCurrentView();
+  }));
+
+  if (!options.length) {
+    const hint = document.createElement("span");
+    hint.className = "account-chip-row-empty";
+    hint.textContent = "Noch keine Konten/Importe.";
+    wrap.appendChild(hint);
+    return;
+  }
+
+  for (const opt of options) {
+    const active = state.filterMode === "selected" && state.filterKeys.includes(opt.key);
+    wrap.appendChild(accountChipEl(opt.name, active, () => {
+      const current = new Set(state.filterMode === "selected" ? state.filterKeys : []);
+      if (current.has(opt.key)) current.delete(opt.key); else current.add(opt.key);
+      if (!current.size) {
+        state.filterMode = "all";
+        state.filterKeys = [];
+      } else {
+        state.filterMode = "selected";
+        state.filterKeys = [...current];
+      }
+      saveFilterState();
+      rerender();
+      refreshCurrentView();
+    }));
+  }
+}
+
+/* Globaler Konten-Filter-Status in der Sidebar - auf jeder Seite sichtbar
+   (die Sidebar bleibt beim View-Wechsel bestehen), damit ein aktiver Filter
+   nicht "unsichtbar" auf einer anderen Seite als der Uebersicht weiterwirkt.
+   Wird bei jeder Filteraenderung ueber saveFilterState() sowie einmal beim
+   Start aufgerufen. */
+async function renderSidebarAccountStatus() {
+  const chipsWrap = document.getElementById("sidebar-account-status-chips");
+  if (!chipsWrap) return;
+  chipsWrap.innerHTML = "";
+
+  if (state.filterMode !== "selected" || !state.filterKeys.length) {
+    chipsWrap.innerHTML = `<span class="sidebar-account-status-chip muted">Alle Konten</span>`;
+    return;
+  }
+
+  const options = await getAccountOptions();
+  const nameByKey = new Map(options.map(o => [o.key, o.name]));
+  const names = state.filterKeys.map(k => nameByKey.get(k) || (k === "csv" ? "Nicht zugeordnet" : `Konto ${k}`));
+
+  const MAX_SHOWN = 3;
+  for (const name of names.slice(0, MAX_SHOWN)) {
+    const chip = document.createElement("span");
+    chip.className = "sidebar-account-status-chip";
+    chip.textContent = name;
+    chipsWrap.appendChild(chip);
+  }
+  if (names.length > MAX_SHOWN) {
+    const more = document.createElement("span");
+    more.className = "sidebar-account-status-chip sidebar-account-status-chip-more";
+    more.textContent = `+${names.length - MAX_SHOWN}`;
+    chipsWrap.appendChild(more);
   }
 }
 
@@ -944,14 +1036,7 @@ async function openOverview() {
   setActiveNav("overview");
 
   const content = await mountView("tpl-overview");
-
-  const toggleBtn = document.getElementById("ov-account-filter-toggle");
-  const panel = document.getElementById("ov-account-filter-panel");
-  toggleBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    panel.hidden = !panel.hidden;
-  });
-  await renderAccountFilter();
+  await renderAccountChipRow("ov-account-chip-row");
 
   const data = await api(withFilter("/api/overview"));
 
@@ -3394,8 +3479,19 @@ document.querySelectorAll(".nav-item").forEach(el => {
   });
 });
 
+/* Globaler Konten-Status-Klick fuehrt zur Uebersicht, wo der Filter sitzt -
+   Tastatur-Aktivierung analog zu .nav-item (ebenfalls ein div[role=button]). */
+const sidebarAccountStatusEl = document.getElementById("sidebar-account-status");
+sidebarAccountStatusEl.addEventListener("click", () => { if (state.view !== "overview") openOverview(); });
+sidebarAccountStatusEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  sidebarAccountStatusEl.click();
+});
+
 loadFilterState();
 loadTagFilterState();
+renderSidebarAccountStatus();
 openOverview();
 
 /* ---------- Newsbar (ForexFactory-Wirtschaftskalender) ---------- */

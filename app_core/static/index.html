@@ -77,6 +77,11 @@
         <span class="nav-label">Einstellungen</span>
       </div>
     </nav>
+
+    <div class="sidebar-account-status" id="sidebar-account-status" role="button" tabindex="0" title="Aktiver Konten-Filter - Klick fuehrt zur Uebersicht" aria-label="Aktiver Konten-Filter, zur Uebersicht wechseln">
+      <span class="sidebar-account-status-label">Konten</span>
+      <div class="sidebar-account-status-chips" id="sidebar-account-status-chips"></div>
+    </div>
   </aside>
 
   <main class="content" id="content">
@@ -191,13 +196,8 @@
     <div class="card">
       <div class="card-title-row">
         <div class="card-title">Equity-Kurve (kumuliert, alle Tage)</div>
-        <div class="card-title-actions">
-          <div class="inline-filter" id="ov-account-filter">
-            <button type="button" class="inline-filter-toggle" id="ov-account-filter-toggle">Konten-Filter <span class="inline-filter-count" id="ov-account-filter-count"></span></button>
-            <div class="inline-filter-panel" id="ov-account-filter-panel" hidden></div>
-          </div>
-        </div>
       </div>
+      <div class="account-chip-row" id="ov-account-chip-row"></div>
       <div class="chart-wrap" id="ov-chart"></div>
     </div>
   </section>
