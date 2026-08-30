@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0
+- Neue Einzel-Trade-Seite: Bewertung/Verfassung/Plan-befolgt/Tags/Freitext
+  je Trade (gleiches System wie das Tages-Journal), Vor/Zurück-Navigation
+  per Button und Pfeiltasten, Warnung samt Liste bei ungespeicherten
+  Änderungen vor dem Verlassen.
+- Trades-Übersicht: Notiz-/Foto-Markierung je Zeile, Feldreihenfolge der
+  Tabellenspalten per Drag & Drop einstellbar, Klick auf eine Zeile öffnet
+  die neue Einzel-Trade-Seite.
+- Monatsübersicht: Liste aller Tage mit Trade/Journal/Bild unter dem
+  Kalender, Journal- und Bild-Icon je Kalenderzelle, Journal-Eintrag öffnet
+  sich in einem Fenster statt die Seite zu wechseln.
+- Übersicht: "Tage im Überblick"-Tabelle entfernt (durch die neue
+  Monatsliste ersetzt), Konten-Filter bleibt an der Equity-Kurve.
+- CSV-Import von der Sidebar in eine eigene Karte auf der Konten-Seite
+  verschoben, unter "Konto hinzufügen".
+- Bilder: direkter Löschen-Button auf jeder Miniatur; Tage ohne Trades aber
+  mit Bild/Journal sind jetzt erreichbar (vorher Fehler); Bildqualität
+  moderat angehoben (max. Breite 1600→2200px, JPEG-Qualität 82→90,
+  Thumbnail 320→380px/Qualität 70→78).
+- Fix: Bei aktivem CSS-Zoom (ab 2200/3200px Fensterbreite) wurden Lightbox,
+  Tag-Popover und Chart-Tooltip falsch positioniert/skaliert, teils mit
+  unerreichbaren Buttons in der Lightbox.
+- Neue Menüpunkte Strategie/Backtesting (Platzhalter "Work in Progress").
+- Diverse Backend-Härtung: unvollständige Backups im WAL-Modus behoben,
+  Migrationsfehler werden nicht mehr stillschweigend verschluckt, statische
+  Dateien werden mit Cache-Control: no-cache ausgeliefert.
+
 ## 1.2.1
 - Journal: Lösch-Button pro Eintrag (mit Ja-Bestätigung) und Mehrfachauswahl
   zum gemeinsamen Löschen mehrerer Tage.
