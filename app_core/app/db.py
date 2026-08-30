@@ -621,6 +621,23 @@ def _attach_image_flags(trades: list[dict]) -> list[dict]:
     return trades
 
 
+def _attach_journal_flags(trades: list[dict]) -> list[dict]:
+    """Setzt has_journal je Trade (entry_type="trade", ref_key=Trade-Id als String) -
+    eine zusaetzliche Query statt einer pro Trade (kein N+1), analog zu _attach_tags()."""
+    if not trades:
+        return trades
+    ids = [str(t["id"]) for t in trades]
+    placeholders = ",".join("?" for _ in ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT ref_key FROM journal_entries WHERE entry_type = 'trade' AND ref_key IN ({placeholders})", ids
+        ).fetchall()
+    with_journal = {r["ref_key"] for r in rows}
+    for t in trades:
+        t["has_journal"] = str(t["id"]) in with_journal
+    return trades
+
+
 def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or",
                  offset: int = 0, limit: int = 50, sort: str = "day", direction: str = "desc") -> tuple[list[dict], int]:
     """Paginierte Liste aller Trades ueber alle Tage hinweg, fuer die Trades-Uebersicht."""
@@ -636,7 +653,7 @@ def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | Non
             params + [limit, offset],
         ).fetchall()
     trades = _attach_tags([dict(r) for r in rows])
-    return _attach_image_flags(trades), total
+    return _attach_journal_flags(_attach_image_flags(trades)), total
 
 
 def get_trade(trade_id: int) -> dict | None:

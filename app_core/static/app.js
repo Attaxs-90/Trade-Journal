@@ -2,7 +2,6 @@ const state = {
   view: "overview", currentDay: null,
   filterMode: "all", filterKeys: [],
   tagFilterMode: "all", tagFilterKeys: [], tagFilterLogic: "or",
-  selectedTradeIds: new Set(),
   // Journal hat einen eigenen Tag-Filter: er filtert Journal-Eintraege, nicht
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
   journalMode: "all", journalQuery: "", journalTagKeys: [], journalRefKey: null,
@@ -678,22 +677,6 @@ function fmtVolume(trade) {
 
 /* ---------- Tag-Chips & Popover (Tagesansicht) ---------- */
 
-/* <optgroup> je tag_group fuer <select>-Elemente (z. B. Mehrfach-Tagging) -
-   sonst ist bei vielen Tags nicht erkennbar, welcher Tag zu welcher Gruppe gehoert. */
-function groupedTagOptionsHtml(tags) {
-  const byGroup = new Map();
-  for (const t of tags) {
-    const g = t.tag_group || "Ohne Gruppe";
-    if (!byGroup.has(g)) byGroup.set(g, []);
-    byGroup.get(g).push(t);
-  }
-  return [...byGroup].map(([group, groupTags]) => `
-    <optgroup label="${escapeHtml(group)}">
-      ${groupTags.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
-    </optgroup>
-  `).join("");
-}
-
 function tagTextColor(hex) {
   const c = (hex || "#6c95ff").replace("#", "");
   const r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
@@ -982,16 +965,46 @@ function saveTradeFieldOrder(order) {
   localStorage.setItem("tradeFieldOrder", JSON.stringify(order));
 }
 
+/* Gespeichert werden die AUSGEBLENDETEN Felder, nicht die sichtbaren - analog
+   zu overviewHiddenColumns (siehe CLAUDE.md), sonst waere ein neu
+   hinzugekommenes Feld fuer Bestandsnutzer mit gespeicherter Auswahl unsichtbar. */
+function loadTradeFieldHidden() {
+  const saved = JSON.parse(localStorage.getItem("tradeFieldHidden") || "null");
+  if (!Array.isArray(saved)) return new Set();
+  return new Set(saved.filter(k => TRADE_CARD_FIELD_KEYS.includes(k)));
+}
+function saveTradeFieldHidden(hiddenSet) {
+  localStorage.setItem("tradeFieldHidden", JSON.stringify([...hiddenSet]));
+}
+
 function renderTradeFieldOrderPanel() {
   const panel = document.getElementById("trades-field-order-panel");
   const order = loadTradeFieldOrder();
-  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren</div>`
+  const hidden = loadTradeFieldHidden();
+  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren, Klick zum Ein-/Ausblenden</div>`
     + order.map(key => {
       const field = TRADE_CARD_FIELDS.find(f => f.key === key);
+      const isHidden = hidden.has(key);
       return `<div class="trade-field-order-row" draggable="true" data-key="${key}">
-        <span class="trade-field-order-handle">⠿</span>${escapeHtml(field.label)}
+        <span class="trade-field-order-handle">⠿</span>
+        <button type="button" class="trade-field-toggle-btn${isHidden ? "" : " active"}" data-key="${key}">${escapeHtml(field.label)}</button>
       </div>`;
     }).join("");
+
+  panel.querySelectorAll(".trade-field-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.key;
+      const hiddenNow = loadTradeFieldHidden();
+      // Mindestens ein Feld muss sichtbar bleiben - sonst zeigt die Tabelle
+      // nur noch die fixen Check-/Badge-Spalten und wirkt kaputt statt leer.
+      if (!hiddenNow.has(key) && hiddenNow.size >= TRADE_CARD_FIELD_KEYS.length - 1) return;
+      if (hiddenNow.has(key)) hiddenNow.delete(key); else hiddenNow.add(key);
+      saveTradeFieldHidden(hiddenNow);
+      btn.classList.toggle("active");
+      renderTradesTable();
+    });
+  });
 
   let dragKey = null;
   panel.querySelectorAll(".trade-field-order-row").forEach(row => {
@@ -1016,31 +1029,54 @@ function renderTradeFieldOrderPanel() {
 
 let tradesTableData = { trades: [], accountNames: new Map() };
 
+/* Auswahl fuer die Sammel-Aktion (Journal-Eintraege mehrerer Trades auf
+   einmal loeschen) - bewusst nicht in state, sondern modulweit wie
+   tradesTableData: gilt nur fuer die aktuell geladene Trades-Seite, wird bei
+   jedem openTrades()-Aufruf (Seiten-/Filterwechsel) zurueckgesetzt. */
+let tradesSelectedIds = new Set();
+
+function updateTradesBulkBar() {
+  const bar = document.getElementById("trades-bulk-bar");
+  if (!bar) return;
+  const n = tradesSelectedIds.size;
+  bar.hidden = n === 0;
+  const countEl = document.getElementById("trades-bulk-count");
+  if (countEl) countEl.textContent = n === 1 ? "1 Trade ausgewählt" : `${n} Trades ausgewählt`;
+}
+
 function renderTradesTable() {
   const theadRow = document.getElementById("trades-thead-row");
   const tbody = document.getElementById("trades-tbody");
   const { trades, accountNames } = tradesTableData;
-  const order = loadTradeFieldOrder();
+  const hidden = loadTradeFieldHidden();
+  const order = loadTradeFieldOrder().filter(key => !hidden.has(key));
 
   // Badges-Spalte ist fix (nicht Teil der einstellbaren Reihenfolge) - sie
-  // markiert nur, ob eine Notiz/ein Bild vorhanden ist, ist also kein
+  // markiert nur, ob Notiz/Bild/Journal-Eintrag vorhanden sind, ist also kein
   // eigenstaendiger Datenwert wie die uebrigen Spalten.
-  theadRow.innerHTML = `<th class="col-badges"></th>` + order.map(key => {
+  const selectAllCb = document.createElement("input");
+  selectAllCb.type = "checkbox";
+  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges"></th>` + order.map(key => {
     const field = TRADE_CARD_FIELDS.find(f => f.key === key);
     return `<th>${escapeHtml(field.label)}</th>`;
   }).join("");
+  theadRow.querySelector(".col-check").appendChild(selectAllCb);
 
   tbody.innerHTML = "";
   if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="${order.length + 1}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${order.length + 2}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    selectAllCb.disabled = true;
+    updateTradesBulkBar();
     return;
   }
   for (const t of trades) {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
     const badges = (t.notes && t.notes.trim() ? `<span class="trade-card-badge" title="Notiz vorhanden">📝</span>` : "")
-      + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">📷</span>` : "");
-    tr.innerHTML = `<td class="col-badges">${badges}</td>` + order.map(key => {
+      + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">📷</span>` : "")
+      + (t.has_journal ? `<span class="trade-card-badge" title="Journal-Eintrag (Bewertung/Review) vorhanden">🗒️</span>` : "");
+    tr.innerHTML = `<td class="col-check"><input type="checkbox" class="trades-row-select" data-id="${t.id}"${tradesSelectedIds.has(t.id) ? " checked" : ""}></td>`
+      + `<td class="col-badges">${badges}</td>` + order.map(key => {
       if (key === "tags") return `<td class="tag-cell"></td>`;
       const field = TRADE_CARD_FIELDS.find(f => f.key === key);
       return `<td>${field.render(t, { accountNames })}</td>`;
@@ -1051,8 +1087,41 @@ function renderTradesTable() {
       tagCell.addEventListener("click", (e) => e.stopPropagation());
       renderTradeTagCell(tagCell, t);
     }
+    const rowCb = tr.querySelector(".trades-row-select");
+    rowCb.addEventListener("click", (e) => e.stopPropagation());
+    rowCb.addEventListener("change", () => {
+      if (rowCb.checked) tradesSelectedIds.add(t.id);
+      else tradesSelectedIds.delete(t.id);
+      selectAllCb.checked = trades.every(tr => tradesSelectedIds.has(tr.id));
+      updateTradesBulkBar();
+    });
     tbody.appendChild(tr);
   }
+
+  selectAllCb.checked = trades.every(t => tradesSelectedIds.has(t.id));
+  selectAllCb.addEventListener("click", (e) => e.stopPropagation());
+  selectAllCb.addEventListener("change", () => {
+    for (const t of trades) {
+      if (selectAllCb.checked) tradesSelectedIds.add(t.id);
+      else tradesSelectedIds.delete(t.id);
+    }
+    tbody.querySelectorAll(".trades-row-select").forEach(cb => { cb.checked = selectAllCb.checked; });
+    updateTradesBulkBar();
+  });
+  updateTradesBulkBar();
+}
+
+async function bulkDeleteTradeJournalEntries() {
+  const ids = [...tradesSelectedIds];
+  if (!ids.length) return;
+  const label = ids.length === 1 ? "den Journal-Eintrag des ausgewählten Trades" : `die Journal-Einträge der ${ids.length} ausgewählten Trades`;
+  if (!await confirmDelete(`Sollen ${label} wirklich gelöscht werden?`, false)) return;
+  await api("/api/journal/trade/bulk-delete", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ref_keys: ids.map(String) }),
+  });
+  tradesSelectedIds.clear();
+  await openTrades(state.tradesPage || 1);
 }
 
 async function openTrades(page = 1) {
@@ -1062,6 +1131,7 @@ async function openTrades(page = 1) {
   setActiveNav("trades");
 
   const content = await mountView("tpl-trades");
+  tradesSelectedIds.clear();
 
   await renderTagFilter();
 
@@ -1082,6 +1152,12 @@ async function openTrades(page = 1) {
     if (panel.hidden) renderTradeFieldOrderPanel();
     panel.hidden = !panel.hidden;
   };
+
+  document.getElementById("trades-bulk-clear").onclick = () => {
+    tradesSelectedIds.clear();
+    renderTradesTable();
+  };
+  document.getElementById("trades-bulk-delete-journal").onclick = () => bulkDeleteTradeJournalEntries();
 
   const totalPages = Math.max(1, Math.ceil(result.total / TRADES_PAGE_SIZE));
   const pagination = document.getElementById("trades-pagination");
@@ -1216,6 +1292,72 @@ document.addEventListener("keydown", (e) => {
   if (btn && !btn.disabled) btn.click();
 });
 
+/* Felder der Trade-Karte in der Tagesansicht (linke Spalte) - Reihenfolge per
+   Drag & Drop einstellbar, analog TRADE_CARD_FIELDS/tradeFieldOrder auf der
+   Trades-Uebersicht, aber eigene Feldliste (kein "Datum", dafuer "Kumuliert")
+   und eigener localStorage-Key, da die Spaltenmengen nicht identisch sind. */
+const DAY_TRADE_FIELDS = [
+  { key: "account", label: "Konto", render: (t, ctx) => t.account_id ? escapeHtml(ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto" },
+  { key: "entry_time", label: "Entry-Zeit", render: (t) => fmtTime(t.entry_time) },
+  { key: "exit_time", label: "Exit-Zeit", render: (t) => fmtTime(t.exit_time) },
+  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</span>` },
+  { key: "volume", label: "Größe", render: (t) => fmtVolume(t) },
+  { key: "entry_price", label: "Entry", render: (t) => fmtNum(t.entry_price) },
+  { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
+  { key: "exit_type", label: "Exit-Typ", render: (t) => t.exit_type || "–" },
+  { key: "points", label: "Punkte", render: (t) => `<span class="${cls(t.points)}">${fmtSigned(t.points, 2)}</span>` },
+  { key: "net_usd", label: "Netto $", render: (t) => `<span class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>` },
+  { key: "cumulative", label: "Kumuliert", render: (t, ctx) => `<span class="${ctx.cumClass}">${fmtSigned(ctx.cumVal)} $</span> ${ctx.hiLoBadge}` },
+  { key: "tags", label: "Tags", render: null },
+];
+const DAY_TRADE_FIELD_KEYS = DAY_TRADE_FIELDS.map(f => f.key);
+
+function loadDayTradeFieldOrder() {
+  const saved = JSON.parse(localStorage.getItem("dayTradeFieldOrder") || "null");
+  if (!Array.isArray(saved)) return [...DAY_TRADE_FIELD_KEYS];
+  const known = saved.filter(k => DAY_TRADE_FIELD_KEYS.includes(k));
+  for (const k of DAY_TRADE_FIELD_KEYS) if (!known.includes(k)) known.push(k);
+  return known;
+}
+function saveDayTradeFieldOrder(order) {
+  localStorage.setItem("dayTradeFieldOrder", JSON.stringify(order));
+}
+
+/* container-scoped statt ueber Ids: dieselbe Tagesansicht kann gleichzeitig
+   als Seite und im Modal existieren (siehe CLAUDE.md "Bewusste
+   Design-Entscheidungen"), globale Ids wuerden sich doppeln. */
+function renderDayTradeFieldOrderPanel(container, onReorder) {
+  const panel = container.querySelector(".day-trade-field-order-panel");
+  const order = loadDayTradeFieldOrder();
+  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren</div>`
+    + order.map(key => {
+      const field = DAY_TRADE_FIELDS.find(f => f.key === key);
+      return `<div class="trade-field-order-row" draggable="true" data-key="${key}">
+        <span class="trade-field-order-handle">⠿</span>${escapeHtml(field.label)}
+      </div>`;
+    }).join("");
+
+  let dragKey = null;
+  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
+    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const dragging = panel.querySelector(".dragging");
+      if (!dragging || dragging === row) return;
+      const rect = row.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
+      saveDayTradeFieldOrder(newOrder);
+      onReorder();
+    });
+  });
+}
+
 async function openDay(day) {
   state.view = "day";
   state.currentDay = day;
@@ -1225,11 +1367,18 @@ async function openDay(day) {
   await populateDay(content, day);
 }
 
-async function populateDay(container, day) {
+/* opts.tradeIndex: welcher Trade der Liste in der linken Spalte angezeigt wird -
+   bleibt beim Neuladen nach Bild-Upload/Loeschen moeglichst erhalten, statt
+   immer wieder beim ersten Trade des Tages zu landen. */
+async function populateDay(container, day, opts = {}) {
   container.querySelector(".day-title").textContent = fmtDate(day);
 
-  const data = await api(withFilter(`/api/days/${day}`));
+  const [data, accountOptions] = await Promise.all([
+    api(withFilter(`/api/days/${day}`)),
+    getAccountOptions(),
+  ]);
   const s = data.stats;
+  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
 
   container.querySelector(".day-stats").innerHTML =
     tile("Punkte", fmtSigned(s.total_points))
@@ -1239,117 +1388,63 @@ async function populateDay(container, day) {
     + tile("Tageshoch (kum.)", fmtSigned(s.highest_cum) + " $", "pos")
     + tile("Peak-to-Valley Drawdown", fmtSigned(s.max_drawdown) + " $");
 
-  const tbody = container.querySelector(".day-table tbody");
-  tbody.innerHTML = data.trades.length
-    ? ""
-    : `<tr><td colspan="14"><div class="empty-state">Keine Trades an diesem Tag.</div></td></tr>`;
   let cum = 0;
   const cumVals = data.trades.map(t => (cum += t.net_usd));
   const highIdx = cumVals.indexOf(Math.max(...cumVals));
   const lowIdx = cumVals.indexOf(Math.min(...cumVals));
 
-  state.selectedTradeIds = new Set();
-  const bulkBar = container.querySelector(".bulk-tag-bar");
-  const selectAllCb = container.querySelector(".day-table-select-all");
-  bulkBar.hidden = true;
-  selectAllCb.checked = false;
+  const emptyEl = container.querySelector(".day-trade-empty");
+  const bodyEl = container.querySelector(".day-trade-body");
+  const toggle = container.querySelector(".day-trade-field-order-toggle");
+  const panel = container.querySelector(".day-trade-field-order-panel");
 
-  function updateBulkBar() {
-    const n = state.selectedTradeIds.size;
-    bulkBar.hidden = n === 0;
-    container.querySelector(".bulk-tag-count").textContent = `${n} Trade(s) ausgewählt`;
+  if (!data.trades.length) {
+    emptyEl.hidden = false;
+    bodyEl.hidden = true;
+    toggle.hidden = true;
+  } else {
+    emptyEl.hidden = true;
+    bodyEl.hidden = false;
+    toggle.hidden = false;
+
+    let activeIndex = Math.min(Math.max(opts.tradeIndex || 0, 0), data.trades.length - 1);
+
+    function renderCard() {
+      const t = data.trades[activeIndex];
+      const i = activeIndex;
+      const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
+      const hiLoBadge = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
+      const ctx = { accountNames, cumVal: cumVals[i], cumClass, hiLoBadge };
+
+      container.querySelector(".day-trade-index").textContent = `Trade ${i + 1} von ${data.trades.length}`;
+      container.querySelector(".day-trade-prev").disabled = i === 0;
+      container.querySelector(".day-trade-next").disabled = i === data.trades.length - 1;
+
+      const order = loadDayTradeFieldOrder();
+      const fieldsEl = container.querySelector(".day-trade-fields");
+      fieldsEl.innerHTML = order.map(key => {
+        if (key === "tags") return `<div class="day-trade-field-row"><span class="label">Tags</span><span class="tag-cell day-trade-tag-cell"></span></div>`;
+        const field = DAY_TRADE_FIELDS.find(f => f.key === key);
+        return `<div class="day-trade-field-row"><span class="label">${escapeHtml(field.label)}</span><span class="value">${field.render(t, ctx)}</span></div>`;
+      }).join("");
+      const tagCell = fieldsEl.querySelector(".day-trade-tag-cell");
+      if (tagCell) renderTradeTagCell(tagCell, t);
+    }
+    renderCard();
+
+    // .onclick statt addEventListener: diese Buttons liegen ausserhalb des
+    // per renderCard() neu befuellten Bereichs und werden bei einem erneuten
+    // populateDay()-Aufruf auf demselben Container nicht neu erzeugt -
+    // addEventListener wuerde sich sonst bei jedem Aufruf stapeln.
+    container.querySelector(".day-trade-prev").onclick = () => { if (activeIndex > 0) { activeIndex--; renderCard(); } };
+    container.querySelector(".day-trade-next").onclick = () => { if (activeIndex < data.trades.length - 1) { activeIndex++; renderCard(); } };
+
+    toggle.onclick = (e) => {
+      e.stopPropagation();
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) renderDayTradeFieldOrderPanel(container, renderCard);
+    };
   }
-
-  data.trades.forEach((t, i) => {
-    const tr = document.createElement("tr");
-    const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
-    const hiLoBadge = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
-    tr.innerHTML = `
-      <td class="col-check"><input type="checkbox" class="row-select" data-id="${t.id}"></td>
-      <td>${fmtTime(t.entry_time)}</td>
-      <td>${fmtTime(t.exit_time)}</td>
-      <td class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</td>
-      <td>${fmtVolume(t)}</td>
-      <td>${fmtNum(t.entry_price)}</td>
-      <td>${fmtNum(t.exit_price)}</td>
-      <td>${t.exit_type || ""}</td>
-      <td class="${cls(t.points)}">${fmtSigned(t.points)}</td>
-      <td class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</td>
-      <td class="${cumClass}">${fmtSigned(cumVals[i])} $${hiLoBadge}</td>
-      <td class="tag-cell"></td>
-      <td><input class="row-note" data-id="${t.id}" value="${(t.notes || "").replace(/"/g, "&quot;")}" placeholder="Notiz…"></td>
-      <td class="image-cell"></td>
-      <td><button class="btn btn-danger row-delete" data-id="${t.id}">Löschen</button></td>
-    `;
-    tbody.appendChild(tr);
-
-    renderTradeTagCell(tr.querySelector(".tag-cell"), t);
-
-    tr.querySelector(".row-select").addEventListener("change", (e) => {
-      if (e.target.checked) state.selectedTradeIds.add(t.id);
-      else state.selectedTradeIds.delete(t.id);
-      selectAllCb.checked = state.selectedTradeIds.size === data.trades.length;
-      updateBulkBar();
-    });
-
-    const cell = tr.querySelector(".image-cell");
-    const tradeImages = (data.images || []).filter(im => im.trade_id === t.id);
-    tradeImages.forEach(img => cell.appendChild(imageThumbEl(img, "image-thumb-sm", () => populateDay(container, day))));
-    cell.appendChild(imageAddButton(day, t.id, container));
-
-    tr.querySelector(".row-delete").addEventListener("click", async () => {
-      if (!confirm("Trade wirklich löschen?")) return;
-      await api(`/api/trades/${t.id}`, { method: "DELETE" });
-
-      if (data.trades.length === 1) {
-        // letzter Trade des Tages - Tag existiert danach nicht mehr,
-        // GET /api/days/{day} liefert 404. Statt populateDay() erneut
-        // aufzurufen (wuerde dort abbrechen und die alte Zeile stehen
-        // lassen), die Ansicht verlassen, die es nicht mehr gibt.
-        if (container.closest("#modal-overlay")) {
-          closeModal();
-          if (state.view === "month") renderMonth();
-        } else {
-          openOverview();
-        }
-        return;
-      }
-
-      await populateDay(container, day);
-    });
-  });
-
-  // .onchange/.onclick statt addEventListener: diese Elemente liegen ausserhalb
-  // von tbody und werden bei einem erneuten populateDay()-Aufruf auf demselben
-  // Container (z.B. nach Bild-Upload) nicht neu erzeugt - addEventListener
-  // wuerde sich sonst bei jedem Aufruf einen weiteren Handler dazustapeln.
-  selectAllCb.onchange = () => {
-    const checked = selectAllCb.checked;
-    tbody.querySelectorAll(".row-select").forEach(cb => { cb.checked = checked; });
-    state.selectedTradeIds = new Set(checked ? data.trades.map(t => t.id) : []);
-    updateBulkBar();
-  };
-
-  const bulkSelect = container.querySelector(".bulk-tag-select");
-  const tagsForBulk = await getTags();
-  bulkSelect.innerHTML = groupedTagOptionsHtml(tagsForBulk);
-  container.querySelector(".bulk-tag-apply").onclick = async () => {
-    if (!bulkSelect.value || !state.selectedTradeIds.size) return;
-    await api("/api/trades/bulk-tag", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trade_ids: Array.from(state.selectedTradeIds), tag_id: parseInt(bulkSelect.value) }),
-    });
-    await populateDay(container, day);
-  };
-
-  tbody.querySelectorAll(".row-note").forEach(inp => {
-    inp.addEventListener("blur", async () => {
-      await api(`/api/trades/${inp.dataset.id}/notes`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: inp.value }),
-      });
-    });
-  });
 
   renderDayImages(container, day, data.images || []);
 
@@ -1936,24 +2031,6 @@ function imageThumbEl(img, sizeClass, onDeleted) {
   return div;
 }
 
-function imageAddButton(day, tradeId, container) {
-  const label = document.createElement("label");
-  label.className = "image-add";
-  label.textContent = "+";
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.hidden = true;
-  input.addEventListener("change", async () => {
-    const file = input.files[0];
-    if (!file) return;
-    await uploadImage(day, file, tradeId);
-    await populateDay(container, day);
-  });
-  label.appendChild(input);
-  return label;
-}
-
 async function uploadImage(day, file, tradeId) {
   const fd = new FormData();
   fd.append("file", file);
@@ -2245,6 +2322,10 @@ async function openDayModal(day) {
   body.innerHTML = "";
   body.appendChild(document.getElementById("tpl-day").content.cloneNode(true));
   overlay.classList.add("visible");
+  // Nach dem Schliessen die Monatsuebersicht neu laden, damit ein frisch
+  // angelegter/geaenderter Journal-Eintrag (oder ein geloeschtes Bild) sofort
+  // im Kalender-Icon auftaucht, ohne dass man selbst neu laden muss.
+  modalOnClose = () => { if (state.view === "month") renderMonth(); };
   await populateDay(body, day);
 }
 

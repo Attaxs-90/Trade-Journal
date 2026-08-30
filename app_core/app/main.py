@@ -479,12 +479,12 @@ def api_delete_journal(entry_type: str, ref_key: str):
     return {"ok": True}
 
 
-@app.post("/api/journal/day/bulk-delete")
-def api_bulk_delete_journal(payload: JournalBulkDelete):
+@app.post("/api/journal/{entry_type}/bulk-delete")
+def api_bulk_delete_journal(entry_type: str, payload: JournalBulkDelete):
     ref_keys = [k for k in payload.ref_keys if k]
     for k in ref_keys:
-        _check_journal_ref("day", k)
-    deleted = db.bulk_delete_journal_entries("day", ref_keys)
+        _check_journal_ref(entry_type, k)
+    deleted = db.bulk_delete_journal_entries(entry_type, ref_keys)
     return {"deleted": deleted}
 
 

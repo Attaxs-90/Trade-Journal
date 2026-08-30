@@ -220,6 +220,11 @@
         </div>
       </div>
       <div class="filter-list filter-list-inline" id="trades-tag-filter-list"></div>
+      <div class="journal-bulk-bar trades-bulk-bar" id="trades-bulk-bar" hidden>
+        <span class="journal-bulk-count" id="trades-bulk-count"></span>
+        <button type="button" class="btn btn-secondary" id="trades-bulk-clear">Auswahl aufheben</button>
+        <button type="button" class="btn btn-danger" id="trades-bulk-delete-journal">Journal-Einträge löschen</button>
+      </div>
       <div class="table-scroll">
         <table class="table trades-table">
           <thead><tr id="trades-thead-row"></tr></thead>
@@ -274,51 +279,58 @@
 </template>
 
 <template id="tpl-day">
-  <section class="view">
+  <section class="view view-day">
     <header class="view-header">
       <h1 class="day-title">Tag</h1>
     </header>
 
     <div class="stat-grid day-stats"></div>
 
-    <div class="card">
-      <div class="card-title">Trades</div>
-      <div class="bulk-tag-bar" hidden>
-        <span class="bulk-tag-count"></span>
-        <select class="bulk-tag-select"></select>
-        <button type="button" class="btn btn-secondary bulk-tag-apply">Tag zuweisen</button>
+    <div class="day-layout">
+      <div class="card day-trade-col">
+        <div class="card-title-row">
+          <div class="card-title">Trades</div>
+          <div class="card-title-actions">
+            <div class="inline-filter day-trade-field-order-filter">
+              <button type="button" class="inline-filter-toggle day-trade-field-order-toggle">Feldreihenfolge</button>
+              <div class="inline-filter-panel day-trade-field-order-panel" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="day-trade-empty empty-state" hidden>Keine Trades an diesem Tag.</div>
+
+        <div class="day-trade-body" hidden>
+          <div class="day-trade-nav">
+            <button type="button" class="btn btn-secondary trade-nav-btn day-trade-prev" title="Vorheriger Trade (Pfeiltaste links)">←</button>
+            <span class="day-trade-index"></span>
+            <button type="button" class="btn btn-secondary trade-nav-btn day-trade-next" title="Nächster Trade (Pfeiltaste rechts)">→</button>
+          </div>
+
+          <div class="day-trade-fields"></div>
+        </div>
       </div>
-      <div class="table-scroll">
-        <table class="table day-table">
-          <thead>
-            <tr>
-              <th class="col-check"><input type="checkbox" class="day-table-select-all"></th>
-              <th>Entry-Zeit</th><th>Exit-Zeit</th><th>Richtung</th><th>Größe</th><th>Entry</th>
-              <th>Exit</th><th>Exit-Typ</th><th>Punkte</th><th>Netto $</th><th>Kumuliert</th><th>Tags</th><th>Notiz</th><th>Bild</th><th>Löschen</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+
+      <div class="day-main-col">
+        <div class="card">
+          <div class="card-title">Beobachtungen</div>
+          <div class="obs-grid day-observations"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Bilder (Tag)</div>
+          <div class="image-strip day-images"></div>
+          <label class="btn btn-secondary image-upload-btn">
+            + Bild hinzufügen
+            <input type="file" accept="image/*" class="day-image-input" hidden>
+          </label>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Journal</div>
+          <div class="journal-editor-host day-journal"></div>
+        </div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Beobachtungen</div>
-      <div class="obs-grid day-observations"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Bilder (Tag)</div>
-      <div class="image-strip day-images"></div>
-      <label class="btn btn-secondary image-upload-btn">
-        + Bild hinzufügen
-        <input type="file" accept="image/*" class="day-image-input" hidden>
-      </label>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Journal</div>
-      <div class="journal-editor-host day-journal"></div>
     </div>
   </section>
 </template>
