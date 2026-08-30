@@ -361,12 +361,52 @@ function renderFontSettings() {
   }
 }
 
+/* Ein-/ausklappbare Karten der Einstellungen - Zustand je Karte (per
+   data-settings-card-Key) in localStorage gemerkt, analog zu Sidebar-/
+   Newsbar-Einklappzustand. Nur der jeweilige Body wird versteckt, die
+   Kopfzeile (Titel + Pfeil) bleibt immer sichtbar. */
+function loadSettingsCollapsedState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("settingsCollapsed") || "null");
+    return Array.isArray(saved) ? new Set(saved) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveSettingsCollapsedState(collapsedKeys) {
+  localStorage.setItem("settingsCollapsed", JSON.stringify([...collapsedKeys]));
+}
+function initSettingsCollapse(content) {
+  const collapsed = loadSettingsCollapsedState();
+  content.querySelectorAll(".settings-card").forEach(card => {
+    const key = card.dataset.settingsCard;
+    card.classList.toggle("collapsed", collapsed.has(key));
+    card.querySelector(".settings-card-header").addEventListener("click", () => {
+      const nowCollapsed = card.classList.toggle("collapsed");
+      if (nowCollapsed) collapsed.add(key); else collapsed.delete(key);
+      saveSettingsCollapsedState(collapsed);
+    });
+  });
+}
+/* Klappt eine einzelne Settings-Karte auf, falls sie eingeklappt ist (z.B.
+   bevor sie hervorgehoben/angesprungen wird) - sonst saehe der Nutzer den
+   Sprungziel-Inhalt trotz Hervorhebung nicht. */
+function expandSettingsCard(key) {
+  const card = document.querySelector(`.settings-card[data-settings-card="${key}"]`);
+  if (!card || !card.classList.contains("collapsed")) return;
+  card.classList.remove("collapsed");
+  const collapsed = loadSettingsCollapsedState();
+  collapsed.delete(key);
+  saveSettingsCollapsedState(collapsed);
+}
+
 async function openSettings() {
   state.view = "settings";
   state.currentDay = null;
   setActiveNav("settings");
 
   const content = await mountView("tpl-settings");
+  initSettingsCollapse(content);
   renderFontSettings();
   await renderSettingsAccountDelete();
   await renderTagsSettings();
@@ -380,6 +420,7 @@ async function goToJournalTemplateSettings() {
   await flushJournal();
   document.getElementById("modal-overlay").classList.remove("visible");
   await openSettings();
+  expandSettingsCard("journal-templates");
   const card = document.getElementById("journal-templates-card");
   // Kein card.scrollIntoView(): direkt nach dem innerHTML-Neuaufbau der Seite
   // ermittelt Chromium den scrollbaren Vorfahren manchmal falsch und scrollt

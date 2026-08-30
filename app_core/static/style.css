@@ -637,6 +637,37 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .modal-card:has(.view-day) { max-width: 1380px; }
 .modal-body .view-header h1 { font-size: 17px; }
 
+/* Settings - ein-/ausklappbare Karten: im eingeklappten Zustand bleibt nur
+   die Kopfzeile (Titel + Pfeil) sichtbar, der restliche Karteninhalt wird
+   komplett ausgeblendet statt nur optisch verkleinert - Vorbild sind die
+   bereits vorhandenen auf-/zuklappbaren Marktnews-Abschnitte
+   (.newsbar-section-toggle). Zustand je Karte in localStorage gemerkt. */
+.settings-card-header {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.settings-card-title { margin-bottom: 0; }
+.settings-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.settings-card-toggle svg { width: 14px; height: 14px; transition: transform 0.15s ease; }
+.settings-card-header:hover .settings-card-toggle { color: var(--text); }
+.settings-card.collapsed .settings-card-toggle svg { transform: rotate(-90deg); }
+.settings-card-body { margin-top: 14px; }
+.settings-card.collapsed .settings-card-body { display: none; }
+
 /* Settings - Font picker */
 .font-grid {
   display: grid;

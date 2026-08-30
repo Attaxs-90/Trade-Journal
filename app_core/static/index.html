@@ -507,53 +507,73 @@
       <h1>Einstellungen</h1>
     </header>
 
-    <div class="card">
-      <div class="card-title">Schriftart</div>
-      <div class="font-grid" id="font-grid"></div>
+    <div class="card settings-card" data-settings-card="font">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Schriftart</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="font-grid" id="font-grid"></div>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">Konto löschen</div>
-      <div class="account-form">
-        <select id="settings-account-select"></select>
-        <button type="button" class="btn btn-danger" id="settings-account-delete-btn">Konto löschen</button>
-      </div>
-      <div class="account-hint" id="settings-account-hint"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Tags</div>
-      <div class="account-hint">
-        Ordne Trades in der Tagesansicht per Tag-Symbol eigene Tags zu (z. B. Strategie oder Fehler)
-        und filtere später auf der Trades-Seite danach - mehrere gleichzeitig, wahlweise UND/ODER verknüpft.
-      </div>
-      <form class="tag-form" id="tag-form">
-        <input type="text" name="tag_group" id="tag-group-input" placeholder="Gruppe (optional, z. B. Strategie)" list="tag-group-options" autocomplete="off">
-        <datalist id="tag-group-options"></datalist>
-        <input type="text" name="name" id="tag-name-input" placeholder="Tag-Name (z. B. Winner)" autocomplete="off" required>
-        <div class="tag-color-row">
-          <div class="tag-swatch-row" id="tag-swatch-row"></div>
-          <input type="color" id="tag-color-input" value="#6c95ff" title="Eigene Farbe">
+    <div class="card settings-card" data-settings-card="account-delete">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Konto löschen</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-form">
+          <select id="settings-account-select"></select>
+          <button type="button" class="btn btn-danger" id="settings-account-delete-btn">Konto löschen</button>
         </div>
-        <button type="submit" class="btn btn-primary" id="tag-form-submit">Tag anlegen</button>
-        <button type="button" class="btn btn-secondary" id="tag-form-cancel" hidden>Abbrechen</button>
-      </form>
-      <div class="tag-list" id="tag-list"></div>
+        <div class="account-hint" id="settings-account-hint"></div>
+      </div>
     </div>
 
-    <div class="card" id="journal-templates-card">
-      <div class="card-title">Journal-Vorlagen</div>
-      <div class="account-hint">
-        Vorlagen fügst du im Journal mit einem Klick in den Eintrag ein. Bearbeite sie so,
-        dass sie zu deinem Ablauf passen – die Struktur ist der halbe Journal-Erfolg.
+    <div class="card settings-card" data-settings-card="tags">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Tags</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-hint">
+          Ordne Trades in der Tagesansicht per Tag-Symbol eigene Tags zu (z. B. Strategie oder Fehler)
+          und filtere später auf der Trades-Seite danach - mehrere gleichzeitig, wahlweise UND/ODER verknüpft.
+        </div>
+        <form class="tag-form" id="tag-form">
+          <input type="text" name="tag_group" id="tag-group-input" placeholder="Gruppe (optional, z. B. Strategie)" list="tag-group-options" autocomplete="off">
+          <datalist id="tag-group-options"></datalist>
+          <input type="text" name="name" id="tag-name-input" placeholder="Tag-Name (z. B. Winner)" autocomplete="off" required>
+          <div class="tag-color-row">
+            <div class="tag-swatch-row" id="tag-swatch-row"></div>
+            <input type="color" id="tag-color-input" value="#6c95ff" title="Eigene Farbe">
+          </div>
+          <button type="submit" class="btn btn-primary" id="tag-form-submit">Tag anlegen</button>
+          <button type="button" class="btn btn-secondary" id="tag-form-cancel" hidden>Abbrechen</button>
+        </form>
+        <div class="tag-list" id="tag-list"></div>
       </div>
-      <form class="tag-form" id="journal-tpl-form">
-        <input type="text" id="journal-tpl-name" placeholder="Name (z. B. Pre-Session)" required>
-        <button type="submit" class="btn btn-primary" id="journal-tpl-submit">Vorlage anlegen</button>
-        <button type="button" class="btn btn-secondary" id="journal-tpl-cancel" hidden>Abbrechen</button>
-      </form>
-      <div class="journal-tpl-editor-host" id="journal-tpl-editor"></div>
-      <div class="tag-list" id="journal-tpl-list"></div>
+    </div>
+
+    <div class="card settings-card" id="journal-templates-card" data-settings-card="journal-templates">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Journal-Vorlagen</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-hint">
+          Vorlagen fügst du im Journal mit einem Klick in den Eintrag ein. Bearbeite sie so,
+          dass sie zu deinem Ablauf passen – die Struktur ist der halbe Journal-Erfolg.
+        </div>
+        <form class="tag-form" id="journal-tpl-form">
+          <input type="text" id="journal-tpl-name" placeholder="Name (z. B. Pre-Session)" required>
+          <button type="submit" class="btn btn-primary" id="journal-tpl-submit">Vorlage anlegen</button>
+          <button type="button" class="btn btn-secondary" id="journal-tpl-cancel" hidden>Abbrechen</button>
+        </form>
+        <div class="journal-tpl-editor-host" id="journal-tpl-editor"></div>
+        <div class="tag-list" id="journal-tpl-list"></div>
+      </div>
     </div>
   </section>
 </template>
