@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.6.0
+- Journal neu strukturiert: das Tagebuch öffnet jetzt auf einer Jahr/Monat-
+  Kachel-Übersicht (Eintragsanzahl, Ø-Bewertung, Netto-Ergebnis, Hinweis auf
+  Handelstage ohne Eintrag je Monat) statt einer endlosen Liste, mit
+  Jahres-Sprungleiste und Breadcrumb-Rücksprung. Suche/Tag-/Modus-Filter
+  wirken weiterhin global über alle Jahre und weichen automatisch in eine
+  flache Ergebnisliste aus.
+- Neuer Bereich "Notizbücher" (zweiter Reiter auf der Journal-Seite): frei
+  verschachtelbare Ordner und Notizen ohne Kalenderbezug, für Beobachtungen,
+  Strategie, Unterlagen, Logins o. Ä. Jede Notiz hat einen eigenen
+  Rich-Text-Editor inkl. Bild-Einfügen. Ordner/Notizen lassen sich umbenennen,
+  per Dialog oder direkt per Drag & Drop verschieben (auch auf die oberste
+  Ebene) und samt Inhalt löschen; Zyklen (ein Ordner in sich selbst oder einen
+  eigenen Unterordner) sind ausgeschlossen.
+- Fix: Journal- bzw. Notizbuch-Einträge, die nur ein eingefügtes Bild ohne
+  Text enthielten, wurden beim Speichern verworfen.
+
 ## 1.5.0
 - Neuer Menüpunkt "Auswertungen": frei zusammenstellbares Dashboard mit
   Equity-Kurve & Drawdown, Kern-Kennzahlen, Serien/Konsistenz-Übersicht,
