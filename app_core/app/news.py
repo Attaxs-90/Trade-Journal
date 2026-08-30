@@ -37,6 +37,51 @@ EVENT_TYPE_KEYWORDS: dict[str, list[str]] = {
 _cache: dict = {"fetched_at": None, "events": []}
 _CACHE_TTL = timedelta(minutes=15)
 
+# FTMO erlaubt keinen Trade (auch keine SL/TP-Ausfuehrung) 2 Minuten vor/nach
+# diesen Events (https://ftmo.com/en/faq/can-i-trade-news/). FTMO hat dafuer
+# keine eigene API - die eigene Kalenderseite (ftmo.com/en/calendar) laedt die
+# Restricted-Markierung erst per JavaScript nach und ist per einfachem
+# HTTP-Request (wie hier) nicht auslesbar. Die Titel unten sind deshalb per
+# Stichprobe aus dem live gerenderten FTMO-Kalender abgeschrieben (mehrere
+# Wochen, Stand 08/2026) - exaktes Titel-Matching (nicht Substring), weil z.B.
+# "ADP Non-Farm Employment Change" NICHT restricted ist, "Non-Farm Employment
+# Change" aber schon. Faellt die FTMO-Kennzeichnung mal weg oder aendert sich
+# der Feed-Titel leicht, matcht dieser Eintrag nicht mehr - kein Ersatz fuer
+# einen Blick in FTMOs eigenen Kalender vor dem Trade.
+FTMO_RESTRICTED_CONFIRMED: dict[str, list[str]] = {
+    "USD": ["Non-Farm Employment Change"],
+    "CAD": ["BOC Rate Statement", "Overnight Rate", "Employment Change", "Unemployment Rate"],
+    "NZD": ["Official Cash Rate", "RBNZ Monetary Policy Statement", "RBNZ Rate Statement",
+            "Employment Change q/q", "Unemployment Rate", "Labor Cost Index q/q"],
+    "AUD": ["GDP q/q"],
+}
+FTMO_RESTRICTED_ALWAYS = ["Crude Oil Inventories"]
+
+# Laut FTMO-FAQ ebenfalls restricted, aber in den geprueften Wochen kam keine
+# passende Sitzung/Veroeffentlichung vor (Notenbanksitzungen sind selten) -
+# deshalb nicht live bestaetigt. Vorsicht: die FAQ war an anderer Stelle nicht
+# wortwoertlich zutreffend (z.B. AUD CPI und USD "Unemployment Rate & Wages"
+# sind laut Live-Kalender NICHT restricted, obwohl die FAQ das nahelegt) -
+# diese Liste kann also zu weit gefasst sein.
+FTMO_RESTRICTED_UNVERIFIED: dict[str, list[str]] = {
+    "USD": ["Federal Funds Rate", "FOMC Statement", "CPI y/y", "Advance GDP q/q", "FOMC Meeting Minutes"],
+    "EUR": ["Main Refinancing Rate"],
+    "GBP": ["Official Bank Rate", "MPC Votes", "CPI y/y"],
+    "CHF": ["SNB Policy Rate"],
+}
+
+
+def _ftmo_status(currency: str, title: str) -> str | None:
+    """None = kein restricted Event. 'confirmed' = live im FTMO-Kalender
+    beobachtet. 'unverified' = nur laut FTMO-FAQ, nicht live bestaetigt."""
+    if title in FTMO_RESTRICTED_ALWAYS:
+        return "confirmed"
+    if title in FTMO_RESTRICTED_CONFIRMED.get(currency, ()):
+        return "confirmed"
+    if title in FTMO_RESTRICTED_UNVERIFIED.get(currency, ()):
+        return "unverified"
+    return None
+
 
 def _categorize(title: str) -> str:
     # Wortgrenzen-Suche statt reinem Substring-Check - sonst matcht z.B. das
@@ -66,15 +111,17 @@ def _parse_event(raw: dict) -> dict | None:
         dt = dt.replace(tzinfo=timezone.utc)
     dt_local = dt.astimezone()
 
+    currency = raw.get("country") or ""
     return dict(
         title=title,
-        currency=raw.get("country") or "",
+        currency=currency,
         time=dt.isoformat(),
         impact=raw.get("impact") or "Low",
         forecast=raw.get("forecast") or "",
         previous=raw.get("previous") or "",
         event_type=_categorize(title),
         ff_url=_ff_day_url(dt_local),
+        ftmo_status=_ftmo_status(currency, title),
     )
 
 

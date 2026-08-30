@@ -1121,6 +1121,8 @@ html[data-newsbar="collapsed"] .app .newsbar-icon:hover { background: var(--bg-h
 .newsbar-icon svg { width: 17px; height: 17px; }
 .newsbar-title { font-weight: 600; font-size: 13px; white-space: nowrap; }
 html[data-newsbar="collapsed"] .app .newsbar-title { display: none; }
+.newsbar-icon-alert { display: none; font-size: 12px; line-height: 1; cursor: help; }
+html[data-newsbar="collapsed"] .app .newsbar-icon-alert:not([hidden]) { display: block; }
 html[data-newsbar="collapsed"] .app .newsbar-header {
   flex-direction: column;
   justify-content: center;
@@ -1239,6 +1241,8 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   line-height: 1.3;
 }
 .news-row:hover { background: var(--bg-hover); }
+.news-row-ftmo-highlight { background: color-mix(in srgb, var(--red) 14%, transparent); }
+.news-row-ftmo-highlight:hover { background: color-mix(in srgb, var(--red) 22%, transparent); }
 .news-row-line1 {
   display: flex;
   align-items: center;
@@ -1255,6 +1259,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   white-space: nowrap;
   min-width: 0;
 }
+.news-row-ftmo { flex-shrink: 0; font-size: 11px; cursor: help; }
 
 /* ---------- Journal ---------- */
 

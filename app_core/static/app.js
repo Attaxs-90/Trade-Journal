@@ -2484,6 +2484,8 @@ const newsFilterState = {
   impact: new Set(NEWS_IMPACT_LEVELS.map(l => l.key)),
   currency: new Set(NEWS_CURRENCIES),
   type: new Set(NEWS_EVENT_TYPES),
+  ftmo: new Set(["on"]),
+  ftmoHighlight: new Set(["on"]),
 };
 let newsEvents = [];
 let newsLoadFailed = false;
@@ -2495,12 +2497,15 @@ function loadNewsFilterState() {
       if (Array.isArray(saved.impact)) newsFilterState.impact = new Set(saved.impact);
       if (Array.isArray(saved.currency)) newsFilterState.currency = new Set(saved.currency);
       if (Array.isArray(saved.type)) newsFilterState.type = new Set(saved.type);
+      if (Array.isArray(saved.ftmo)) newsFilterState.ftmo = new Set(saved.ftmo);
+      if (Array.isArray(saved.ftmoHighlight)) newsFilterState.ftmoHighlight = new Set(saved.ftmoHighlight);
     }
   } catch (e) { /* ignore */ }
 }
 function saveNewsFilterState() {
   localStorage.setItem("newsCalendarFilter", JSON.stringify({
     impact: [...newsFilterState.impact], currency: [...newsFilterState.currency], type: [...newsFilterState.type],
+    ftmo: [...newsFilterState.ftmo], ftmoHighlight: [...newsFilterState.ftmoHighlight],
   }));
 }
 
@@ -2532,6 +2537,12 @@ function renderNewsFilters() {
     <button type="button" class="newsbar-chip${newsFilterState.currency.has(c) ? " active" : ""}" data-group="currency" data-key="${c}">${c}</button>
   `).join("");
 
+  const ftmoWrap = document.getElementById("newsbar-filter-ftmo");
+  ftmoWrap.innerHTML = `
+    <button type="button" class="newsbar-chip${newsFilterState.ftmo.has("on") ? " active" : ""}" data-group="ftmo" data-key="on" title="FTMO Restricted Events (2 Min. vor/nach kein Trade erlaubt) anzeigen/ausblenden">❗ FTMO News</button>
+    <button type="button" class="newsbar-chip${newsFilterState.ftmoHighlight.has("on") ? " active" : ""}" data-group="ftmoHighlight" data-key="on" title="FTMO Restricted Events rot hinterlegen">Rot hervorheben</button>
+  `;
+
   document.querySelectorAll("#newsbar-filter-panel .newsbar-chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const group = chip.dataset.group, key = chip.dataset.key;
@@ -2555,24 +2566,34 @@ function renderNewsFilters() {
   });
 }
 
-function newsRowHtml(e) {
+function ftmoMarkerHtml(e) {
+  if (!e.ftmo_status) return "";
+  const hint = e.ftmo_status === "unverified"
+    ? "FTMO Restricted Event (laut FTMO-FAQ, nicht live verifiziert) - 2 Min. vor/nach kein Trade"
+    : "FTMO Restricted Event - 2 Min. vor/nach kein Trade";
+  return `<span class="news-row-ftmo" title="${escapeHtml(hint)}">❗</span>`;
+}
+
+function newsRowHtml(e, showFtmo) {
   const dt = new Date(e.time);
   const weekday = dt.toLocaleDateString("de-DE", { weekday: "short" });
   const time = dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const highlight = showFtmo && e.ftmo_status && newsFilterState.ftmoHighlight.has("on");
   return `
-    <a class="news-row" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
+    <a class="news-row${highlight ? " news-row-ftmo-highlight" : ""}" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
       <div class="news-row-line1">
         <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
         <span class="news-row-time">${weekday} ${time}</span>
         <span class="news-row-currency">${escapeHtml(e.currency)}</span>
         <span class="news-row-title">${escapeHtml(e.title)}</span>
+        ${showFtmo ? ftmoMarkerHtml(e) : ""}
       </div>
     </a>`;
 }
 
-function fillNewsList(elId, events, emptyMsg) {
+function fillNewsList(elId, events, emptyMsg, showFtmo = false) {
   const el = document.getElementById(elId);
-  el.innerHTML = events.length ? events.map(newsRowHtml).join("") : `<div class="empty-state">${emptyMsg}</div>`;
+  el.innerHTML = events.length ? events.map(e => newsRowHtml(e, showFtmo)).join("") : `<div class="empty-state">${emptyMsg}</div>`;
 }
 
 function renderNewsSections() {
@@ -2590,7 +2611,8 @@ function renderNewsSections() {
   const nextSaturday0 = new Date(nextMonday0); nextSaturday0.setDate(nextSaturday0.getDate() + 5);
 
   const filtered = newsEvents.filter(e =>
-    newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type)
+    newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type) &&
+    (newsFilterState.ftmo.has("on") || !e.ftmo_status)
   );
 
   const week = [], nextWeek = [], hot = [], history = [];
@@ -2607,9 +2629,18 @@ function renderNewsSections() {
   hot.sort((a, b) => new Date(b.time) - new Date(a.time));
   history.sort((a, b) => new Date(b.time) - new Date(a.time));
 
+  // Unabhaengig von allen Filtern (auch dem FTMO-Sichtbarkeits-Filter) - der
+  // Zweck ist eine Erinnerung im eingeklappten Zustand, die nicht durch eine
+  // enge Filterauswahl verschwinden darf. Deckt diese UND naechste Woche ab.
+  const weekHasFtmo = newsEvents.some(e => {
+    const day0 = startOfDay(new Date(e.time));
+    return ((day0 >= monday0 && day0 < saturday0) || (day0 >= nextMonday0 && day0 < nextSaturday0)) && e.ftmo_status;
+  });
+  document.getElementById("newsbar-icon-alert").hidden = !weekHasFtmo;
+
   const emptyMsg = newsLoadFailed && !newsEvents.length ? "Kalender aktuell nicht erreichbar." : "Keine Termine.";
-  fillNewsList("news-upcoming", week, emptyMsg);
-  fillNewsList("news-nextweek", nextWeek, emptyMsg);
+  fillNewsList("news-upcoming", week, emptyMsg, true);
+  fillNewsList("news-nextweek", nextWeek, emptyMsg, true);
   fillNewsList("news-hot", hot.slice(0, 30), emptyMsg);
   fillNewsList("news-history", history.slice(0, 60), emptyMsg);
 }
