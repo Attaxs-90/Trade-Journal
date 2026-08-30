@@ -1553,6 +1553,9 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   width: max-content; min-width: 100%;
 }
 .nb-row-main:hover { background: var(--bg-hover); }
+.nb-row-main.nb-dragging { opacity: 0.4; }
+.nb-row-main.nb-drop-target { background: var(--accent-fill); outline: 2px dashed var(--accent); outline-offset: -2px; }
+.notebook-tree.nb-drop-target-root { outline: 2px dashed var(--accent); outline-offset: -2px; border-radius: 8px; }
 .nb-row-main:hover .nb-row-actions { opacity: 1; }
 .nb-toggle {
   all: unset; cursor: pointer; width: 16px; height: 16px; flex-shrink: 0; display: flex;

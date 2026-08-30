@@ -2319,6 +2319,31 @@ async function openJournal() {
   });
   document.getElementById("nb-add-folder-btn").addEventListener("click", () => notebookCreateDirect(null, "folder"));
   document.getElementById("nb-add-note-btn").addEventListener("click", () => notebookCreateDirect(null, "note"));
+
+  // Drop auf den freien Bereich der Baum-Palette (nicht auf einer Zeile) -
+  // loest den gezogenen Knoten auf die oberste Ebene. Einmalig hier verdrahtet
+  // statt in renderNotebookTree(), weil das Baum-Element selbst bei jedem
+  // Rerender erhalten bleibt (nur innerHTML wird geleert) und sonst bei jedem
+  // Aufruf ein weiterer Listener dazukaeme.
+  const notebookTreeEl = document.getElementById("notebook-tree");
+  notebookTreeEl.addEventListener("dragover", (e) => {
+    if (!nbDrag) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    notebookTreeEl.classList.add("nb-drop-target-root");
+  });
+  notebookTreeEl.addEventListener("dragleave", (e) => {
+    if (e.target === notebookTreeEl) notebookTreeEl.classList.remove("nb-drop-target-root");
+  });
+  notebookTreeEl.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    notebookTreeEl.classList.remove("nb-drop-target-root");
+    if (!nbDrag) return;
+    const draggedId = nbDrag.id;
+    nbDrag = null;
+    await notebookMoveTo(draggedId, null);
+  });
+
   await switchJournalTab(state.journalTab, true);
 }
 
@@ -2482,6 +2507,7 @@ function notebookRowEl(node, depth, byParent) {
     if (isFolder) toggleNotebookFolder(node.id);
     else selectNotebookNote(node.id);
   });
+  wireNotebookDragAndDrop(main, node, isFolder);
   wrap.appendChild(main);
 
   if (isFolder && expanded) {
@@ -2493,6 +2519,78 @@ function notebookRowEl(node, depth, byParent) {
     wrap.appendChild(childWrap);
   }
   return wrap;
+}
+
+/* Haelt den gerade gezogenen Knoten fest, waehrend eine Drag&Drop-Operation
+   laeuft - null ausserhalb einer Operation. excludeIds (der Knoten selbst
+   plus bei einem Ordner alle Nachfahren) verhindert schon waehrend des
+   Ziehens optisch ungueltige Ziele, statt erst nach dem Drop einen
+   Server-Fehler anzuzeigen. */
+let nbDrag = null;
+
+function wireNotebookDragAndDrop(main, node, isFolder) {
+  main.draggable = true;
+  main.addEventListener("dragstart", (e) => {
+    e.stopPropagation();
+    nbDrag = { id: node.id, excludeIds: new Set([node.id]) };
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(node.id));
+    main.classList.add("nb-dragging");
+    if (isFolder) {
+      fetchNotebookNodes().then(nodes => {
+        for (const id of notebookDescendantIds(nodes, node.id)) nbDrag?.excludeIds.add(id);
+      });
+    }
+  });
+  main.addEventListener("dragend", () => {
+    main.classList.remove("nb-dragging");
+    document.querySelectorAll(".nb-drop-target").forEach(el => el.classList.remove("nb-drop-target"));
+    nbDrag = null;
+  });
+
+  if (isFolder) {
+    main.addEventListener("dragover", (e) => {
+      // stopPropagation immer, auch bei ungueltigem Ziel - sonst blubbert
+      // das Ereignis zum Baum-Root-Drop-Handler hoch und der wuerde einen
+      // eigentlich abgelehnten Drop faelschlich als "auf oberste Ebene
+      // verschieben" werten.
+      e.stopPropagation();
+      if (!nbDrag || nbDrag.excludeIds.has(node.id)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      main.classList.add("nb-drop-target");
+    });
+    main.addEventListener("dragleave", (e) => { e.stopPropagation(); main.classList.remove("nb-drop-target"); });
+    main.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      main.classList.remove("nb-drop-target");
+      if (!nbDrag || nbDrag.excludeIds.has(node.id)) return;
+      const draggedId = nbDrag.id;
+      nbDrag = null;
+      if (draggedId === node.id) return;
+      await notebookMoveTo(draggedId, node.id);
+    });
+  } else {
+    // Notizen koennen keine Kinder enthalten - Drop hier ablehnen, aber
+    // stoppen, damit es nicht als Drop auf die oberste Ebene durchschlaegt.
+    main.addEventListener("dragover", (e) => e.stopPropagation());
+    main.addEventListener("drop", (e) => { e.preventDefault(); e.stopPropagation(); });
+  }
+}
+
+async function notebookMoveTo(draggedId, targetParentId) {
+  try {
+    await api(`/api/notebooks/${draggedId}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: targetParentId }),
+    });
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  if (targetParentId !== null) { state.notebookExpanded.add(targetParentId); saveNotebookExpandedState(); }
+  await renderNotebookTree();
 }
 
 function toggleNotebookFolder(folderId) {
@@ -2619,17 +2717,7 @@ async function notebookMoveFlow(node) {
   }
   const targetId = await pickNotebookParentDialog(nodes, excludeIds, node.parent_id);
   if (targetId === undefined || targetId === node.parent_id) return;
-  try {
-    await api(`/api/notebooks/${node.id}/move`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ parent_id: targetId }),
-    });
-  } catch (e) {
-    alert(e.message);
-    return;
-  }
-  if (targetId !== null) { state.notebookExpanded.add(targetId); saveNotebookExpandedState(); }
-  await renderNotebookTree();
+  await notebookMoveTo(node.id, targetId);
 }
 
 async function notebookDeleteFlow(node) {
