@@ -2815,7 +2815,41 @@ async function renderImportAccountSelect() {
 }
 /* ---------- Nav ---------- */
 
+/* Reihenfolge der Sidebar-Menuepunkte per Drag & Drop einstellbar, in
+   localStorage gespeichert - gleiches Muster wie die Feldreihenfolge der
+   Trades-Uebersicht (bekannte Keys aus gespeicherter Reihenfolge uebernehmen,
+   neue/entfernte Keys ergaenzen/rausfiltern, damit ein spaeter hinzugekommener
+   Menuepunkt fuer Bestandsnutzer nicht verschwindet). */
+function applyNavOrder() {
+  const nav = document.querySelector(".nav");
+  const items = [...nav.querySelectorAll(".nav-item")];
+  const knownViews = items.map(el => el.dataset.view);
+  const saved = JSON.parse(localStorage.getItem("navOrder") || "null");
+  if (!Array.isArray(saved)) return;
+  const order = saved.filter(v => knownViews.includes(v));
+  for (const v of knownViews) if (!order.includes(v)) order.push(v);
+  for (const view of order) {
+    const el = items.find(e => e.dataset.view === view);
+    if (el) nav.appendChild(el);
+  }
+}
+function saveNavOrder() {
+  const order = [...document.querySelectorAll(".nav-item")].map(el => el.dataset.view);
+  localStorage.setItem("navOrder", JSON.stringify(order));
+}
+applyNavOrder();
+
 document.querySelectorAll(".nav-item").forEach(el => {
+  // .nav-item ist bewusst ein <div role="button"> statt <button> - draggable="true"
+  // auf einem echten <button> feuert in Chromium kein dragstart (die Buttons
+  // eigene Press-Behandlung schluckt die Maus-Geste), auf einem <div> geht es
+  // zuverlaessig. Dafuer fehlt die native Tastatur-Aktivierung, deshalb hier
+  // explizit per Enter/Leertaste nachgebaut.
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    el.click();
+  });
   el.addEventListener("click", async () => {
     // Erst den Journal-Editor leeren, dann wechseln - sonst geht der zuletzt
     // getippte, noch nicht automatisch gespeicherte Absatz verloren.
@@ -2828,6 +2862,17 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "backtesting") openBacktesting();
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
+  });
+  el.addEventListener("dragstart", () => el.classList.add("dragging"));
+  el.addEventListener("dragend", () => { el.classList.remove("dragging"); saveNavOrder(); });
+  el.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    const nav = document.querySelector(".nav");
+    const dragging = nav.querySelector(".dragging");
+    if (!dragging || dragging === el) return;
+    const rect = el.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    nav.insertBefore(dragging, before ? el : el.nextSibling);
   });
 });
 

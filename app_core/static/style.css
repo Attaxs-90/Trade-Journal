@@ -180,9 +180,16 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+  /* Ohne das wuerde ein Drag, der ueber dem Label-Text startet, als
+     Textauswahl statt als Element-Drag interpretiert - gleiche Ursache wie
+     bei .trade-field-order-row. */
+  user-select: none;
+  -webkit-user-drag: element;
 }
+.nav-item .nav-icon svg { -webkit-user-drag: none; pointer-events: none; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .nav-item.active { background: var(--bg-hover); color: var(--text); }
+.nav-item.dragging { opacity: 0.4; }
 .nav-icon {
   display: flex;
   align-items: center;
@@ -855,7 +862,10 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   display: inline-block;
 }
 .tag-filter-all-chip:hover { border-color: var(--text-faint); }
-.tag-filter-all-chip.active { background: var(--accent-fill); border-color: var(--accent); color: var(--accent); }
+/* "Alle Tags" ist der Standardzustand (kein Filter aktiv), keine echte
+   Auswahl wie ein angeklickter Tag-Chip - deshalb bewusst kein Blau, sonst
+   wirkt die Seite staendig "wie ausgewaehlt" statt neutral. */
+.tag-filter-all-chip.active { color: var(--text); font-weight: 700; }
 
 .tag-filter-group { margin-bottom: 10px; }
 .tag-filter-group:last-child { margin-bottom: 0; }
@@ -1300,8 +1310,11 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   display: flex; flex-direction: column; gap: 4px;
 }
 .journal-bulk-bar {
-  display: flex; align-items: center; gap: 8px; background: var(--accent-fill);
-  border: 1px solid var(--accent); border-radius: 8px; padding: 7px 10px;
+  /* Neutral statt blau: die Auswahlleiste zeigt selbst schon per Zaehler und
+     Buttons an, dass eine Auswahl aktiv ist - keine zusaetzliche Akzentfarbe
+     noetig, sonst faellt sie aus dem sonst neutralen Seitenstil heraus. */
+  display: flex; align-items: center; gap: 8px; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
 }
 .journal-bulk-count { font-size: 12.5px; color: var(--text); font-weight: 600; flex: 1; }
 .journal-item:hover { background: var(--bg-hover); }
