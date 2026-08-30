@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.0
+- Neuer Menüpunkt "Auswertungen": frei zusammenstellbares Dashboard mit
+  Equity-Kurve & Drawdown, Kern-Kennzahlen, Serien/Konsistenz-Übersicht,
+  P&L-Verteilung und beliebig kombinierbaren Balkendiagrammen (Wochentag,
+  Uhrzeit, Instrument, Richtung, Haltedauer, Positionsgröße, Tagesbewertung,
+  Verfassung, Plan befolgt, Konto, Tag). Jede Auswertung lässt sich
+  hinzufügen, bearbeiten und entfernen, mit eigenem Konten-/Tag-/
+  Zeitraum-Filter.
+- Einstellungen: alle Karten (Schriftart, Konto löschen, Tags,
+  Journal-Vorlagen) lassen sich einzeln ein-/ausklappen.
+- Übersicht: Konten-Filter der Equity-Kurve jetzt als direkt klickbare Chips
+  statt hinter einem Dropdown versteckt; neuer Status-Bereich unten in der
+  Sidebar zeigt den aktiven Konten-Filter auf jeder Seite und führt per Klick
+  zurück zur Übersicht.
+- Barrierefreiheit: durchgängig sichtbarer Fokusring für Tastaturnavigation,
+  aria-Label für alle Icon-Buttons, Theme-Umschalter als SVG-Icon statt
+  Emoji, größere Klickflächen für kleine Icon-Buttons.
+
 ## 1.4.0
 - Tagesansicht neu gestaltet: Trades stehen als linke Spalte mit Feldern
   untereinander statt als Tabelle, Reihenfolge per Drag & Drop einstellbar,
