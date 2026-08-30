@@ -161,8 +161,6 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
 .brand-icon-btn svg { width: 16px; height: 16px; }
 .brand-icon-btn:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
 
-.theme-toggle { font-size: 14px; }
-
 .sync-btn.syncing svg { animation: brand-icon-spin 0.9s linear infinite; }
 @keyframes brand-icon-spin { to { transform: rotate(360deg); } }
 
@@ -258,7 +256,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   all: unset;
   cursor: pointer;
   padding: 2px 7px;
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.3px;
   color: var(--text-faint);
@@ -417,7 +415,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .table .dir-short { color: var(--red); }
 .table .cum-high { color: var(--green); font-weight: 700; }
 .table .cum-low { color: var(--red); font-weight: 700; }
-.table .badge-tag { font-size: 10px; font-family: var(--font-sans); color: var(--text-faint); margin-left: 6px; }
+.table .badge-tag { font-size: 11.5px; font-family: var(--font-sans); color: var(--text-faint); margin-left: 6px; }
 .table input.row-note {
   all: unset;
   width: 140px;
@@ -574,7 +572,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .month-cell.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.25); }
 .month-cell .cell-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
 .month-cell .cell-net { font-family: var(--font-mono); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
-.month-cell .cell-count { font-size: 10.5px; color: var(--text-faint); }
+.month-cell .cell-count { font-size: 11.5px; color: var(--text-faint); }
 
 /* Ruhige Pastellflaeche statt kraeftig-satter Farbe - Zahl bleibt der
    Blickfang (dunkle/kraeftige Akzentfarbe, fett), Hintergrund liefert nur
@@ -843,7 +841,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   margin-right: -1px;
   border-right: 1px solid currentColor;
   text-transform: uppercase;
-  font-size: 9.5px;
+  font-size: 11px;
   letter-spacing: 0.3px;
 }
 
@@ -870,7 +868,7 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .tag-filter-group { margin-bottom: 10px; }
 .tag-filter-group:last-child { margin-bottom: 0; }
 .tag-filter-group-title {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-faint);
@@ -900,8 +898,8 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 .tag-add-btn {
   all: unset;
   cursor: pointer;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px dashed var(--border);
   color: var(--text-faint);
@@ -1118,8 +1116,8 @@ html[data-newsbar="collapsed"] .app .newsbar { width: 44px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
   color: var(--text-dim);
   cursor: pointer;
@@ -1141,8 +1139,8 @@ html[data-newsbar="collapsed"] .app .newsbar-header {
 .newsbar-filter-btn, .newsbar-collapse-btn {
   all: unset;
   cursor: pointer;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
   border-radius: 6px;
   display: flex;
@@ -1170,7 +1168,7 @@ html[data-newsbar="collapsed"] .app .newsbar-collapse-btn svg { transform: rotat
 html[data-newsbar="collapsed"] .app .newsbar-filter-panel,
 .newsbar-filter-panel[hidden] { display: none; }
 .newsbar-filter-group-title {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-faint);
@@ -1215,7 +1213,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 
 .newsbar-section { padding: 8px 12px 2px; }
 .newsbar-section-title {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-faint);
@@ -1225,8 +1223,8 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .newsbar-section-toggle {
   all: unset;
   cursor: pointer;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1259,7 +1257,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 }
 .news-row-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .news-row-time { font-size: 11px; font-weight: 700; color: var(--text); font-family: var(--font-mono); flex-shrink: 0; }
-.news-row-currency { font-size: 10px; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+.news-row-currency { font-size: 11px; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
 .news-row-title {
   color: var(--text);
   overflow: hidden;
@@ -1515,4 +1513,86 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 }
 .day-trade-field-row .label { color: var(--text-dim); }
 .day-trade-field-row .value { font-weight: 500; text-align: right; }
+
+/* ---------- Auswertungen ---------- */
+/* Eigene Seite braucht mehr Breite als die 1100px der uebrigen Ansichten,
+   damit zwei normale Widgets nebeneinander plus ein breites (Equity/Verteilung)
+   Platz haben, ohne sofort auf eine Spalte umzubrechen. */
+.view.view-analytics { max-width: 1560px; }
+
+/* Deutlich mehr Kopfzeilen-Aktionen als bei anderen Views (Konten-/Tag-Filter,
+   Zeitraum, "+ Auswertung") - .view-header selbst umbricht sonst nicht, das
+   wuerde bei schmalerem Fenster ueber den Content-Rand hinaus schieben. */
+.view-analytics .view-header { flex-wrap: wrap; row-gap: 10px; }
+.analytics-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.analytics-range { display: flex; align-items: center; gap: 6px; }
+.analytics-range input[type="date"] {
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 6px 8px; font-family: var(--font-sans); font-size: 12.5px;
+}
+.analytics-range-sep { color: var(--text-faint); font-size: 12px; }
+/* :not([hidden]) statt display:flex direkt auf der Klasse - sonst gewinnt
+   diese Autoren-Regel gegen die UA-Regel "[hidden] { display: none }" (beide
+   gleich spezifisch, aber Autoren-CSS schlaegt UA-CSS immer), das Panel
+   bliebe trotz hidden-Attribut sichtbar. */
+.analytics-tag-panel { width: 280px; }
+.analytics-tag-panel:not([hidden]) { display: flex; flex-direction: column; gap: 8px; }
+
+/* Dichteres Grid als der Rest der App (Dashboard-Charakter: viele Kacheln auf
+   einen Blick statt einer langen Karten-Liste) - kleinerer Gap, kompaktere
+   Kacheln-Innenabstaende (siehe .analytics-widget). */
+.analytics-grid {
+  display: grid;
+  /* min(420px, 100%) statt eines festen 420px-Minimums - sonst erzwingt die
+     Spalte diese Breite auch in einem schmaleren Container (z.B. verkleinertes
+     Browserfenster) und reisst horizontales Scrollen mit sich. */
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.analytics-widget { padding: 14px 16px; }
+.analytics-widget-wide { grid-column: span 2; }
+@media (max-width: 900px) {
+  .analytics-widget-wide { grid-column: span 1; }
+}
+.analytics-widget-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.analytics-widget-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+.analytics-widget-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.analytics-widget-edit, .analytics-widget-remove {
+  all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; color: var(--text-faint);
+}
+.analytics-widget-edit svg, .analytics-widget-remove svg { width: 14px; height: 14px; }
+.analytics-widget-edit:hover { background: var(--bg-hover); color: var(--text); }
+.analytics-widget-remove:hover { background: var(--red-fill); color: var(--red); }
+.analytics-widget-body.stat-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.analytics-widget-body .empty-state { padding: 28px 0; }
+.analytics-widget-body .chart-wrap { height: 220px; }
+.analytics-equity-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 12px; color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.analytics-equity-meta strong { font-family: var(--font-mono); }
+
+/* Auswertung hinzufuegen/bearbeiten (Modal-Formular) - Selects brauchen eine
+   sichtbare Beschriftung (anders als die uebrigen .account-form-Felder, deren
+   Placeholder als Label reicht), weil "Wochentag"/"Netto-P&L" ohne Kontext
+   nicht selbsterklaerend sind. */
+.widget-form-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px;
+}
+.widget-form-label select, .widget-form-label input {
+  text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--text);
+}
+
+/* Sichtbarer Fokusring fuer Tastaturnavigation - steht bewusst ganz unten in
+   der Kaskade: viele Buttons oben nutzen "all: unset" (entfernt den nativen
+   Outline), bei gleicher Selektor-Spezifitaet gewinnt die spaeter stehende
+   Regel, damit der Ring ueberall zuverlaessig erscheint. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 

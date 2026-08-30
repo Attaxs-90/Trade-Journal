@@ -66,6 +66,28 @@ def day_stats(trades: list[dict]) -> dict:
     )
 
 
+def compute_start_balance(account_keys: list[str] | None) -> float:
+    """Startkapital fuer eine Konten-Auswahl: bevorzugt der zuletzt von MT5
+    gemeldete Kontostand (synced_balance), zurueckgerechnet um die Netto-Summe
+    der Trades, damit Kurve/Kontostand deckungsgleich mit dem echten Broker-
+    Konto bleiben. Nur ohne Sync zaehlt das manuell eingetragene starting_balance.
+    Gemeinsam genutzt von der Uebersicht und den Auswertungen (kein Duplikat)."""
+    all_accounts = db.list_accounts()
+    net_totals = db.account_net_totals()
+    if account_keys is None:
+        included = all_accounts
+    else:
+        account_ids = {k for k in account_keys if k != "csv"}
+        included = [a for a in all_accounts if str(a["id"]) in account_ids]
+    start_balance = 0.0
+    for a in included:
+        if a["synced_balance"] is not None:
+            start_balance += a["synced_balance"] - (net_totals.get(a["id"]) or 0)
+        else:
+            start_balance += a["starting_balance"] or 0
+    return start_balance
+
+
 def _fmt_num(n: float) -> str:
     s = f"{n:,.2f}"
     s = s.replace(",", "_").replace(".", ",").replace("_", ".")

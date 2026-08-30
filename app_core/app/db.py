@@ -715,6 +715,49 @@ def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: li
     return _attach_tags([dict(r) for r in rows])
 
 
+def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                               tag_logic: str = "or", start: str | None = None, end: str | None = None) -> list[dict]:
+    """Wie get_trades_in_range(), aber mit optionalen statt Pflicht-Datumsgrenzen -
+    Basis fuer die Auswertungsseite, die wahlweise die komplette Historie oder
+    einen frei gewaehlten Zeitraum je Widget auswertet. Tags werden direkt
+    mitgeladen (eine Zusatzquery, kein N+1), weil die Tag-Dimension der
+    Auswertung sie fuer jeden Trade braucht."""
+    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    parts = [clause] if clause else []
+    if start:
+        parts.append("day >= ?")
+        params.append(start)
+    if end:
+        parts.append("day <= ?")
+        params.append(end)
+    where = f"WHERE {' AND '.join(parts)}" if parts else ""
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM trades {where} ORDER BY day ASC, entry_time ASC", params
+        ).fetchall()
+    return _attach_tags([dict(r) for r in rows])
+
+
+def journal_day_details(start: str | None = None, end: str | None = None) -> dict[str, dict]:
+    """ref_key -> {rating, mood, followed_plan} fuer Tages-Journal-Eintraege im
+    Zeitraum - eine Query, analog zu journal_map(), aber mit den zusaetzlichen
+    Feldern, die die Journal-Korrelations-Auswertungen brauchen."""
+    parts = ["entry_type = 'day'"]
+    params: list = []
+    if start:
+        parts.append("ref_key >= ?")
+        params.append(start)
+    if end:
+        parts.append("ref_key <= ?")
+        params.append(end)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT ref_key, rating, mood, followed_plan FROM journal_entries WHERE {' AND '.join(parts)}",
+            params,
+        ).fetchall()
+    return {r["ref_key"]: dict(rating=r["rating"], mood=r["mood"], followed_plan=r["followed_plan"]) for r in rows}
+
+
 def get_trades_in_range(start_day: str, end_day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
     """Ein einzelner Query fuer einen ganzen Zeitraum (Woche/Monat) statt eines
     Queries pro Tag - vermeidet bis zu 31 einzelne Connections pro Monatsansicht."""

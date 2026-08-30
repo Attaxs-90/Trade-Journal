@@ -11,7 +11,8 @@ from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUA
 from .config import IMAGES_DIR
 from .images import save_image, delete_image_files
 from .parser import parse_csv, pair_trades
-from .stats import day_stats, build_week_payload, build_month_payload
+from .stats import day_stats, build_week_payload, build_month_payload, compute_start_balance
+from . import analytics as an
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
@@ -222,25 +223,8 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
     # Startkapital: bei einer Konto-Auswahl nur deren Startkapital summieren
     # (der Magic-Key "csv" fuer nicht zugeordnete Trades hat keins), sonst
     # alle verbundenen Konten - die Kurve/der Kontostand sollen dann bei
-    # diesem Basiswert starten statt bei 0. Bevorzugt wird der zuletzt von
-    # MT5 gemeldete Kontostand (synced_balance) zurueckgerechnet um die
-    # Netto-Summe der Trades - das haelt Kurve und Kontostand deckungsgleich
-    # mit dem echten Broker-Konto. Nur wenn kein Sync stattfand, zaehlt das
-    # manuell eingetragene starting_balance.
-    all_accounts = db.list_accounts()
-    net_totals = db.account_net_totals()
-    if keys is None:
-        included = all_accounts
-    else:
-        account_ids = {k for k in keys if k != "csv"}
-        included = [a for a in all_accounts if str(a["id"]) in account_ids]
-
-    start_balance = 0.0
-    for a in included:
-        if a["synced_balance"] is not None:
-            start_balance += a["synced_balance"] - (net_totals.get(a["id"]) or 0)
-        else:
-            start_balance += a["starting_balance"] or 0
+    # diesem Basiswert starten statt bei 0.
+    start_balance = compute_start_balance(keys)
 
     days_sorted = sorted(days, key=lambda d: d["day"])
     cum = start_balance
@@ -263,6 +247,47 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
         "start_balance": round(start_balance, 2),
         "current_balance": round(start_balance + total_net, 2),
     }
+
+
+@app.get("/api/analytics/dimensions")
+def api_analytics_dimensions():
+    return [{"key": k, "label": v["label"]} for k, v in an.DIMENSIONS.items()]
+
+
+@app.get("/api/analytics/summary")
+def api_analytics_summary(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                           start: str | None = None, end: str | None = None):
+    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    return an.trade_summary(trades)
+
+
+@app.get("/api/analytics/equity")
+def api_analytics_equity(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                          start: str | None = None, end: str | None = None):
+    keys = _parse_accounts(accounts)
+    days = db.list_days(keys, _parse_tags(tags), tag_logic)
+    if start:
+        days = [d for d in days if d["day"] >= start]
+    if end:
+        days = [d for d in days if d["day"] <= end]
+    return an.equity_and_drawdown(days, compute_start_balance(keys))
+
+
+@app.get("/api/analytics/breakdown")
+def api_analytics_breakdown(dimension: str, accounts: str | None = None, tags: str | None = None,
+                             tag_logic: str = "or", start: str | None = None, end: str | None = None):
+    if dimension not in an.DIMENSIONS:
+        raise HTTPException(400, f"Unbekannte Dimension '{dimension}'.")
+    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    ctx = an.build_context(trades)
+    return {"dimension": dimension, "label": an.DIMENSIONS[dimension]["label"], "rows": an.breakdown(trades, dimension, ctx)}
+
+
+@app.get("/api/analytics/distribution")
+def api_analytics_distribution(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                                start: str | None = None, end: str | None = None, bins: int = 10):
+    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    return an.pnl_distribution(trades, min(max(bins, 4), 24))
 
 
 @app.get("/api/week/{iso_year}/{iso_week}")

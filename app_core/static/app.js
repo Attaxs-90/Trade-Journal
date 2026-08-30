@@ -6,6 +6,7 @@ const state = {
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
   journalMode: "all", journalQuery: "", journalTagKeys: [], journalRefKey: null,
   journalSelectedKeys: new Set(),
+  analyticsRange: { start: null, end: null },
 };
 
 /* ---------- Konten-Filter ---------- */
@@ -59,20 +60,23 @@ async function getAccountOptions() {
   return api("/api/account-options");
 }
 
-/* Rendert den Konten-Filter in das Inline-Panel der Uebersicht. Kein-Op, wenn
-   das Panel gerade nicht im DOM ist (Uebersicht nicht aktive View). */
-async function renderAccountFilter() {
-  const panel = document.getElementById("ov-account-filter-panel");
+/* Rendert den Konten-Filter in ein Inline-Panel. Kein-Op, wenn das Panel
+   gerade nicht im DOM ist (View nicht aktiv). panelId/countId parametrisiert,
+   weil neben der Uebersicht auch die Auswertungsseite ihr eigenes Panel-Paar
+   hat - gleiche Logik, andere IDs, statt einer zweiten Kopie dieser Funktion. */
+async function renderAccountFilter(panelId = "ov-account-filter-panel", countId = "ov-account-filter-count") {
+  const panel = document.getElementById(panelId);
   if (!panel) return;
   const options = await getAccountOptions();
   panel.innerHTML = "";
+  const rerender = () => renderAccountFilter(panelId, countId);
 
-  const countBadge = document.getElementById("ov-account-filter-count");
+  const countBadge = document.getElementById(countId);
   if (countBadge) countBadge.textContent = state.filterMode === "selected" && state.filterKeys.length ? `(${state.filterKeys.length})` : "";
 
   const masterLabel = document.createElement("label");
   masterLabel.className = "filter-item master";
-  masterLabel.innerHTML = `<input type="checkbox" id="filter-all"> Alle Konten`;
+  masterLabel.innerHTML = `<input type="checkbox"> Alle Konten`;
   panel.appendChild(masterLabel);
   const masterInput = masterLabel.querySelector("input");
   masterInput.checked = state.filterMode === "all";
@@ -80,7 +84,7 @@ async function renderAccountFilter() {
     state.filterMode = "all";
     state.filterKeys = [];
     saveFilterState();
-    renderAccountFilter();
+    rerender();
     refreshCurrentView();
   });
 
@@ -109,7 +113,7 @@ async function renderAccountFilter() {
         state.filterKeys = checked;
       }
       saveFilterState();
-      renderAccountFilter();
+      rerender();
       refreshCurrentView();
     });
     panel.appendChild(label);
@@ -170,12 +174,15 @@ function buildTagChipGroups(tags, isActive, onToggle) {
 }
 
 /* Tag-Filter als Klick-Chips gruppiert nach tag_group, Vorbild die
-   Marktnews-Filterchips (.newsbar-chip) statt Checkboxen. */
-async function renderTagFilter() {
-  const wrap = document.getElementById("trades-tag-filter-list");
+   Marktnews-Filterchips (.newsbar-chip) statt Checkboxen. listId/logicToggleId
+   parametrisiert, weil die Auswertungsseite ihr eigenes Tag-Filter-Panel hat -
+   gleiche Logik, andere Container, statt einer zweiten Kopie dieser Funktion. */
+async function renderTagFilter(listId = "trades-tag-filter-list", logicToggleId = "trades-tag-logic-toggle") {
+  const wrap = document.getElementById(listId);
   if (!wrap) return;
   const tags = await getTags();
   wrap.innerHTML = "";
+  const rerender = () => renderTagFilter(listId, logicToggleId);
 
   const allBtn = document.createElement("button");
   allBtn.type = "button";
@@ -185,7 +192,7 @@ async function renderTagFilter() {
     state.tagFilterMode = "all";
     state.tagFilterKeys = [];
     saveTagFilterState();
-    renderTagFilter();
+    rerender();
     refreshCurrentView();
   });
   wrap.appendChild(allBtn);
@@ -211,18 +218,18 @@ async function renderTagFilter() {
           state.tagFilterKeys = [...current];
         }
         saveTagFilterState();
-        renderTagFilter();
+        rerender();
         refreshCurrentView();
       },
     ));
   }
 
-  document.querySelectorAll("#trades-tag-logic-toggle .tag-logic-btn").forEach(btn => {
+  document.querySelectorAll(`#${logicToggleId} .tag-logic-btn`).forEach(btn => {
     btn.classList.toggle("active", btn.dataset.logic === state.tagFilterLogic);
     btn.onclick = () => {
       state.tagFilterLogic = btn.dataset.logic;
       saveTagFilterState();
-      renderTagFilter();
+      rerender();
       refreshCurrentView();
     };
   });
@@ -234,15 +241,19 @@ function refreshCurrentView() {
   else if (state.view === "trades") openTrades(state.tradesPage || 1);
   else if (state.view === "month") renderMonth();
   else if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
+  else if (state.view === "analytics") renderAllAnalyticsWidgets();
 }
 
 /* ---------- Theme ---------- */
+
+const ICON_SUN = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+const ICON_MOON = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 
 function initTheme() {
   const btn = document.getElementById("theme-toggle");
   const apply = (theme) => {
     document.documentElement.setAttribute("data-theme", theme);
-    btn.textContent = theme === "light" ? "☀️" : "🌙";
+    btn.innerHTML = theme === "light" ? ICON_SUN : ICON_MOON;
   };
   apply(localStorage.getItem("theme") || "dark");
   btn.addEventListener("click", () => {
@@ -940,7 +951,7 @@ const TRADE_CARD_FIELDS = [
   { key: "day", label: "Datum", render: (t) => t.day },
   { key: "account", label: "Konto", render: (t, ctx) => t.account_id ? escapeHtml(ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto" },
   { key: "entry_time", label: "Entry-Zeit", render: (t) => fmtTime(t.entry_time) },
-  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</span>` },
+  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction === "Long" ? "▲" : "▼"} ${t.direction}</span>` },
   { key: "volume", label: "Größe", render: (t) => fmtVolume(t) },
   { key: "entry_price", label: "Entry", render: (t) => fmtNum(t.entry_price) },
   { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
@@ -1300,7 +1311,7 @@ const DAY_TRADE_FIELDS = [
   { key: "account", label: "Konto", render: (t, ctx) => t.account_id ? escapeHtml(ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto" },
   { key: "entry_time", label: "Entry-Zeit", render: (t) => fmtTime(t.entry_time) },
   { key: "exit_time", label: "Exit-Zeit", render: (t) => fmtTime(t.exit_time) },
-  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction}</span>` },
+  { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction === "Long" ? "▲" : "▼"} ${t.direction}</span>` },
   { key: "volume", label: "Größe", render: (t) => fmtVolume(t) },
   { key: "entry_price", label: "Entry", render: (t) => fmtNum(t.entry_price) },
   { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
@@ -2491,10 +2502,15 @@ function lineChartSvg(values, labels, baseline = 0) {
 // Sofortiges, gut lesbares Tooltip statt des traegen nativen SVG-<title> -
 // wird nach dem Einfuegen des lineChartSvg()-Markups auf den chart-wrap
 // aufgerufen (braucht die tatsaechlichen DOM-Positionen der Trefferkreise).
-function attachChartTooltip(chartWrap) {
+function attachChartTooltip(chartWrap, renderContent) {
   const tooltip = chartWrap.querySelector(".chart-tooltip");
   const ring = chartWrap.querySelector(".chart-hover-ring");
   if (!tooltip) return;
+  // Default: Datum + $-Wert (Equity-Kurve). Balkendiagramme der Auswertungen
+  // uebergeben einen eigenen Renderer (andere Achsen/Einheiten) statt diese
+  // Funktion zu duplizieren.
+  renderContent = renderContent || ((hit) => `<div class="chart-tooltip-date">${fmtDate(hit.dataset.day)}</div>`
+    + `<div class="chart-tooltip-value">${fmtNum(parseFloat(hit.dataset.value))} $</div>`);
 
   const position = (e) => {
     const wrapRect = chartWrap.getBoundingClientRect();
@@ -2510,8 +2526,7 @@ function attachChartTooltip(chartWrap) {
 
   chartWrap.querySelectorAll(".chart-dot-hit").forEach(hit => {
     hit.addEventListener("mouseenter", (e) => {
-      tooltip.innerHTML = `<div class="chart-tooltip-date">${fmtDate(hit.dataset.day)}</div>`
-        + `<div class="chart-tooltip-value">${fmtNum(parseFloat(hit.dataset.value))} $</div>`;
+      tooltip.innerHTML = renderContent(hit);
       tooltip.style.display = "block";
       if (ring) {
         ring.setAttribute("cx", hit.getAttribute("cx"));
@@ -2550,6 +2565,431 @@ async function openBacktesting() {
   state.currentDay = null;
   setActiveNav("backtesting");
   await mountView("tpl-backtesting");
+}
+
+/* ---------- Auswertungen ---------- */
+/* Modulares Dashboard: jede Kachel (Widget) ist ein Objekt {id, type, title,
+   ...typspezifische Felder}. type="breakdown" traegt zusaetzlich dimension +
+   metric - eine einzige generische Balkendiagramm-Darstellung bedient damit
+   jede Dimension x Kennzahl-Kombination, statt fuer jede Auswertung eine
+   eigene Komponente zu bauen. Konfiguration liegt in localStorage, analog zu
+   den uebrigen Ansichts-Einstellungen dieser App (Spaltenreihenfolge, Sidebar-
+   Reihenfolge, ...) - kein Server-Roundtrip fuer reine Anzeige-Praeferenzen. */
+
+const ANALYTICS_METRICS = [
+  { key: "net", field: "total_net", label: "Netto-P&L", unit: "$", signed: true, decimals: 0 },
+  { key: "points", field: "total_points", label: "Punkte", unit: "Pkt", signed: true, decimals: 1 },
+  { key: "win_rate", field: "win_rate", label: "Trefferquote", unit: "%", signed: false, decimals: 1 },
+  { key: "profit_factor", field: "profit_factor", label: "Profit-Faktor", unit: "", signed: false, decimals: 2 },
+  { key: "expectancy", field: "expectancy", label: "Ø pro Trade", unit: "$", signed: true, decimals: 1 },
+  { key: "trade_count", field: "trade_count", label: "Anzahl Trades", unit: "", signed: false, decimals: 0 },
+  { key: "avg_win", field: "avg_win", label: "Ø Gewinn", unit: "$", signed: false, decimals: 1 },
+  { key: "avg_loss", field: "avg_loss", label: "Ø Verlust", unit: "$", signed: false, decimals: 1 },
+];
+
+const ANALYTICS_DEFAULT_WIDGETS = [
+  { id: "kpi-1", type: "kpi", title: "Kern-Kennzahlen" },
+  { id: "equity-1", type: "equity", title: "Equity-Kurve & Drawdown" },
+  { id: "streaks-1", type: "streaks", title: "Serien & Konsistenz" },
+  { id: "bd-weekday", type: "breakdown", title: "Netto-P&L nach Wochentag", dimension: "weekday", metric: "net" },
+  { id: "bd-hour", type: "breakdown", title: "Netto-P&L nach Uhrzeit (Entry)", dimension: "hour", metric: "net" },
+  { id: "bd-instrument", type: "breakdown", title: "Performance nach Instrument", dimension: "instrument", metric: "net" },
+  { id: "bd-direction", type: "breakdown", title: "Trefferquote: Long vs. Short", dimension: "direction", metric: "win_rate" },
+  { id: "bd-duration", type: "breakdown", title: "Performance nach Haltedauer", dimension: "duration", metric: "net" },
+  { id: "dist-1", type: "distribution", title: "P&L-Verteilung" },
+  { id: "bd-rating", type: "breakdown", title: "Netto-P&L nach Tagesbewertung", dimension: "rating", metric: "net" },
+  { id: "bd-plan", type: "breakdown", title: "Trefferquote: Plan befolgt?", dimension: "followed_plan", metric: "win_rate" },
+  { id: "bd-account", type: "breakdown", title: "Performance nach Konto", dimension: "account", metric: "net" },
+];
+
+let analyticsWidgets = [];
+
+function loadAnalyticsWidgets() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("analyticsWidgets") || "null");
+    if (Array.isArray(saved) && saved.length) return saved;
+  } catch (e) { /* ignore */ }
+  return ANALYTICS_DEFAULT_WIDGETS.map(w => ({ ...w }));
+}
+function saveAnalyticsWidgets() {
+  localStorage.setItem("analyticsWidgets", JSON.stringify(analyticsWidgets));
+}
+
+function loadAnalyticsRangeState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("analyticsRange") || "null");
+    state.analyticsRange = saved && typeof saved === "object" ? saved : { start: null, end: null };
+  } catch (e) {
+    state.analyticsRange = { start: null, end: null };
+  }
+}
+function saveAnalyticsRangeState() {
+  localStorage.setItem("analyticsRange", JSON.stringify(state.analyticsRange));
+}
+function analyticsRangeQS() {
+  const { start, end } = state.analyticsRange || {};
+  const parts = [];
+  if (start) parts.push(`start=${encodeURIComponent(start)}`);
+  if (end) parts.push(`end=${encodeURIComponent(end)}`);
+  return parts.join("&");
+}
+/* Wie withFilter(), zusaetzlich mit dem Zeitraum der Auswertungsseite -
+   eigene Funktion statt withFilter() selbst zu erweitern, weil der Zeitraum
+   nur hier existiert (Uebersicht/Trades/Journal kennen keinen Datumsfilter). */
+function withAnalyticsFilter(url) {
+  const parts = [accountsQS(), tagsQS(), analyticsRangeQS()].filter(Boolean);
+  if (!parts.length) return url;
+  return url + (url.includes("?") ? "&" : "?") + parts.join("&");
+}
+
+let cachedAnalyticsDimensions = null;
+async function getAnalyticsDimensions() {
+  if (!cachedAnalyticsDimensions) cachedAnalyticsDimensions = await api("/api/analytics/dimensions");
+  return cachedAnalyticsDimensions;
+}
+
+function shortenLabel(label, max = 13) {
+  const s = String(label);
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+/* Generisches Balkendiagramm - bedient sowohl breakdown-Widgets (rows aus
+   /api/analytics/breakdown) als auch die P&L-Verteilung (rows synthetisch aus
+   den Histogramm-Bins gebaut), damit fuer Letztere kein zweiter Chart-Baustein
+   noetig ist. metric.field zeigt auf das Feld in jeder row, das die Balkenhoehe
+   liefert; null-Werte (z.B. Profit-Faktor ohne Verlusttrade) werden als "∞"
+   beschriftet statt als 0 fehlinterpretiert. */
+function barChartSvg(rows, metric) {
+  const w = 1000, h = 260, padL = 54, padR = 16, padT = 20, padB = 46;
+  const values = rows.map(r => { const v = r[metric.field]; return v == null ? 0 : v; });
+  const rawMin = Math.min(0, ...values), rawMax = Math.max(0, ...values);
+  const range = (rawMax - rawMin) || 1;
+  const y = v => padT + (h - padT - padB) * (1 - (v - rawMin) / range);
+  const zeroY = y(0);
+  const n = rows.length;
+  const bandW = (w - padL - padR) / n;
+  const barW = Math.min(58, bandW * 0.62);
+
+  const cs = getComputedStyle(document.documentElement);
+  const green = cs.getPropertyValue("--green").trim();
+  const red = cs.getPropertyValue("--red").trim();
+  const accent = cs.getPropertyValue("--accent").trim();
+  const border = cs.getPropertyValue("--border").trim();
+  const faint = cs.getPropertyValue("--text-faint").trim();
+  const text = cs.getPropertyValue("--text").trim();
+
+  const GRID_LINES = 4;
+  let gridSvg = "";
+  for (let i = 0; i <= GRID_LINES; i++) {
+    const v = rawMin + (range * i / GRID_LINES);
+    const gy = y(v);
+    gridSvg += `<line x1="${padL}" y1="${gy}" x2="${w - padR}" y2="${gy}" stroke="${border}" stroke-width="1" opacity="0.5" />`;
+    gridSvg += `<text x="${padL - 8}" y="${gy + 3}" fill="${faint}" font-size="10" text-anchor="end">${fmtNum(v, 0)}</text>`;
+  }
+
+  let barsSvg = "", labelsSvg = "", hitSvg = "";
+  rows.forEach((r, i) => {
+    const raw = r[metric.field];
+    const v = values[i];
+    const cx = padL + bandW * i + bandW / 2;
+    const barTop = y(Math.max(v, 0));
+    const barBottom = y(Math.min(v, 0));
+    const barH = Math.max(1.5, barBottom - barTop);
+    const color = metric.signed ? (v >= 0 ? green : red) : accent;
+    const valueLabel = raw == null ? "∞" : `${fmtNum(v, metric.decimals ?? 0)}${metric.unit ? " " + metric.unit : ""}`;
+    const labelY = v >= 0 ? barTop - 6 : barBottom + 14;
+    barsSvg += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${barTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="4" fill="${color}" opacity="0.85" />`;
+    barsSvg += `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" fill="${text}" font-size="11" font-weight="600" text-anchor="middle">${valueLabel}</text>`;
+    labelsSvg += `<text x="${cx.toFixed(1)}" y="${h - padB + 18}" fill="${faint}" font-size="10" text-anchor="middle">${escapeHtml(shortenLabel(r.label))}</text>`;
+    hitSvg += `<rect class="chart-dot-hit" x="${(cx - bandW / 2).toFixed(1)}" y="${padT}" width="${bandW.toFixed(1)}" height="${h - padT - padB}" fill="transparent" data-day="${escapeHtml(r.label)}" data-value="${raw == null ? "" : v}" data-count="${r.trade_count}" />`;
+  });
+
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    ${gridSvg}
+    <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${w - padR}" y2="${zeroY.toFixed(1)}" stroke="${text}" stroke-width="1" opacity="0.5" />
+    ${barsSvg}
+    ${labelsSvg}
+    ${hitSvg}
+  </svg>`;
+}
+
+function barTooltipRenderer(metric) {
+  return (hit) => {
+    const raw = hit.dataset.value;
+    const valueText = raw === "" ? "∞" : `${fmtNum(parseFloat(raw), metric.decimals ?? 2)}${metric.unit ? " " + metric.unit : ""}`;
+    return `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)}</div>`
+      + `<div class="chart-tooltip-value">${valueText}</div>`
+      + `<div class="chart-tooltip-date">${hit.dataset.count} Trade${hit.dataset.count === "1" ? "" : "s"}</div>`;
+  };
+}
+
+async function renderKpiWidget(body) {
+  const data = await api(withAnalyticsFilter("/api/analytics/summary"));
+  if (!data.trade_count) {
+    body.innerHTML = `<div class="empty-state">Keine Trades im gewählten Zeitraum/Filter.</div>`;
+    return;
+  }
+  body.innerHTML = tile("Netto-P&L", fmtSigned(data.total_net) + " $", cls(data.total_net))
+    + tile("Trefferquote", fmtNum(data.win_rate, 1) + " %")
+    + tile("Profit-Faktor", data.profit_factor === null ? "∞" : fmtNum(data.profit_factor, 2))
+    + tile("Ø pro Trade", fmtSigned(data.expectancy, 1) + " $", cls(data.expectancy))
+    + tile("Anzahl Trades", data.trade_count)
+    + tile("Ø Gewinn", fmtNum(data.avg_win, 1) + " $", "pos")
+    + tile("Ø Verlust", fmtNum(Math.abs(data.avg_loss), 1) + " $", "neg")
+    + tile("Ø Haltedauer", fmtDuration(data.avg_duration_sec))
+    + tile("Bester Trade", fmtSigned(data.best_trade) + " $", "pos")
+    + tile("Schwächster Trade", fmtSigned(data.worst_trade) + " $", "neg");
+}
+
+async function renderEquityWidget(body) {
+  const data = await api(withAnalyticsFilter("/api/analytics/equity"));
+  if (data.trading_days < 2) {
+    body.innerHTML = `<div class="empty-state">Mindestens 2 Handelstage im gewählten Zeitraum/Filter nötig.</div>`;
+    return;
+  }
+  const values = data.curve.map(p => p.cum_net);
+  const labels = data.curve.map(p => p.day);
+  body.innerHTML = `<div class="analytics-equity-meta">
+      <span>Max. Drawdown: <strong class="neg">${fmtNum(data.max_drawdown)} $</strong>${data.max_drawdown_day ? ` (${fmtDate(data.max_drawdown_day)})` : ""}</span>
+      <span>Gewinn-/Verlusttage: <strong class="pos">${data.win_days}</strong> / <strong class="neg">${data.loss_days}</strong> (${fmtNum(data.win_days_pct, 1)} %)</span>
+    </div>
+    <div class="chart-wrap analytics-equity-chart">${lineChartSvg(values, labels, data.start_balance)}<div class="chart-tooltip"></div></div>`;
+  attachChartTooltip(body.querySelector(".analytics-equity-chart"));
+}
+
+async function renderStreaksWidget(body) {
+  const data = await api(withAnalyticsFilter("/api/analytics/equity"));
+  if (!data.trading_days) {
+    body.innerHTML = `<div class="empty-state">Keine Handelstage im gewählten Zeitraum/Filter.</div>`;
+    return;
+  }
+  const curLabel = data.current_streak_type === "win" ? "Gewinn-Serie" : data.current_streak_type === "loss" ? "Verlust-Serie" : "–";
+  const curClass = data.current_streak_type === "win" ? "pos" : data.current_streak_type === "loss" ? "neg" : "";
+  body.innerHTML = tile("Aktuelle Serie", data.current_streak ? `${data.current_streak} Tage` : "–", curClass)
+    + tile("Serientyp", curLabel, curClass)
+    + tile("Längste Gewinn-Serie", data.longest_win_streak + " Tage", "pos")
+    + tile("Längste Verlust-Serie", data.longest_loss_streak + " Tage", "neg")
+    + tile("Profitable Handelstage", `${fmtNum(data.win_days_pct, 1)} %`, cls(data.win_days_pct - 50))
+    + tile("Handelstage gesamt", data.trading_days);
+}
+
+async function renderDistributionWidget(body) {
+  const data = await api(withAnalyticsFilter("/api/analytics/distribution?bins=10"));
+  if (!data.trade_count) {
+    body.innerHTML = `<div class="empty-state">Keine Trades im gewählten Zeitraum/Filter.</div>`;
+    return;
+  }
+  const rows = data.bins.map(b => ({ label: b.label, total_net: b.count, trade_count: b.count }));
+  const metric = { field: "total_net", unit: "", decimals: 0, signed: false };
+  body.innerHTML = `<div class="analytics-equity-meta">
+      <span>Ø Gewinn: <strong class="pos">${fmtNum(data.avg_win)} $</strong></span>
+      <span>Ø Verlust: <strong class="neg">${fmtNum(data.avg_loss)} $</strong></span>
+      <span>Größter Gewinn: <strong class="pos">${fmtNum(data.largest_win)} $</strong></span>
+      <span>Größter Verlust: <strong class="neg">${fmtNum(data.largest_loss)} $</strong></span>
+    </div>
+    <div class="chart-wrap analytics-bar-chart">${barChartSvg(rows, metric)}<div class="chart-tooltip"></div></div>`;
+  attachChartTooltip(body.querySelector(".analytics-bar-chart"), (hit) =>
+    `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)} $</div><div class="chart-tooltip-value">${hit.dataset.count} Trades</div>`);
+}
+
+async function renderBreakdownWidget(body, widget) {
+  const metric = ANALYTICS_METRICS.find(m => m.key === widget.metric) || ANALYTICS_METRICS[0];
+  const data = await api(withAnalyticsFilter(`/api/analytics/breakdown?dimension=${encodeURIComponent(widget.dimension)}`));
+  const rows = data.rows.filter(r => r.trade_count > 0);
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty-state">Keine Daten für diese Auswertung im gewählten Zeitraum/Filter.</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="chart-wrap analytics-bar-chart">${barChartSvg(rows, metric)}<div class="chart-tooltip"></div></div>`;
+  attachChartTooltip(body.querySelector(".analytics-bar-chart"), barTooltipRenderer(metric));
+}
+
+function analyticsWidgetRenderer(widget) {
+  if (widget.type === "kpi") return renderKpiWidget;
+  if (widget.type === "equity") return renderEquityWidget;
+  if (widget.type === "streaks") return renderStreaksWidget;
+  if (widget.type === "distribution") return renderDistributionWidget;
+  if (widget.type === "breakdown") return (body) => renderBreakdownWidget(body, widget);
+  return async (body) => { body.innerHTML = `<div class="empty-state">Unbekannter Auswertungstyp.</div>`; };
+}
+
+const ANALYTICS_WIDE_TYPES = new Set(["equity", "distribution"]);
+
+function analyticsWidgetCardHtml(widget) {
+  const wideClass = ANALYTICS_WIDE_TYPES.has(widget.type) ? " analytics-widget-wide" : "";
+  const bodyClass = (widget.type === "kpi" || widget.type === "streaks") ? " stat-grid" : "";
+  return `
+    <div class="card analytics-widget${wideClass}" data-widget-id="${widget.id}">
+      <div class="analytics-widget-header">
+        <div class="analytics-widget-title">${escapeHtml(widget.title)}</div>
+        <div class="analytics-widget-actions">
+          <button type="button" class="analytics-widget-edit" title="Bearbeiten" aria-label="Auswertung bearbeiten">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </button>
+          <button type="button" class="analytics-widget-remove" title="Entfernen" aria-label="Auswertung entfernen">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="analytics-widget-body${bodyClass}"><div class="empty-state">Lädt…</div></div>
+    </div>`;
+}
+
+async function renderAnalyticsWidget(widget) {
+  const card = document.querySelector(`.analytics-widget[data-widget-id="${widget.id}"]`);
+  if (!card) return;
+  const body = card.querySelector(".analytics-widget-body");
+  try {
+    await analyticsWidgetRenderer(widget)(body);
+  } catch (e) {
+    body.innerHTML = `<div class="empty-state">Fehler beim Laden: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function renderAllAnalyticsWidgets() {
+  await Promise.all(analyticsWidgets.map(w => renderAnalyticsWidget(w)));
+}
+
+function mountAnalyticsGrid() {
+  const grid = document.getElementById("analytics-grid");
+  if (!grid) return;
+  grid.innerHTML = analyticsWidgets.length
+    ? analyticsWidgets.map(analyticsWidgetCardHtml).join("")
+    : `<div class="empty-state">Noch keine Auswertungen. Klicke auf „+ Auswertung", um deine erste hinzuzufügen.</div>`;
+  grid.querySelectorAll(".analytics-widget").forEach(card => {
+    const widget = analyticsWidgets.find(w => w.id === card.dataset.widgetId);
+    if (!widget) return;
+    card.querySelector(".analytics-widget-edit").addEventListener("click", () => openAnalyticsWidgetEditor(widget));
+    card.querySelector(".analytics-widget-remove").addEventListener("click", () => removeAnalyticsWidget(widget.id));
+  });
+}
+
+function removeAnalyticsWidget(id) {
+  analyticsWidgets = analyticsWidgets.filter(w => w.id !== id);
+  saveAnalyticsWidgets();
+  mountAnalyticsGrid();
+  renderAllAnalyticsWidgets();
+}
+
+/* Hinzufuegen/Bearbeiten im bestehenden Modal (gleiche Ueberlagerung wie
+   Tages-/Journal-Modal) statt einer eigenen Dialog-Komponente. */
+async function openAnalyticsWidgetEditor(existingWidget) {
+  const dims = await getAnalyticsDimensions();
+  const isEdit = !!existingWidget;
+  const w = existingWidget || { type: "breakdown", dimension: dims[0]?.key, metric: "net", title: "" };
+
+  const overlay = document.getElementById("modal-overlay");
+  const body = document.getElementById("modal-body");
+  body.innerHTML = `
+    <section class="view">
+      <header class="view-header"><h1>${isEdit ? "Auswertung bearbeiten" : "Auswertung hinzufügen"}</h1></header>
+      <form class="account-form" id="widget-form">
+        <input type="text" name="title" placeholder="Titel" value="${escapeHtml(w.title || "")}" required>
+        <label class="widget-form-label">Typ
+          <select name="type">
+            <option value="kpi">Kern-Kennzahlen</option>
+            <option value="equity">Equity-Kurve &amp; Drawdown</option>
+            <option value="streaks">Serien &amp; Konsistenz</option>
+            <option value="breakdown">Balkendiagramm nach Kategorie</option>
+            <option value="distribution">P&amp;L-Verteilung</option>
+          </select>
+        </label>
+        <label class="widget-form-label" id="widget-dim-row">Gruppieren nach
+          <select name="dimension">${dims.map(d => `<option value="${d.key}">${escapeHtml(d.label)}</option>`).join("")}</select>
+        </label>
+        <label class="widget-form-label" id="widget-metric-row">Kennzahl
+          <select name="metric">${ANALYTICS_METRICS.map(m => `<option value="${m.key}">${escapeHtml(m.label)}</option>`).join("")}</select>
+        </label>
+        <button type="submit" class="btn btn-primary">${isEdit ? "Speichern" : "Hinzufügen"}</button>
+      </form>
+    </section>`;
+  overlay.classList.add("visible");
+
+  const form = document.getElementById("widget-form");
+  form.type.value = w.type;
+  form.dimension.value = w.dimension || dims[0]?.key;
+  form.metric.value = w.metric || "net";
+
+  const dimRow = document.getElementById("widget-dim-row");
+  const metricRow = document.getElementById("widget-metric-row");
+  const updateVisibility = () => {
+    const show = form.type.value === "breakdown";
+    dimRow.style.display = show ? "" : "none";
+    metricRow.style.display = show ? "" : "none";
+  };
+  form.type.addEventListener("change", updateVisibility);
+  updateVisibility();
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const title = form.title.value.trim();
+    if (!title) return;
+    const type = form.type.value;
+    const newWidget = {
+      id: existingWidget ? existingWidget.id : "w" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      type, title,
+    };
+    if (type === "breakdown") {
+      newWidget.dimension = form.dimension.value;
+      newWidget.metric = form.metric.value;
+    }
+    if (isEdit) {
+      const idx = analyticsWidgets.findIndex(x => x.id === existingWidget.id);
+      analyticsWidgets[idx] = newWidget;
+    } else {
+      analyticsWidgets.push(newWidget);
+    }
+    saveAnalyticsWidgets();
+    closeModal();
+    mountAnalyticsGrid();
+    renderAllAnalyticsWidgets();
+  });
+}
+
+function onAnalyticsRangeChange() {
+  state.analyticsRange = {
+    start: document.getElementById("an-range-start").value || null,
+    end: document.getElementById("an-range-end").value || null,
+  };
+  saveAnalyticsRangeState();
+  renderAllAnalyticsWidgets();
+}
+
+async function openAnalytics() {
+  state.view = "analytics";
+  state.currentDay = null;
+  setActiveNav("analytics");
+
+  await mountView("tpl-analytics");
+  loadAnalyticsRangeState();
+
+  const accToggle = document.getElementById("an-account-filter-toggle");
+  const accPanel = document.getElementById("an-account-filter-panel");
+  accToggle.addEventListener("click", (e) => { e.stopPropagation(); accPanel.hidden = !accPanel.hidden; });
+  await renderAccountFilter("an-account-filter-panel", "an-account-filter-count");
+
+  const tagToggle = document.getElementById("an-tag-filter-toggle");
+  const tagPanel = document.getElementById("an-tag-filter-panel");
+  tagToggle.addEventListener("click", (e) => { e.stopPropagation(); tagPanel.hidden = !tagPanel.hidden; });
+  await renderTagFilter("an-tag-filter-list", "an-tag-logic-toggle");
+
+  document.getElementById("an-range-start").value = state.analyticsRange.start || "";
+  document.getElementById("an-range-end").value = state.analyticsRange.end || "";
+  document.getElementById("an-range-start").addEventListener("change", onAnalyticsRangeChange);
+  document.getElementById("an-range-end").addEventListener("change", onAnalyticsRangeChange);
+  document.getElementById("an-range-clear").addEventListener("click", () => {
+    state.analyticsRange = { start: null, end: null };
+    saveAnalyticsRangeState();
+    document.getElementById("an-range-start").value = "";
+    document.getElementById("an-range-end").value = "";
+    renderAllAnalyticsWidgets();
+  });
+
+  document.getElementById("an-add-widget-btn").addEventListener("click", () => openAnalyticsWidgetEditor(null));
+
+  analyticsWidgets = loadAnalyticsWidgets();
+  mountAnalyticsGrid();
+  await renderAllAnalyticsWidgets();
 }
 
 async function openAccounts() {
@@ -2857,6 +3297,7 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "overview") openOverview();
     if (el.dataset.view === "trades") openTrades();
     if (el.dataset.view === "journal") openJournal();
+    if (el.dataset.view === "analytics") openAnalytics();
     if (el.dataset.view === "month") openMonth();
     if (el.dataset.view === "strategy") openStrategy();
     if (el.dataset.view === "backtesting") openBacktesting();
