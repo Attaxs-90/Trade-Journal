@@ -108,6 +108,23 @@ CREATE TABLE IF NOT EXISTS journal_templates (
     position INTEGER DEFAULT 0
 );
 
+-- Notizbuecher: frei verschachtelbare Ordner/Notizen ohne Kalenderbezug (Edge,
+-- Strategie, Beobachtungen, Unterlagen, Logins, ...) - getrennt vom
+-- Tages-Journal, weil sich "Ordner in Ordner" nicht sinnvoll ueber
+-- entry_type/ref_key abbilden laesst. Kaskaden-Delete/Zyklus-Pruefung laufen
+-- manuell in Python (siehe delete_notebook_node/move_notebook_node), keine
+-- FK-Constraint, gleiche Handhabung wie bei trades/trade_tags in dieser Datei.
+CREATE TABLE IF NOT EXISTS notebook_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    node_type TEXT NOT NULL CHECK(node_type IN ('folder', 'note')),
+    name TEXT NOT NULL,
+    content_html TEXT DEFAULT '',
+    plain_text TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_day ON trades(day);
 CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id);
 CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
@@ -117,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_trade_tags_trade ON trade_tags(trade_id);
 CREATE INDEX IF NOT EXISTS idx_journal_ref ON journal_entries(entry_type, ref_key);
 CREATE INDEX IF NOT EXISTS idx_journal_tags_entry ON journal_tags(entry_id);
 CREATE INDEX IF NOT EXISTS idx_journal_tags_tag ON journal_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_notebook_nodes_parent ON notebook_nodes(parent_id);
 """
 
 # Versionierte Migrationen fuer bestehende Nutzer-Datenbanken (per PRAGMA user_version
@@ -197,6 +215,17 @@ MIGRATIONS: list[str] = [
         '<h3>Zahlen der Woche</h3><p><br></p>'
         || '<h3>Wiederkehrende Muster</h3><ul><li><br></li></ul>'
         || '<h3>Disziplin</h3><p><br></p><h3>Fokus naechste Woche</h3><p><br></p>', 3)""",  # -> Version 17
+    """CREATE TABLE IF NOT EXISTS notebook_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_id INTEGER,
+        node_type TEXT NOT NULL CHECK(node_type IN ('folder', 'note')),
+        name TEXT NOT NULL,
+        content_html TEXT DEFAULT '',
+        plain_text TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",                                                                     # -> Version 18
+    "CREATE INDEX IF NOT EXISTS idx_notebook_nodes_parent ON notebook_nodes(parent_id)",  # -> Version 19
 ]
 
 
@@ -919,7 +948,7 @@ def upsert_journal_entry(entry_type: str, ref_key: str, title: str = "", content
     stehen zu bleiben - sonst fuellt sich die Liste mit leeren Tagen, sobald man
     den Editor nur einmal geoeffnet hat."""
     tag_ids = tag_ids or []
-    if (not plain_text.strip() and not title.strip() and not tag_ids
+    if (not plain_text.strip() and not content_html.strip() and not title.strip() and not tag_ids
             and rating is None and mood is None and followed_plan is None):
         delete_journal_entry(entry_type, ref_key)
         return None
@@ -1023,6 +1052,43 @@ def list_journal_entries(entry_type: str = "day", start: str | None = None, end:
     return _attach_journal_tags(entries)
 
 
+def journal_month_summary() -> list[dict]:
+    """Monats-Aggregate fuer die Journal-Kachel-Uebersicht (Tages-Eintraege):
+    je eine Query ueber journal_entries und trades statt einer Schleife pro
+    Monat. trading_days-entry_count ist nur eine Naeherung fuer "Handelstage
+    ohne Eintrag" (ein Eintrag koennte an einem handelsfreien Tag liegen),
+    daher im Frontend als ungefaehrer Hinweis markiert."""
+    with get_conn() as conn:
+        journal_rows = conn.execute(
+            """SELECT substr(ref_key, 1, 7) as month, COUNT(*) as entry_count,
+                      AVG(rating) as avg_rating
+               FROM journal_entries WHERE entry_type = 'day'
+               GROUP BY month"""
+        ).fetchall()
+        trade_rows = conn.execute(
+            """SELECT substr(day, 1, 7) as month, COUNT(*) as trade_count,
+                      COUNT(DISTINCT day) as trading_days,
+                      ROUND(SUM(net_usd), 2) as net_usd
+               FROM trades GROUP BY month"""
+        ).fetchall()
+    months: dict[str, dict] = {}
+    for r in journal_rows:
+        months[r["month"]] = dict(
+            month=r["month"], entry_count=r["entry_count"],
+            avg_rating=round(r["avg_rating"], 1) if r["avg_rating"] else None,
+            trade_count=0, trading_days=0, net_usd=0.0,
+        )
+    for r in trade_rows:
+        m = months.setdefault(r["month"], dict(
+            month=r["month"], entry_count=0, avg_rating=None,
+            trade_count=0, trading_days=0, net_usd=0.0,
+        ))
+        m["trade_count"] = r["trade_count"]
+        m["trading_days"] = r["trading_days"]
+        m["net_usd"] = r["net_usd"] or 0.0
+    return sorted(months.values(), key=lambda m: m["month"], reverse=True)
+
+
 def journal_map(entry_type: str = "day", start: str | None = None, end: str | None = None) -> dict[str, dict]:
     """ref_key -> {rating} fuer vorhandene Eintraege. Eine Query, damit Uebersicht
     und Monatsgrid ihre Journal-Marker ohne Zusatzabfrage pro Tag setzen koennen."""
@@ -1074,3 +1140,98 @@ def update_journal_template(template_id: int, name: str, content_html: str, posi
 def delete_journal_template(template_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM journal_templates WHERE id = ?", (template_id,))
+
+
+# ---------- Notizbuecher (frei verschachtelbare Ordner/Notizen) ----------
+
+def list_notebook_nodes() -> list[dict]:
+    """Alle Knoten auf einmal - der Baum wird im Frontend ueber parent_id
+    aufgebaut, kein Query pro Ebene. content_html fehlt bewusst (nur beim
+    Oeffnen einer einzelnen Notiz noetig, siehe get_notebook_node)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, parent_id, node_type, name, plain_text, created_at, updated_at
+               FROM notebook_nodes ORDER BY node_type ASC, name COLLATE NOCASE"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_notebook_node(node_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM notebook_nodes WHERE id = ?", (node_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_notebook_node(parent_id: int | None, node_type: str, name: str) -> dict:
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO notebook_nodes (parent_id, node_type, name, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (parent_id, node_type, name, now, now),
+        )
+        node_id = cur.lastrowid
+    return get_notebook_node(node_id)
+
+
+def update_notebook_node(node_id: int, name: str | None = None, content_html: str | None = None,
+                          plain_text: str | None = None) -> dict | None:
+    fields, params = [], []
+    if name is not None:
+        fields.append("name = ?"); params.append(name)
+    if content_html is not None:
+        fields.append("content_html = ?"); params.append(content_html)
+    if plain_text is not None:
+        fields.append("plain_text = ?"); params.append(plain_text)
+    if not fields:
+        return get_notebook_node(node_id)
+    fields.append("updated_at = ?"); params.append(datetime.now().isoformat(timespec="seconds"))
+    params.append(node_id)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE notebook_nodes SET {', '.join(fields)} WHERE id = ?", params)
+    return get_notebook_node(node_id)
+
+
+def _notebook_descendant_ids(conn, node_id: int) -> set[int]:
+    """Alle Nachfahren eines Knotens - iterativ statt WITH RECURSIVE, die
+    Baumtiefe bleibt hier ohnehin klein (von Hand angelegte Ordner)."""
+    ids: set[int] = set()
+    frontier = [node_id]
+    while frontier:
+        placeholders = ",".join("?" for _ in frontier)
+        rows = conn.execute(
+            f"SELECT id FROM notebook_nodes WHERE parent_id IN ({placeholders})", frontier
+        ).fetchall()
+        frontier = [r["id"] for r in rows if r["id"] not in ids]
+        ids.update(frontier)
+    return ids
+
+
+def move_notebook_node(node_id: int, parent_id: int | None) -> dict:
+    """Verschiebt einen Knoten unter einen neuen Elternknoten (None = oberste
+    Ebene). Verhindert Zyklen: ein Ordner darf nicht in sich selbst oder einen
+    eigenen Nachfahren verschoben werden."""
+    if parent_id is not None:
+        if parent_id == node_id:
+            raise ValueError("Ein Knoten kann nicht in sich selbst verschoben werden.")
+        with get_conn() as conn:
+            descendants = _notebook_descendant_ids(conn, node_id)
+        if parent_id in descendants:
+            raise ValueError("Ein Ordner kann nicht in einen eigenen Unterordner verschoben werden.")
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE notebook_nodes SET parent_id = ?, updated_at = ? WHERE id = ?",
+            (parent_id, datetime.now().isoformat(timespec="seconds"), node_id),
+        )
+    return get_notebook_node(node_id)
+
+
+def delete_notebook_node(node_id: int) -> int:
+    """Loescht einen Knoten samt aller Nachfahren - manueller Kaskaden-Delete
+    statt FK-Constraint, gleiches Vorgehen wie delete_trade()/delete_account()
+    in dieser Datei."""
+    with get_conn() as conn:
+        ids = _notebook_descendant_ids(conn, node_id) | {node_id}
+        placeholders = ",".join("?" for _ in ids)
+        cur = conn.execute(f"DELETE FROM notebook_nodes WHERE id IN ({placeholders})", list(ids))
+        return cur.rowcount

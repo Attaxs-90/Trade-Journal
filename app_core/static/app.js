@@ -5,7 +5,9 @@ const state = {
   // Journal hat einen eigenen Tag-Filter: er filtert Journal-Eintraege, nicht
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
   journalMode: "all", journalQuery: "", journalTagKeys: [], journalRefKey: null,
+  journalMonth: null, journalTab: "diary",
   journalSelectedKeys: new Set(),
+  notebookExpanded: new Set(), notebookSelectedId: null,
   analyticsRange: { start: null, end: null },
 };
 
@@ -988,6 +990,36 @@ function confirmContinue(message, yesLabel = "Weiter") {
   });
 }
 
+/* Einzeiliges Texteingabe-Fenster (Umbenennen, Name beim Anlegen) - null bei
+   Abbruch oder leerer Eingabe. */
+function promptDialog(message, defaultValue = "") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    overlay.innerHTML = `
+      <div class="modal-card confirm-card">
+        <div class="confirm-message">${escapeHtml(message)}</div>
+        <input type="text" class="confirm-input" autocomplete="off">
+        <div class="confirm-actions">
+          <button class="btn btn-secondary confirm-no">Abbrechen</button>
+          <button class="btn btn-primary confirm-yes">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector(".confirm-input");
+    input.value = defaultValue;
+    function cleanup(result) { overlay.remove(); resolve(result); }
+    attachOutsideClose(overlay, () => cleanup(null));
+    overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(null));
+    overlay.querySelector(".confirm-yes").addEventListener("click", () => cleanup(input.value.trim() || null));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); overlay.querySelector(".confirm-yes").click(); }
+    });
+    input.focus();
+    input.select();
+  });
+}
+
 /* Gemeinsamer Ablauf fuer Konto-Loeschung, aufgerufen sowohl von der
    Konten-Seite als auch von den Einstellungen - vermeidet doppelte
    Confirm-/Request-/Refresh-Logik an zwei Stellen. */
@@ -1024,6 +1056,8 @@ function setActiveNav(view) {
 async function mountView(templateId) {
   await flushJournal();
   activeJournal = null;
+  await flushNotebookNote();
+  activeNotebookNote = null;
   const content = document.getElementById("content");
   content.innerHTML = "";
   content.appendChild(document.getElementById(templateId).content.cloneNode(true));
@@ -1675,7 +1709,7 @@ async function saveJournal(force = false) {
   if (!j || (!j.dirty && !force)) return;
   clearTimeout(j.timer);
   j.dirty = false;
-  const html = j.quill.getText().trim() ? j.quill.root.innerHTML : "";
+  const html = j.quill.getLength() > 1 ? j.quill.root.innerHTML : "";
   const payload = {
     title: "",
     content_html: html,
@@ -1727,6 +1761,7 @@ async function flushJournal() {
 }
 window.addEventListener("beforeunload", () => {
   if (activeJournal && activeJournal.dirty) saveJournal();
+  if (activeNotebookNote && activeNotebookNote.dirty) saveNotebookNote();
 });
 
 function journalScoreRow(label, name, value, labels) {
@@ -1935,6 +1970,11 @@ const JOURNAL_MODES = [
 
 function journalListQS() {
   const parts = [`type=day`, `mode=${state.journalMode}`];
+  if (state.journalMonth) {
+    const [y, m] = state.journalMonth.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    parts.push(`start=${state.journalMonth}-01`, `end=${state.journalMonth}-${String(lastDay).padStart(2, "0")}`);
+  }
   if (state.journalQuery) parts.push(`q=${encodeURIComponent(state.journalQuery)}`);
   if (state.journalTagKeys.length) parts.push(`tags=${encodeURIComponent(state.journalTagKeys.join(","))}`);
   return "/api/journal?" + parts.join("&");
@@ -1949,6 +1989,129 @@ function journalPreview(entry) {
 function journalStars(rating) {
   if (!rating) return "";
   return "★".repeat(rating) + "☆".repeat(5 - rating);
+}
+
+/* ---------- Journal: Jahr/Monat-Uebersicht ----------
+   Einstiegsebene des Journals: Monats-Kacheln gruppiert nach Jahr statt einer
+   endlosen Tagesliste. Sobald gesucht/gefiltert wird oder ein Monat geoeffnet
+   ist, weicht die Uebersicht der bisherigen Liste+Editor-Ansicht - siehe
+   journalListMode()/updateJournalViewMode(). */
+
+function journalListMode() {
+  return !!(state.journalMonth || state.journalQuery || state.journalTagKeys.length || state.journalMode !== "all");
+}
+
+function updateJournalViewMode() {
+  const monthsEl = document.getElementById("journal-months");
+  const layoutEl = document.getElementById("journal-layout");
+  const crumbEl = document.getElementById("journal-breadcrumb");
+  const crumbCurrent = document.getElementById("journal-breadcrumb-current");
+  if (!monthsEl || !layoutEl) return;
+  const listMode = journalListMode();
+  monthsEl.hidden = listMode;
+  layoutEl.hidden = !listMode;
+  crumbEl.hidden = !listMode;
+  if (crumbCurrent) {
+    crumbCurrent.textContent = state.journalMonth
+      ? monthLabel(...state.journalMonth.split("-").map(Number))
+      : "Suchergebnisse";
+  }
+}
+
+function journalBackToOverview() {
+  state.journalMonth = null;
+  state.journalQuery = "";
+  state.journalTagKeys = [];
+  state.journalMode = "all";
+  const search = document.getElementById("journal-search");
+  if (search) search.value = "";
+  document.querySelectorAll("#journal-mode-chips .newsbar-chip").forEach((c, i) => {
+    c.classList.toggle("active", JOURNAL_MODES[i]?.key === "all");
+  });
+  renderJournalTagFilter();
+  updateJournalViewMode();
+  renderJournalMonths();
+}
+
+async function openJournalMonth(monthKey) {
+  state.journalMonth = monthKey;
+  updateJournalViewMode();
+  await renderJournalList();
+}
+
+async function renderJournalMonths() {
+  const jumpEl = document.getElementById("journal-year-jump");
+  const groupsEl = document.getElementById("journal-year-groups");
+  if (!groupsEl) return;
+  const { months } = await api("/api/journal/months");
+  jumpEl.innerHTML = "";
+  groupsEl.innerHTML = "";
+  if (!months.length) {
+    groupsEl.innerHTML = `<div class="empty-state">Noch keine Handelstage oder Journal-Einträge vorhanden.</div>`;
+    return;
+  }
+  const byYear = new Map();
+  for (const m of months) {
+    const year = m.month.slice(0, 4);
+    if (!byYear.has(year)) byYear.set(year, []);
+    byYear.get(year).push(m);
+  }
+  for (const year of byYear.keys()) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "tag-chip-filter journal-year-chip";
+    chip.style.setProperty("--tag-color", "var(--accent)");
+    chip.textContent = year;
+    chip.addEventListener("click", () => {
+      document.getElementById(`journal-year-${year}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    jumpEl.appendChild(chip);
+  }
+  for (const [year, list] of byYear) {
+    const yearNet = list.reduce((sum, m) => sum + (m.net_usd || 0), 0);
+    const group = document.createElement("div");
+    group.className = "journal-year-group";
+    group.id = `journal-year-${year}`;
+    group.innerHTML = `
+      <div class="journal-year-heading">
+        <span>${year}</span>
+        <span class="journal-year-net ${cls(yearNet)}">${fmtSigned(yearNet)} $</span>
+      </div>
+      <div class="journal-month-grid"></div>`;
+    const grid = group.querySelector(".journal-month-grid");
+    for (const m of list) grid.appendChild(journalMonthTileEl(m));
+    groupsEl.appendChild(group);
+  }
+}
+
+function journalMonthTileEl(m) {
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "journal-month-tile" + (m.trade_count ? ` tile-${cls(m.net_usd)}` : "");
+  const [y, mo] = m.month.split("-").map(Number);
+  const label = new Date(y, mo - 1, 1).toLocaleDateString("de-DE", { month: "long" });
+  const ratingHtml = m.avg_rating
+    ? `<span class="journal-month-rating">${journalStars(Math.round(m.avg_rating))} <span class="muted">${m.avg_rating.toFixed(1)}</span></span>`
+    : "";
+  const netHtml = m.trade_count
+    ? `<span class="journal-month-net ${cls(m.net_usd)}">${fmtSigned(m.net_usd)} $</span>`
+    : `<span class="journal-month-net muted">kein Trade</span>`;
+  const gap = m.trading_days - m.entry_count;
+  const gapHtml = gap > 0
+    ? `<div class="journal-month-gap">≈ ${gap} Handelstag${gap === 1 ? "" : "e"} ohne Eintrag</div>`
+    : "";
+  el.innerHTML = `
+    <div class="journal-month-tile-top">
+      <span class="journal-month-name">${label}</span>
+      ${netHtml}
+    </div>
+    <div class="journal-month-tile-meta">
+      <span>${m.entry_count} Eintrag${m.entry_count === 1 ? "" : "e"}</span>
+      ${ratingHtml}
+    </div>
+    ${gapHtml}`;
+  el.addEventListener("click", () => openJournalMonth(m.month));
+  return el;
 }
 
 async function renderJournalList() {
@@ -2076,6 +2239,7 @@ async function renderJournalTagFilter() {
         chip.classList.toggle("active");
         document.getElementById("journal-tag-count").textContent =
           state.journalTagKeys.length ? `(${state.journalTagKeys.length})` : "";
+        updateJournalViewMode();
         renderJournalList();
       },
     ));
@@ -2098,6 +2262,8 @@ async function openJournal() {
   });
   document.querySelector(".journal-bulk-delete").addEventListener("click", () => bulkDeleteJournalEntries());
 
+  document.getElementById("journal-breadcrumb-root").addEventListener("click", () => journalBackToOverview());
+
   const modeRow = document.getElementById("journal-mode-chips");
   for (const mode of JOURNAL_MODES) {
     const chip = document.createElement("button");
@@ -2107,6 +2273,7 @@ async function openJournal() {
     chip.addEventListener("click", () => {
       state.journalMode = mode.key;
       modeRow.querySelectorAll(".newsbar-chip").forEach(c => c.classList.toggle("active", c === chip));
+      updateJournalViewMode();
       renderJournalList();
     });
     modeRow.appendChild(chip);
@@ -2119,6 +2286,7 @@ async function openJournal() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       state.journalQuery = search.value.trim();
+      updateJournalViewMode();
       renderJournalList();
     }, 300);
   });
@@ -2134,11 +2302,480 @@ async function openJournal() {
   const dateInput = document.getElementById("journal-new-date");
   dateInput.value = new Date().toISOString().slice(0, 10);
   document.getElementById("journal-new-btn").addEventListener("click", () => {
-    if (dateInput.value) selectJournalEntry(dateInput.value);
+    if (!dateInput.value) return;
+    state.journalMonth = dateInput.value.slice(0, 7);
+    updateJournalViewMode();
+    renderJournalList();
+    selectJournalEntry(dateInput.value);
   });
 
+  updateJournalViewMode();
+  await renderJournalMonths();
   await renderJournalList();
   if (state.journalRefKey) await selectJournalEntry(state.journalRefKey);
+
+  document.querySelectorAll(".journal-view-tab").forEach(tab => {
+    tab.addEventListener("click", () => switchJournalTab(tab.dataset.journalTab));
+  });
+  document.getElementById("nb-add-folder-btn").addEventListener("click", () => notebookCreateDirect(null, "folder"));
+  document.getElementById("nb-add-note-btn").addEventListener("click", () => notebookCreateDirect(null, "note"));
+  await switchJournalTab(state.journalTab, true);
+}
+
+/* ---------- Notizbuecher: frei verschachtelbare Ordner/Notizen ----------
+   Zweiter Bereich neben dem Tages-Tagebuch, fuer Inhalte ohne Kalenderbezug
+   (Strategie, Beobachtungen, Unterlagen, Logins, ...). Ordner koennen beliebig
+   tief verschachtelt und jederzeit unter einen anderen Ordner verschoben
+   werden (siehe move_notebook_node in db.py fuer die Zyklus-Pruefung). */
+
+const NB_ICON_FOLDER = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
+const NB_ICON_NOTE = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v5h5"/></svg>`;
+const NB_ICON_CHEVRON = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>`;
+
+async function switchJournalTab(tab, force = false) {
+  if (!force && state.journalTab === tab) return;
+  await flushNotebookNote();
+  state.journalTab = tab;
+  document.querySelectorAll(".journal-view-tab").forEach(t => t.classList.toggle("active", t.dataset.journalTab === tab));
+  document.getElementById("journal-diary-panel").hidden = tab !== "diary";
+  document.getElementById("notebook-panel").hidden = tab !== "notebooks";
+  if (tab === "notebooks") await renderNotebookTree();
+}
+
+function loadNotebookExpandedState() {
+  try {
+    state.notebookExpanded = new Set(JSON.parse(localStorage.getItem("notebookExpanded") || "[]"));
+  } catch {
+    state.notebookExpanded = new Set();
+  }
+}
+function saveNotebookExpandedState() {
+  localStorage.setItem("notebookExpanded", JSON.stringify([...state.notebookExpanded]));
+}
+
+async function fetchNotebookNodes() {
+  const { nodes } = await api("/api/notebooks");
+  return nodes;
+}
+
+/* Alle Nachfahren eines Knotens aus der flachen Liste - iterativ ueber
+   parent_id, damit weder Backend-Rundtrips noch WITH RECURSIVE noetig sind. */
+function notebookDescendantIds(nodes, rootId) {
+  const byParent = new Map();
+  for (const n of nodes) {
+    const key = n.parent_id ?? "root";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(n);
+  }
+  const ids = new Set();
+  const stack = [rootId];
+  while (stack.length) {
+    for (const child of byParent.get(stack.pop()) || []) {
+      if (!ids.has(child.id)) { ids.add(child.id); stack.push(child.id); }
+    }
+  }
+  return ids;
+}
+
+async function renderNotebookTree() {
+  const treeEl = document.getElementById("notebook-tree");
+  if (!treeEl) return;
+  const nodes = await fetchNotebookNodes();
+  treeEl.innerHTML = "";
+  if (!nodes.length) {
+    treeEl.innerHTML = `<div class="empty-state notebook-tree-empty">Noch keine Ordner oder Notizen - oben anlegen.</div>`;
+    return;
+  }
+  const byParent = new Map();
+  for (const n of nodes) {
+    const key = n.parent_id ?? "root";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(n);
+  }
+  for (const node of byParent.get("root") || []) {
+    treeEl.appendChild(notebookRowEl(node, 0, byParent));
+  }
+}
+
+function notebookRowEl(node, depth, byParent) {
+  const isFolder = node.node_type === "folder";
+  const expanded = state.notebookExpanded.has(node.id);
+
+  const wrap = document.createElement("div");
+  wrap.className = "nb-row" + (node.id === state.notebookSelectedId ? " selected" : "");
+  wrap.dataset.id = node.id;
+
+  const main = document.createElement("div");
+  main.className = "nb-row-main";
+  // Ab einer gewissen Tiefe nicht weiter einruecken, sonst frisst die
+  // Einrueckung bei langen Ketten irgendwann den kompletten Platz fuer den
+  // Namen weg (siehe Tooltip auf .nb-name als zusaetzliche Absicherung).
+  main.style.paddingLeft = `${6 + Math.min(depth, 10) * 18}px`;
+
+  if (isFolder) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "nb-toggle" + (expanded ? " expanded" : "");
+    toggle.setAttribute("aria-label", expanded ? "Ordner einklappen" : "Ordner ausklappen");
+    toggle.innerHTML = NB_ICON_CHEVRON;
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleNotebookFolder(node.id);
+    });
+    main.appendChild(toggle);
+  } else {
+    const spacer = document.createElement("span");
+    spacer.className = "nb-toggle-spacer";
+    main.appendChild(spacer);
+  }
+
+  const icon = document.createElement("span");
+  icon.className = "nb-icon";
+  icon.innerHTML = isFolder ? NB_ICON_FOLDER : NB_ICON_NOTE;
+  main.appendChild(icon);
+
+  const name = document.createElement("span");
+  name.className = "nb-name";
+  name.textContent = node.name;
+  name.title = node.name;
+  main.appendChild(name);
+
+  const actions = document.createElement("div");
+  actions.className = "nb-row-actions";
+
+  if (isFolder) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "nb-icon-btn";
+    addBtn.textContent = "+";
+    addBtn.setAttribute("aria-label", `Neu in "${node.name}"`);
+    addBtn.addEventListener("click", (e) => { e.stopPropagation(); notebookCreateFlow(node.id); });
+    actions.appendChild(addBtn);
+  }
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "nb-icon-btn";
+  renameBtn.textContent = "✎";
+  renameBtn.setAttribute("aria-label", "Umbenennen");
+  renameBtn.addEventListener("click", (e) => { e.stopPropagation(); notebookRenameFlow(node); });
+  actions.appendChild(renameBtn);
+
+  const moveBtn = document.createElement("button");
+  moveBtn.type = "button";
+  moveBtn.className = "nb-icon-btn";
+  moveBtn.textContent = "⇄";
+  moveBtn.setAttribute("aria-label", "Verschieben nach…");
+  moveBtn.addEventListener("click", (e) => { e.stopPropagation(); notebookMoveFlow(node); });
+  actions.appendChild(moveBtn);
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "nb-icon-btn nb-delete";
+  delBtn.textContent = "×";
+  delBtn.setAttribute("aria-label", "Löschen");
+  delBtn.addEventListener("click", (e) => { e.stopPropagation(); notebookDeleteFlow(node); });
+  actions.appendChild(delBtn);
+
+  main.appendChild(actions);
+  main.addEventListener("click", () => {
+    if (isFolder) toggleNotebookFolder(node.id);
+    else selectNotebookNote(node.id);
+  });
+  wrap.appendChild(main);
+
+  if (isFolder && expanded) {
+    const childWrap = document.createElement("div");
+    childWrap.className = "nb-children";
+    for (const child of byParent.get(node.id) || []) {
+      childWrap.appendChild(notebookRowEl(child, depth + 1, byParent));
+    }
+    wrap.appendChild(childWrap);
+  }
+  return wrap;
+}
+
+function toggleNotebookFolder(folderId) {
+  if (state.notebookExpanded.has(folderId)) state.notebookExpanded.delete(folderId);
+  else state.notebookExpanded.add(folderId);
+  saveNotebookExpandedState();
+  renderNotebookTree();
+}
+
+async function notebookCreateNode(parentId, nodeType, name) {
+  const { node } = await api("/api/notebooks", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_id: parentId, node_type: nodeType, name }),
+  });
+  if (parentId) { state.notebookExpanded.add(parentId); saveNotebookExpandedState(); }
+  await renderNotebookTree();
+  if (nodeType === "note") await selectNotebookNote(node.id);
+  return node;
+}
+
+async function notebookCreateDirect(parentId, nodeType) {
+  const label = nodeType === "folder" ? "Name des Ordners:" : "Titel der Notiz:";
+  const name = await promptDialog(label, nodeType === "folder" ? "Neuer Ordner" : "Neue Notiz");
+  if (!name) return;
+  await notebookCreateNode(parentId, nodeType, name);
+}
+
+/* "+" innerhalb eines Ordners - anders als die Werkzeugleiste (zwei getrennte
+   Buttons) muss hier erst geklaert werden, ob ein Unterordner oder eine
+   Notiz entstehen soll. */
+function notebookTypeDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    overlay.innerHTML = `
+      <div class="modal-card confirm-card">
+        <div class="confirm-message">Was möchtest du anlegen?</div>
+        <div class="confirm-actions">
+          <button class="btn btn-secondary confirm-no">Abbrechen</button>
+          <button class="btn btn-secondary" data-type="folder">Ordner</button>
+          <button class="btn btn-primary" data-type="note">Notiz</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    function cleanup(result) { overlay.remove(); resolve(result); }
+    attachOutsideClose(overlay, () => cleanup(null));
+    overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(null));
+    overlay.querySelectorAll("[data-type]").forEach(btn => {
+      btn.addEventListener("click", () => cleanup(btn.dataset.type));
+    });
+  });
+}
+
+async function notebookCreateFlow(parentId) {
+  const nodeType = await notebookTypeDialog();
+  if (!nodeType) return;
+  await notebookCreateDirect(parentId, nodeType);
+}
+
+async function notebookRenameFlow(node) {
+  const name = await promptDialog("Neuer Name:", node.name);
+  if (!name || name === node.name) return;
+  await api(`/api/notebooks/${node.id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  await renderNotebookTree();
+  if (state.notebookSelectedId === node.id && activeNotebookNote) {
+    activeNotebookNote.titleEl.value = name;
+  }
+}
+
+/* Statt Drag&Drop (bei beliebiger Verschachtelungstiefe schwer treffsicher zu
+   bedienen) ein Zielordner-Dialog - deckt "loesen und neu verknuepfen" ab,
+   ohne Baum-Drag-Handling zu brauchen. Ordner koennen nicht in sich selbst
+   oder einen eigenen Nachfahren verschoben werden (serverseitig zusaetzlich
+   abgesichert, siehe move_notebook_node). */
+function pickNotebookParentDialog(nodes, excludeIds, currentParentId) {
+  return new Promise((resolve) => {
+    const folders = nodes.filter(n => n.node_type === "folder" && !excludeIds.has(n.id));
+    const byParent = new Map();
+    for (const f of folders) {
+      const key = f.parent_id ?? "root";
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(f);
+    }
+    const rows = [];
+    (function walk(key, depth) {
+      for (const f of (byParent.get(key) || []).slice().sort((a, b) => a.name.localeCompare(b.name, "de"))) {
+        rows.push({ id: f.id, name: f.name, depth });
+        walk(f.id, depth + 1);
+      }
+    })("root", 0);
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    const rootSuffix = currentParentId === null ? " – aktuell" : "";
+    overlay.innerHTML = `
+      <div class="modal-card confirm-card">
+        <div class="confirm-message">Wohin verschieben?</div>
+        <div class="notebook-move-list">
+          <button type="button" class="notebook-move-option" data-id="" style="padding-left:10px">(Oberste Ebene)${rootSuffix}</button>
+          ${rows.map(r => `<button type="button" class="notebook-move-option" data-id="${r.id}" style="padding-left:${10 + r.depth * 16}px">${escapeHtml(r.name)}${r.id === currentParentId ? " – aktuell" : ""}</button>`).join("")}
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-secondary confirm-no">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    function cleanup(result) { overlay.remove(); resolve(result); }
+    attachOutsideClose(overlay, () => cleanup(undefined));
+    overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(undefined));
+    overlay.querySelectorAll(".notebook-move-option").forEach(btn => {
+      btn.addEventListener("click", () => cleanup(btn.dataset.id ? Number(btn.dataset.id) : null));
+    });
+  });
+}
+
+async function notebookMoveFlow(node) {
+  const nodes = await fetchNotebookNodes();
+  const excludeIds = new Set([node.id]);
+  if (node.node_type === "folder") {
+    for (const id of notebookDescendantIds(nodes, node.id)) excludeIds.add(id);
+  }
+  const targetId = await pickNotebookParentDialog(nodes, excludeIds, node.parent_id);
+  if (targetId === undefined || targetId === node.parent_id) return;
+  try {
+    await api(`/api/notebooks/${node.id}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent_id: targetId }),
+    });
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  if (targetId !== null) { state.notebookExpanded.add(targetId); saveNotebookExpandedState(); }
+  await renderNotebookTree();
+}
+
+async function notebookDeleteFlow(node) {
+  const nodes = await fetchNotebookNodes();
+  const descendantIds = node.node_type === "folder" ? notebookDescendantIds(nodes, node.id) : new Set();
+  const label = node.node_type === "folder"
+    ? `den Ordner "${node.name}"${descendantIds.size ? ` samt ${descendantIds.size} enthaltenem Eintrag/Einträgen` : ""}`
+    : `die Notiz "${node.name}"`;
+  if (!await confirmDelete(`Soll ${label} wirklich gelöscht werden?`, descendantIds.size > 0)) return;
+  await api(`/api/notebooks/${node.id}`, { method: "DELETE" });
+  if (state.notebookSelectedId === node.id || descendantIds.has(state.notebookSelectedId)) {
+    state.notebookSelectedId = null;
+    activeNotebookNote = null;
+    resetNotebookEditorHost();
+  }
+  await renderNotebookTree();
+}
+
+function resetNotebookEditorHost() {
+  const host = document.getElementById("notebook-editor-host");
+  if (!host) return;
+  host.innerHTML = `<div class="empty-state">Ordner oder Notiz links auswählen bzw. anlegen.</div>`;
+  host.dataset.notebookId = "";
+}
+
+const NOTEBOOK_TOOLBAR = [
+  [{ header: [1, 2, 3, false] }],
+  [{ font: [false, ...JOURNAL_FONTS] }, { size: [false, ...JOURNAL_SIZES] }],
+  ["bold", "italic", "underline", "strike"],
+  [{ color: [] }, { background: [] }],
+  [{ list: "ordered" }, { list: "bullet" }, { indent: "-1" }, { indent: "+1" }],
+  [{ align: [] }, "blockquote", "code-block"],
+  ["link", "image"],
+  ["clean"],
+];
+
+let activeNotebookNote = null;
+
+async function selectNotebookNote(nodeId) {
+  await flushNotebookNote();
+  state.notebookSelectedId = nodeId;
+  document.querySelectorAll("#notebook-tree .nb-row").forEach(el => {
+    el.classList.toggle("selected", Number(el.dataset.id) === nodeId);
+  });
+  const host = document.getElementById("notebook-editor-host");
+  await mountNotebookEditor(host, nodeId);
+}
+
+async function mountNotebookEditor(host, nodeId) {
+  if (!host) return;
+  if (host.dataset.notebookId === String(nodeId)) return;
+  initQuillFormats();
+  host.dataset.notebookId = String(nodeId);
+
+  const { node } = await api(`/api/notebooks/${nodeId}`);
+  host.innerHTML = `
+    <input type="text" class="notebook-note-title" id="notebook-note-title" value="${escapeHtml(node.name)}" placeholder="Titel">
+    <div class="journal-quill" id="notebook-quill"></div>
+    <div class="journal-footer">
+      <button type="button" class="btn btn-danger" id="notebook-delete-btn">Notiz löschen</button>
+      <span class="journal-status" id="notebook-note-status"></span>
+    </div>`;
+
+  const quill = new Quill(host.querySelector("#notebook-quill"), {
+    theme: "snow",
+    placeholder: "Frei schreiben…",
+    modules: { toolbar: { container: NOTEBOOK_TOOLBAR } },
+  });
+  if (node.content_html) quill.clipboard.dangerouslyPasteHTML(node.content_html);
+
+  activeNotebookNote = {
+    nodeId, quill, host, dirty: false, timer: null,
+    statusEl: host.querySelector("#notebook-note-status"),
+    titleEl: host.querySelector("#notebook-note-title"),
+  };
+
+  // Bilder in Notizen haengen an keinem Tag - eigener Upload-Endpunkt statt
+  // des tagesgebundenen /api/days/{day}/images (siehe mountJournalEditor).
+  quill.getModule("toolbar").addHandler("image", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async () => {
+      if (!input.files || !input.files[0]) return;
+      const fd = new FormData();
+      fd.append("file", input.files[0]);
+      const img = await api(`/api/notebooks/${nodeId}/images`, { method: "POST", body: fd });
+      const range = quill.getSelection(true);
+      quill.insertEmbed(range.index, "image", `/media/${img.filename}`, "user");
+      quill.setSelection(range.index + 1);
+      notebookMarkDirty();
+    };
+    input.click();
+  });
+
+  quill.on("text-change", (delta, old, source) => { if (source === "user") notebookMarkDirty(); });
+  activeNotebookNote.titleEl.addEventListener("input", () => notebookMarkDirty());
+  quill.root.addEventListener("blur", () => { if (activeNotebookNote && activeNotebookNote.dirty) saveNotebookNote(); });
+  activeNotebookNote.titleEl.addEventListener("blur", () => { if (activeNotebookNote && activeNotebookNote.dirty) saveNotebookNote(); });
+  host.querySelector("#notebook-delete-btn").addEventListener("click", () => notebookDeleteFlow(node));
+}
+
+function notebookStatus(text, tone = "") {
+  if (!activeNotebookNote || !activeNotebookNote.statusEl) return;
+  activeNotebookNote.statusEl.textContent = text;
+  activeNotebookNote.statusEl.className = "journal-status " + tone;
+}
+
+function notebookMarkDirty() {
+  if (!activeNotebookNote) return;
+  activeNotebookNote.dirty = true;
+  notebookStatus("Änderungen…", "pending");
+  clearTimeout(activeNotebookNote.timer);
+  activeNotebookNote.timer = setTimeout(() => saveNotebookNote(), JOURNAL_AUTOSAVE_MS);
+}
+
+async function saveNotebookNote(force = false) {
+  const n = activeNotebookNote;
+  if (!n || (!n.dirty && !force)) return;
+  clearTimeout(n.timer);
+  n.dirty = false;
+  const name = n.titleEl.value.trim() || "Ohne Titel";
+  const payload = {
+    name,
+    // getText() ignoriert eingebettete Bilder (Embeds zaehlen nicht als Text) -
+    // getLength() > 1 (Quill haengt immer ein abschliessendes Newline an)
+    // erkennt auch eine Notiz, die nur aus einem Bild ohne Text besteht.
+    content_html: n.quill.getLength() > 1 ? n.quill.root.innerHTML : "",
+    plain_text: n.quill.getText(),
+  };
+  try {
+    await api(`/api/notebooks/${n.nodeId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    notebookStatus("Gespeichert", "saved");
+    const nameEl = document.querySelector(`#notebook-tree .nb-row[data-id="${n.nodeId}"] > .nb-row-main .nb-name`);
+    if (nameEl) { nameEl.textContent = name; nameEl.title = name; }
+  } catch (e) {
+    n.dirty = true;
+    notebookStatus("Nicht gespeichert: " + e.message, "error");
+  }
+}
+
+async function flushNotebookNote() {
+  if (activeNotebookNote && activeNotebookNote.dirty) await saveNotebookNote();
 }
 
 /* ---------- Bilder & Lightbox ---------- */
@@ -3491,6 +4128,7 @@ sidebarAccountStatusEl.addEventListener("keydown", (e) => {
 
 loadFilterState();
 loadTagFilterState();
+loadNotebookExpandedState();
 renderSidebarAccountStatus();
 openOverview();
 

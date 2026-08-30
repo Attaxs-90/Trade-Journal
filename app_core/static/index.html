@@ -373,17 +373,17 @@
 </template>
 
 <template id="tpl-journal">
-  <section class="view">
+  <section class="view view-journal">
     <header class="view-header">
       <h1>Journal</h1>
-      <div class="journal-new">
-        <input type="date" id="journal-new-date">
-        <button type="button" class="btn btn-primary" id="journal-new-btn">+ Eintrag</button>
+      <div class="journal-view-tabs" id="journal-view-tabs">
+        <button type="button" class="journal-view-tab active" data-journal-tab="diary">Tagebuch</button>
+        <button type="button" class="journal-view-tab" data-journal-tab="notebooks">Notizbücher</button>
       </div>
     </header>
 
-    <div class="journal-layout">
-      <aside class="journal-list-pane">
+    <div class="journal-diary-panel" id="journal-diary-panel">
+      <div class="journal-toolbar">
         <input type="search" id="journal-search" class="journal-search" placeholder="Volltextsuche…">
         <div class="newsbar-chip-row journal-mode-row" id="journal-mode-chips"></div>
         <div class="inline-filter journal-tag-filter">
@@ -392,16 +392,54 @@
           </button>
           <div class="inline-filter-panel" id="journal-tag-panel" hidden></div>
         </div>
-        <div class="journal-bulk-bar" id="journal-bulk-bar" hidden>
-          <span class="journal-bulk-count" id="journal-bulk-count"></span>
-          <button type="button" class="btn btn-secondary journal-bulk-clear">Auswahl aufheben</button>
-          <button type="button" class="btn btn-danger journal-bulk-delete">Löschen</button>
+        <div class="journal-new">
+          <input type="date" id="journal-new-date">
+          <button type="button" class="btn btn-primary" id="journal-new-btn">+ Eintrag</button>
         </div>
-        <div class="journal-list" id="journal-list"></div>
-      </aside>
+      </div>
 
-      <div class="journal-editor-pane">
-        <div class="journal-editor-host" id="journal-page-host"></div>
+      <nav class="journal-breadcrumb" id="journal-breadcrumb" hidden>
+        <button type="button" class="journal-breadcrumb-root" id="journal-breadcrumb-root">← Übersicht</button>
+        <span class="journal-breadcrumb-sep">/</span>
+        <span class="journal-breadcrumb-current" id="journal-breadcrumb-current"></span>
+      </nav>
+
+      <div class="journal-bulk-bar" id="journal-bulk-bar" hidden>
+        <span class="journal-bulk-count" id="journal-bulk-count"></span>
+        <button type="button" class="btn btn-secondary journal-bulk-clear">Auswahl aufheben</button>
+        <button type="button" class="btn btn-danger journal-bulk-delete">Löschen</button>
+      </div>
+
+      <div class="journal-months" id="journal-months">
+        <div class="journal-year-jump" id="journal-year-jump"></div>
+        <div class="journal-year-groups" id="journal-year-groups"></div>
+      </div>
+
+      <div class="journal-layout" id="journal-layout" hidden>
+        <aside class="journal-list-pane">
+          <div class="journal-list" id="journal-list"></div>
+        </aside>
+
+        <div class="journal-editor-pane">
+          <div class="journal-editor-host" id="journal-page-host"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notebook-panel" id="notebook-panel" hidden>
+      <div class="notebook-toolbar">
+        <button type="button" class="btn btn-secondary" id="nb-add-folder-btn">+ Ordner</button>
+        <button type="button" class="btn btn-secondary" id="nb-add-note-btn">+ Notiz</button>
+      </div>
+      <div class="notebook-layout">
+        <aside class="journal-list-pane notebook-tree-pane">
+          <div class="notebook-tree" id="notebook-tree"></div>
+        </aside>
+        <div class="journal-editor-pane notebook-editor-pane">
+          <div class="notebook-editor-host" id="notebook-editor-host">
+            <div class="empty-state">Ordner oder Notiz links auswählen bzw. anlegen.</div>
+          </div>
+        </div>
       </div>
     </div>
   </section>

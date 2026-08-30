@@ -130,6 +130,22 @@ class JournalTemplateUpdate(BaseModel):
     position: int = 0
 
 
+class NotebookNodeCreate(BaseModel):
+    parent_id: int | None = None
+    node_type: str  # "folder" oder "note"
+    name: str
+
+
+class NotebookNodeUpdate(BaseModel):
+    name: str | None = None
+    content_html: str | None = None
+    plain_text: str | None = None
+
+
+class NotebookNodeMove(BaseModel):
+    parent_id: int | None = None
+
+
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -480,6 +496,11 @@ def api_list_journal(type: str = "day", start: str | None = None, end: str | Non
     )}
 
 
+@app.get("/api/journal/months")
+def api_journal_months():
+    return {"months": db.journal_month_summary()}
+
+
 @app.get("/api/journal/{entry_type}/{ref_key}")
 def api_get_journal(entry_type: str, ref_key: str):
     entry_type, ref_key = _check_journal_ref(entry_type, ref_key)
@@ -539,6 +560,85 @@ def api_update_journal_template(template_id: int, payload: JournalTemplateUpdate
 def api_delete_journal_template(template_id: int):
     db.delete_journal_template(template_id)
     return {"ok": True}
+
+
+@app.get("/api/notebooks")
+def api_list_notebooks():
+    return {"nodes": db.list_notebook_nodes()}
+
+
+@app.get("/api/notebooks/{node_id}")
+def api_get_notebook(node_id: int):
+    node = db.get_notebook_node(node_id)
+    if not node:
+        raise HTTPException(404, "Notiz/Ordner nicht gefunden.")
+    return {"node": node}
+
+
+@app.post("/api/notebooks")
+def api_create_notebook(payload: NotebookNodeCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    if payload.node_type not in ("folder", "note"):
+        raise HTTPException(400, "node_type muss 'folder' oder 'note' sein.")
+    if payload.parent_id is not None:
+        parent = db.get_notebook_node(payload.parent_id)
+        if not parent:
+            raise HTTPException(404, "Übergeordneter Ordner nicht gefunden.")
+        if parent["node_type"] != "folder":
+            raise HTTPException(400, "Nur Ordner können weitere Einträge enthalten.")
+    return {"node": db.create_notebook_node(payload.parent_id, payload.node_type, name)}
+
+
+@app.put("/api/notebooks/{node_id}")
+def api_update_notebook(node_id: int, payload: NotebookNodeUpdate):
+    if not db.get_notebook_node(node_id):
+        raise HTTPException(404, "Notiz/Ordner nicht gefunden.")
+    name = payload.name.strip() if payload.name is not None else None
+    if name == "":
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    node = db.update_notebook_node(node_id, name, payload.content_html, payload.plain_text)
+    return {"node": node}
+
+
+@app.post("/api/notebooks/{node_id}/move")
+def api_move_notebook(node_id: int, payload: NotebookNodeMove):
+    if not db.get_notebook_node(node_id):
+        raise HTTPException(404, "Notiz/Ordner nicht gefunden.")
+    if payload.parent_id is not None:
+        parent = db.get_notebook_node(payload.parent_id)
+        if not parent:
+            raise HTTPException(404, "Übergeordneter Ordner nicht gefunden.")
+        if parent["node_type"] != "folder":
+            raise HTTPException(400, "Nur Ordner können weitere Einträge enthalten.")
+    try:
+        node = db.move_notebook_node(node_id, payload.parent_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"node": node}
+
+
+@app.delete("/api/notebooks/{node_id}")
+def api_delete_notebook(node_id: int):
+    db.delete_notebook_node(node_id)
+    return {"ok": True}
+
+
+@app.post("/api/notebooks/{node_id}/images")
+async def api_upload_notebook_image(node_id: int, file: UploadFile = File(...)):
+    """Bilder in Notizbuch-Notizen haengen (anders als Tages-/Trade-Bilder) an
+    keinem Kalendertag - kein images-Zeilen-Eintrag noetig, das Bild lebt
+    ausschliesslich als <img>-Tag im content_html der Notiz (Quill haelt die
+    Referenz), die Datei selbst liegt wie alle anderen Bilder unter IMAGES_DIR."""
+    if not db.get_notebook_node(node_id):
+        raise HTTPException(404, "Notiz nicht gefunden.")
+    raw = await _read_upload(file, MAX_IMAGE_BYTES)
+    try:
+        filename, thumb_filename = save_image(raw)
+    except Exception:
+        raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
+    return {"filename": filename, "thumb_filename": thumb_filename}
 
 
 @app.get("/api/news/calendar")
