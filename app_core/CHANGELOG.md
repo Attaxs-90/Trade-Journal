@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0
+- Tagesansicht neu gestaltet: Trades stehen als linke Spalte mit Feldern
+  untereinander statt als Tabelle, Reihenfolge per Drag & Drop einstellbar,
+  Pfeil-Navigation zwischen den Trades desselben Tages.
+- Kalender-Modal der Tagesansicht lädt die Monatsübersicht beim Schließen
+  neu, damit ein frischer Journal-/Bild-Eintrag sofort im Kalender-Icon
+  erscheint.
+- Trades-Übersicht: neue Badge zeigt an, ob zu einem Trade ein
+  Journal-Eintrag existiert; Mehrfachauswahl per Checkbox, um
+  Journal-Einträge mehrerer Trades auf einmal zu löschen; Feldreihenfolge
+  lässt sich jetzt auch einzeln ein-/ausblenden (nicht nur umsortieren).
+- Sidebar-Menüpunkte per Drag & Drop umsortierbar, Reihenfolge wird
+  gespeichert.
+- "Alle Tags"-Chip und Auswahlleisten (Trades/Journal) zeigen keinen blauen
+  Standard-Hintergrund mehr - echte Auswahl bleibt weiterhin farbig
+  hervorgehoben.
+
 ## 1.3.0
 - Neue Einzel-Trade-Seite: Bewertung/Verfassung/Plan-befolgt/Tags/Freitext
   je Trade (gleiches System wie das Tages-Journal), Vor/Zurück-Navigation
