@@ -2659,8 +2659,8 @@ function shortenLabel(label, max = 13) {
    noetig ist. metric.field zeigt auf das Feld in jeder row, das die Balkenhoehe
    liefert; null-Werte (z.B. Profit-Faktor ohne Verlusttrade) werden als "∞"
    beschriftet statt als 0 fehlinterpretiert. */
-function barChartSvg(rows, metric) {
-  const w = 1000, h = 260, padL = 54, padR = 16, padT = 20, padB = 46;
+function barChartSvg(rows, metric, w = 1000, h = 260) {
+  const padL = 54, padR = 16, padT = 20, padB = 46;
   const values = rows.map(r => { const v = r[metric.field]; return v == null ? 0 : v; });
   const rawMin = Math.min(0, ...values), rawMax = Math.max(0, ...values);
   const range = (rawMax - rawMin) || 1;
@@ -2687,6 +2687,17 @@ function barChartSvg(rows, metric) {
     gridSvg += `<text x="${padL - 8}" y="${gy + 3}" fill="${faint}" font-size="10" text-anchor="end">${fmtNum(v, 0)}</text>`;
   }
 
+  // Wieviele x-Achsen-Beschriftungen unten Platz haben, bevor sie sich
+  // ueberlappen - wie die Datums-Labels in lineChartSvg() nur eine Auswahl
+  // zeigen statt jede Kategorie, wenn es viele sind (z.B. 24 Stunden) oder
+  // die Kategorienamen selbst lang sind (z.B. Instrument-Ticker). Richtet
+  // sich nach der tatsaechlichen Durchschnittslaenge der Labels, nicht nach
+  // einer festen Breite - sonst ueberlappen sich lange Namen trotzdem.
+  const avgLabelLen = rows.reduce((sum, r) => sum + shortenLabel(r.label).length, 0) / n || 6;
+  const labelPxNeeded = Math.max(34, avgLabelLen * 6.2 + 8);
+  const maxAxisLabels = Math.max(1, Math.floor((w - padL - padR) / labelPxNeeded));
+  const axisLabelStep = Math.max(1, Math.ceil(n / maxAxisLabels));
+
   let barsSvg = "", labelsSvg = "", hitSvg = "";
   rows.forEach((r, i) => {
     const raw = r[metric.field];
@@ -2699,18 +2710,43 @@ function barChartSvg(rows, metric) {
     const valueLabel = raw == null ? "∞" : `${fmtNum(v, metric.decimals ?? 0)}${metric.unit ? " " + metric.unit : ""}`;
     const labelY = v >= 0 ? barTop - 6 : barBottom + 14;
     barsSvg += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${barTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="4" fill="${color}" opacity="0.85" />`;
-    barsSvg += `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" fill="${text}" font-size="11" font-weight="600" text-anchor="middle">${valueLabel}</text>`;
-    labelsSvg += `<text x="${cx.toFixed(1)}" y="${h - padB + 18}" fill="${faint}" font-size="10" text-anchor="middle">${escapeHtml(shortenLabel(r.label))}</text>`;
+    // Wertelabel nur zeichnen, wenn es grob in die eigene Bandbreite passt -
+    // sonst ueberlappen sich Nachbarlabels bei vielen/schmalen Balken (z.B.
+    // 24 Stunden) und werden unleserlich. Der exakte Wert bleibt per Tooltip
+    // abrufbar, auch wenn das Label hier ausgelassen wird.
+    const estWidth = valueLabel.length * 6.3;
+    if (estWidth <= bandW - 2) {
+      barsSvg += `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" fill="${text}" font-size="11" font-weight="600" text-anchor="middle">${valueLabel}</text>`;
+    }
+    if (i % axisLabelStep === 0) {
+      labelsSvg += `<text x="${cx.toFixed(1)}" y="${h - padB + 18}" fill="${faint}" font-size="10" text-anchor="middle">${escapeHtml(shortenLabel(r.label))}</text>`;
+    }
     hitSvg += `<rect class="chart-dot-hit" x="${(cx - bandW / 2).toFixed(1)}" y="${padT}" width="${bandW.toFixed(1)}" height="${h - padT - padB}" fill="transparent" data-day="${escapeHtml(r.label)}" data-value="${raw == null ? "" : v}" data-count="${r.trade_count}" />`;
   });
 
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+  // Kein preserveAspectRatio="none" mehr: w/h kommen jetzt von mountBarChart()
+  // in echten Pixelmassen der Kachel, die viewBox entspricht also bereits der
+  // tatsaechlichen Seitenverhaeltnis - eine nicht-uniforme Streckung (und
+  // damit verzerrter, schwer lesbarer Text) faellt dadurch weg.
+  return `<svg viewBox="0 0 ${w} ${h}">
     ${gridSvg}
     <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${w - padR}" y2="${zeroY.toFixed(1)}" stroke="${text}" stroke-width="1" opacity="0.5" />
     ${barsSvg}
     ${labelsSvg}
     ${hitSvg}
   </svg>`;
+}
+
+/* Zeichnet das Balkendiagramm in einen bereits im DOM haengenden, leeren
+   .chart-wrap - braucht ein eingehaengtes Element zum Ausmessen (nicht nur
+   einen HTML-String), damit die viewBox exakt der gerenderten Kachelgroesse
+   entspricht statt einer festen 1000x260-Einheit, die je nach Kachelbreite
+   unterschiedlich stark nicht-uniform gestreckt wuerde. */
+function mountBarChart(wrap, rows, metric, tooltipRenderer) {
+  const w = Math.max(220, Math.round(wrap.clientWidth) || 1000);
+  const h = Math.max(120, Math.round(wrap.clientHeight) || 260);
+  wrap.innerHTML = barChartSvg(rows, metric, w, h) + `<div class="chart-tooltip"></div>`;
+  attachChartTooltip(wrap, tooltipRenderer);
 }
 
 function barTooltipRenderer(metric) {
@@ -2787,8 +2823,8 @@ async function renderDistributionWidget(body) {
       <span>Größter Gewinn: <strong class="pos">${fmtNum(data.largest_win)} $</strong></span>
       <span>Größter Verlust: <strong class="neg">${fmtNum(data.largest_loss)} $</strong></span>
     </div>
-    <div class="chart-wrap analytics-bar-chart">${barChartSvg(rows, metric)}<div class="chart-tooltip"></div></div>`;
-  attachChartTooltip(body.querySelector(".analytics-bar-chart"), (hit) =>
+    <div class="chart-wrap analytics-bar-chart"></div>`;
+  mountBarChart(body.querySelector(".analytics-bar-chart"), rows, metric, (hit) =>
     `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)} $</div><div class="chart-tooltip-value">${hit.dataset.count} Trades</div>`);
 }
 
@@ -2800,8 +2836,8 @@ async function renderBreakdownWidget(body, widget) {
     body.innerHTML = `<div class="empty-state">Keine Daten für diese Auswertung im gewählten Zeitraum/Filter.</div>`;
     return;
   }
-  body.innerHTML = `<div class="chart-wrap analytics-bar-chart">${barChartSvg(rows, metric)}<div class="chart-tooltip"></div></div>`;
-  attachChartTooltip(body.querySelector(".analytics-bar-chart"), barTooltipRenderer(metric));
+  body.innerHTML = `<div class="chart-wrap analytics-bar-chart"></div>`;
+  mountBarChart(body.querySelector(".analytics-bar-chart"), rows, metric, barTooltipRenderer(metric));
 }
 
 function analyticsWidgetRenderer(widget) {
