@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.1
+- Journal: Lösch-Button pro Eintrag (mit Ja-Bestätigung) und Mehrfachauswahl
+  zum gemeinsamen Löschen mehrerer Tage.
+- Journal: Bewertung/Verfassung/Plan-befolgt jetzt als Liste untereinander,
+  direkter Link zur Vorlagenverwaltung aus dem Editor.
+- Marktnews: neuer Filter "FTMO News" für FTMOs Restricted Events (2 Min.
+  Trade-Sperre vor/nach der Veröffentlichung) - mit ❗-Markierung, optionaler
+  roter Hervorhebung und Hinweis-Icon bei eingeklappter Newsbar.
+- Tags/Journal-Vorlagen: Eingabefelder kompakter und untereinander statt
+  über die volle Breite verteilt.
+- Diverse Bugfixes: Browser-Autofill-Vorschläge bei Tags deaktiviert, zwei
+  Fälle behoben in denen die Seite nach einem Sprung zu den
+  Journal-Vorlagen falsch scrollte.
+
 ## 1.2.0
 - Neues Journal: formatierbare Einträge (Schriftart, Größe, Listen,
   Überschriften u. a.) je Handelstag, unabhängig davon ob an dem Tag
