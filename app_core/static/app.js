@@ -752,12 +752,13 @@ async function openTagPopover(button, trade, cell) {
 
   popover.hidden = false;
   const rect = button.getBoundingClientRect();
-  popover.style.top = `${rect.bottom + 4}px`;
-  popover.style.left = `${rect.left}px`;
+  const zoom = currentZoom();
+  popover.style.top = `${(rect.bottom + 4) / zoom}px`;
+  popover.style.left = `${rect.left / zoom}px`;
   requestAnimationFrame(() => {
     const pRect = popover.getBoundingClientRect();
-    if (pRect.right > window.innerWidth - 8) popover.style.left = `${Math.max(8, window.innerWidth - pRect.width - 8)}px`;
-    if (pRect.bottom > window.innerHeight - 8) popover.style.top = `${Math.max(8, rect.top - pRect.height - 4)}px`;
+    if (pRect.right > window.innerWidth - 8) popover.style.left = `${Math.max(8, window.innerWidth - pRect.width - 8) / zoom}px`;
+    if (pRect.bottom > window.innerHeight - 8) popover.style.top = `${Math.max(8, rect.top - pRect.height - 4) / zoom}px`;
   });
 }
 
@@ -1992,16 +1993,39 @@ function saveLightboxSize(size) {
   localStorage.setItem("lightboxSize", JSON.stringify(size));
 }
 
+/* Ab 2200px/3200px Fensterbreite skaliert die App per CSS-Zoom hoch (siehe
+   style.css) - Chromium rendert dabei JEDEN in px geschriebenen Wert eines
+   Nachfahren-Elements zusaetzlich mal diesem Zoom-Faktor (bestaetigt: 720px
+   geschriebene Breite kommt bei zoom:1.15 als 828px = 720*1.15 gerendert
+   zurueck). window.innerWidth/innerHeight sind davon nicht betroffen und
+   zeigen weiterhin die echte Fenstergroesse. Jeder Code, der eine Zielgroesse
+   in echten Bildschirm-Pixeln berechnet und dann per style.width/height/left/
+   top setzt, muss deshalb durch den Zoom-Faktor teilen. */
+function currentZoom() {
+  return parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+}
+
 function positionLightboxBox(size) {
   const box = document.getElementById("lightbox-box");
+  // Eine gespeicherte Groesse kann von einem groesseren Monitor stammen -
+  // hier immer auf das aktuelle Fenster begrenzen (gleiche Grenzen wie beim
+  // manuellen Ziehen am Handle), sonst ragt die Box ueber den Bildschirm
+  // hinaus und die Toolbar (Groesse speichern/Standardgroesse/Loeschen) am
+  // unteren Rand wird unerreichbar. Die gespeicherte Praeferenz selbst bleibt
+  // dabei unangetastet - zurueck auf dem grossen Monitor gilt sie wieder voll.
+  const maxWidth = window.innerWidth * 0.96;
+  const maxHeight = window.innerHeight * 0.9;
+  const width = Math.min(size.width, maxWidth);
+  const height = Math.min(size.height, maxHeight);
   // top/left einmalig fest setzen (nicht ueber Flexbox zentrieren) - sonst
   // verschiebt sich der Anker waehrend des Resize-Drags mit dem Mauszeiger mit.
-  const left = Math.max(10, Math.round((window.innerWidth - size.width) / 2));
-  const top = Math.max(10, Math.round((window.innerHeight - size.height) / 2));
-  box.style.left = left + "px";
-  box.style.top = top + "px";
-  box.style.width = size.width + "px";
-  box.style.height = size.height + "px";
+  const left = Math.max(10, Math.round((window.innerWidth - width) / 2));
+  const top = Math.max(10, Math.round((window.innerHeight - height) / 2));
+  const zoom = currentZoom();
+  box.style.left = (left / zoom) + "px";
+  box.style.top = (top / zoom) + "px";
+  box.style.width = (width / zoom) + "px";
+  box.style.height = (height / zoom) + "px";
 }
 
 function openLightbox(img) {
@@ -2038,10 +2062,11 @@ function closeLightbox() {
     const maxHeight = window.innerHeight * 0.9;
     const width = Math.min(maxWidth, Math.max(minWidth, Math.abs(e.clientX - centerX) * 2));
     const height = Math.min(maxHeight, Math.max(minHeight, Math.abs(e.clientY - centerY) * 2));
-    box.style.width = width + "px";
-    box.style.height = height + "px";
-    box.style.left = (centerX - width / 2) + "px";
-    box.style.top = (centerY - height / 2) + "px";
+    const zoom = currentZoom();
+    box.style.width = (width / zoom) + "px";
+    box.style.height = (height / zoom) + "px";
+    box.style.left = ((centerX - width / 2) / zoom) + "px";
+    box.style.top = ((centerY - height / 2) / zoom) + "px";
   }
 
   function onUp() {
@@ -2397,8 +2422,9 @@ function attachChartTooltip(chartWrap) {
     let top = e.clientY - wrapRect.top - th - 10;
     if (left + tw > wrapRect.width) left = e.clientX - wrapRect.left - tw - 14;
     if (top < 0) top = e.clientY - wrapRect.top + 14;
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
+    const zoom = currentZoom();
+    tooltip.style.left = `${left / zoom}px`;
+    tooltip.style.top = `${top / zoom}px`;
   };
 
   chartWrap.querySelectorAll(".chart-dot-hit").forEach(hit => {

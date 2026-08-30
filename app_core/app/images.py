@@ -7,10 +7,10 @@ from PIL import Image, ImageOps
 
 from .config import IMAGES_DIR
 
-MAX_WIDTH = 1600
-MAX_THUMB_WIDTH = 320
-JPEG_QUALITY = 82
-THUMB_QUALITY = 70
+MAX_WIDTH = 2200
+MAX_THUMB_WIDTH = 380
+JPEG_QUALITY = 90
+THUMB_QUALITY = 78
 
 
 def _resized(img: Image.Image, max_width: int) -> Image.Image:

@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import db, news
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
@@ -17,6 +18,28 @@ STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="Trade Journal")
 db.init_db()
+
+
+# HTML/CSS/JS aendern sich bei jedem Update, haben aber keine versionierte
+# URL (bewusst kein Build-Schritt, siehe CLAUDE.md) - ohne Cache-Control
+# entscheidet der Browser per Heuristik selbst, wie lange er sie ungefragt
+# aus dem Cache statt vom Server serviert, und ein einfaches Neuladen zeigt
+# dann trotz geaenderter Datei auf der Platte noch den alten Stand (wiederholt
+# in dieser Session aufgetreten, u.a. beim Lightbox-Fix). no-cache erzwingt
+# eine Revalidierung (If-Modified-Since) bei jedem Laden - der Server
+# antwortet bei unveraendertem Inhalt weiterhin schnell mit 304, es wird also
+# nicht bei jedem Laden neu heruntergeladen, nur immer geprueft. Bilder unter
+# /media sind davon bewusst ausgenommen (Dateiname enthaelt bereits eine neue
+# UUID pro Upload, aggressives Caching ist dort unproblematisch).
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if not request.url.path.startswith("/media"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.add_middleware(NoCacheStaticMiddleware)
 
 MAX_CSV_BYTES = 25 * 1024 * 1024   # 25 MB - grosszuegig fuer Tages-/Wochenexporte
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB - deckt auch hochaufgeloeste Screenshots ab

@@ -1071,6 +1071,15 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
+  /* Der absolut positionierte Resize-Griff (.lightbox-handle, unten rechts
+     an der Box verankert) ueberlappt geometrisch die Ecke des letzten
+     Buttons hier - ohne eigenen Stacking-Kontext wuerde er trotzdem ueber
+     der Toolbar liegen (absolut positionierte Elemente malen sich immer
+     ueber normale Flow-Geschwister, unabhaengig von der DOM-Reihenfolge) und
+     Klicks in dieser Ecke abfangen. */
+  position: relative;
+  z-index: 2;
 }
 .lightbox-close {
   position: absolute;
