@@ -4,7 +4,7 @@ const state = {
   tagFilterMode: "all", tagFilterKeys: [], tagFilterLogic: "or",
   // Journal hat einen eigenen Tag-Filter: er filtert Journal-Eintraege, nicht
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
-  journalMode: "all", journalQuery: "", journalTagKeys: [], journalRefKey: null,
+  journalMode: "all", journalQuery: "", journalSearchScope: "journal", journalTagKeys: [], journalRefKey: null,
   journalMonth: null, journalTab: "diary",
   journalSelectedKeys: new Set(),
   notebookExpanded: new Set(), notebookSelectedId: null,
@@ -1064,6 +1064,180 @@ async function mountView(templateId) {
   return content;
 }
 
+/* Kachel-Definitionen der Uebersicht - jede mit eigener render(data)-Funktion,
+   damit Prozent-/Verhaeltnis-Kennzahlen ihre Gauge-/Ratio-Grafik bekommen
+   (analog zum Auswertungen-Widget-System, aber ohne Umsortieren - hier reicht
+   Ein-/Ausblenden). Reihenfolge hier = Anzeige-Reihenfolge. */
+const OVERVIEW_STAT_DEFS = [
+  { key: "start_balance", label: "Startkapital", render: (d) => tile("Startkapital", fmtNum(d.start_balance) + " $") },
+  { key: "current_balance", label: "Kontostand", render: (d) => tile("Kontostand", fmtNum(d.current_balance) + " $", cls(d.current_balance - d.start_balance)) },
+  { key: "total_net", label: "Netto gesamt", render: (d) => tile("Netto gesamt", fmtSigned(d.total_net) + " $", cls(d.total_net)) },
+  { key: "total_trades", label: "Trades gesamt", render: (d) => tile("Trades gesamt", d.total_trades) },
+  { key: "trading_days", label: "Handelstage", render: (d) => tile("Handelstage", d.trading_days) },
+  { key: "win_rate", label: "Trefferquote", render: (d) => gaugeTile("Trefferquote", d.win_rate, fmtNum(d.win_rate, 1) + " %") },
+  { key: "profit_factor", label: "Profit-Faktor", render: (d) => tile("Profit-Faktor", d.profit_factor === null ? "∞" : fmtNum(d.profit_factor, 2)) },
+  { key: "win_days_pct", label: "Handelstage % Gewinn", render: (d) => gaugeTile("Handelstage % Gewinn", d.win_days_pct, fmtNum(d.win_days_pct, 1) + " %") },
+  { key: "win_loss_ratio", label: "Ø Gewinn/Verlust-Verhältnis", render: (d) => ratioTile("Ø Gewinn/Verlust-Verhältnis", d.avg_win, d.avg_loss, d.win_loss_ratio) },
+  { key: "expectancy", label: "Erwartungswert", render: (d) => tile("Erwartungswert", fmtSigned(d.expectancy, 2) + " $", cls(d.expectancy)) },
+  { key: "best_day", label: "Bester Tag", render: (d) => tile("Bester Tag", d.best_day ? `${d.best_day.day} (${fmtSigned(d.best_day.net_usd)} $)` : "–") },
+  { key: "worst_day", label: "Schwächster Tag", render: (d) => tile("Schwächster Tag", d.worst_day ? `${d.worst_day.day} (${fmtSigned(d.worst_day.net_usd)} $)` : "–") },
+];
+const OVERVIEW_STAT_KEYS = OVERVIEW_STAT_DEFS.map(d => d.key);
+
+/* Gespeichert werden die AUSGEBLENDETEN Kacheln, nicht die sichtbaren -
+   analog zu overviewHiddenColumns/tradeFieldHidden (siehe CLAUDE.md), sonst
+   waere eine neu hinzugekommene Kachel fuer Bestandsnutzer unsichtbar. */
+function loadOverviewHiddenStats() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("overviewHiddenStats") || "null");
+    if (Array.isArray(saved)) return new Set(saved.filter(k => OVERVIEW_STAT_KEYS.includes(k)));
+  } catch (e) { /* ignore */ }
+  return new Set();
+}
+function saveOverviewHiddenStats(hiddenSet) {
+  localStorage.setItem("overviewHiddenStats", JSON.stringify([...hiddenSet]));
+}
+
+/* Reihenfolge der Kacheln - analog zu tradeFieldOrder/analyticsWidgets:
+   unbekannte/entfernte Keys rausfiltern, neu hinzugekommene hinten anhaengen. */
+function loadOverviewStatOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("overviewStatOrder") || "null");
+    if (Array.isArray(saved)) {
+      const known = saved.filter(k => OVERVIEW_STAT_KEYS.includes(k));
+      for (const k of OVERVIEW_STAT_KEYS) if (!known.includes(k)) known.push(k);
+      return known;
+    }
+  } catch (e) { /* ignore */ }
+  return [...OVERVIEW_STAT_KEYS];
+}
+function saveOverviewStatOrder(order) {
+  localStorage.setItem("overviewStatOrder", JSON.stringify(order));
+}
+
+/* Drag & Drop der Kacheln im Grid - 2-achsige Positionsbestimmung wie bei den
+   Auswertungen-Widgets (analyticsCardGoesBefore), da #ov-stats ein
+   mehrspaltiges Grid ist, kein einspaltiges wie die Trade-Feldreihenfolge. */
+let overviewStatDragEl = null;
+function overviewStatGoesBefore(e, rect) {
+  if (e.clientY < rect.top) return true;
+  if (e.clientY > rect.bottom) return false;
+  return e.clientX < rect.left + rect.width / 2;
+}
+function wireOverviewStatDrag(tileEl) {
+  tileEl.addEventListener("dragstart", (e) => {
+    overviewStatDragEl = tileEl;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", tileEl.dataset.statKey);
+    tileEl.classList.add("dragging");
+  });
+  tileEl.addEventListener("dragend", () => {
+    tileEl.classList.remove("dragging");
+    overviewStatDragEl = null;
+    const keys = [...document.querySelectorAll("#ov-stats .stat-tile")].map(t => t.dataset.statKey);
+    saveOverviewStatOrder(keys);
+  });
+  tileEl.addEventListener("dragover", (e) => {
+    if (!overviewStatDragEl || overviewStatDragEl === tileEl) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const before = overviewStatGoesBefore(e, tileEl.getBoundingClientRect());
+    tileEl.parentElement.insertBefore(overviewStatDragEl, before ? tileEl : tileEl.nextSibling);
+  });
+}
+
+function gaugeTile(label, pct, valueText) {
+  const clamped = Math.max(0, Math.min(100, pct ?? 0));
+  return `<div class="stat-tile">
+    <div class="label">${label}</div>
+    <div class="value">${valueText}</div>
+    <div class="stat-gauge-track"><div class="stat-gauge-marker" style="left:${clamped}%"></div></div>
+    <div class="stat-gauge-scale"><span>0</span><span>50</span><span>100</span></div>
+  </div>`;
+}
+
+function ratioTile(label, avgWin, avgLoss, ratio) {
+  const win = Math.abs(avgWin || 0), loss = Math.abs(avgLoss || 0);
+  const total = win + loss;
+  const winPct = total ? (win / total * 100) : 50;
+  const valueText = ratio === null ? "∞" : fmtNum(ratio, 2);
+  return `<div class="stat-tile">
+    <div class="label">${label}</div>
+    <div class="value">${valueText}</div>
+    <div class="stat-ratio-track">
+      <div class="stat-ratio-win" style="width:${winPct}%"></div>
+      <div class="stat-ratio-loss" style="width:${100 - winPct}%"></div>
+    </div>
+    <div class="stat-ratio-scale"><span class="pos">+${fmtNum(win, 2)} $</span><span class="neg">-${fmtNum(loss, 2)} $</span></div>
+  </div>`;
+}
+
+let lastOverviewData = null;
+
+function renderOverviewStats(data) {
+  lastOverviewData = data;
+  const hidden = loadOverviewHiddenStats();
+  const grid = document.getElementById("ov-stats");
+  grid.innerHTML = loadOverviewStatOrder()
+    .filter(key => !hidden.has(key))
+    .map(key => {
+      const def = OVERVIEW_STAT_DEFS.find(d => d.key === key);
+      const html = def.render(data);
+      // draggable/data-Attribut hier statt in jeder render()-Funktion setzen -
+      // alle drei (tile/gaugeTile/ratioTile) beginnen mit demselben
+      // `<div class="stat-tile">`.
+      return html.replace('<div class="stat-tile">', `<div class="stat-tile" draggable="true" data-stat-key="${key}">`);
+    }).join("");
+  grid.querySelectorAll(".stat-tile").forEach(wireOverviewStatDrag);
+}
+
+function renderOverviewStatsPanel() {
+  const panel = document.getElementById("ov-stats-panel");
+  const hidden = loadOverviewHiddenStats();
+  const order = loadOverviewStatOrder();
+  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren, Klick zum Ein-/Ausblenden</div>`
+    + order.map(key => {
+      const def = OVERVIEW_STAT_DEFS.find(d => d.key === key);
+      const isHidden = hidden.has(key);
+      return `<div class="trade-field-order-row" draggable="true" data-key="${key}">
+        <span class="trade-field-order-handle">⠿</span>
+        <button type="button" class="trade-field-toggle-btn${isHidden ? "" : " active"}" data-key="${key}">${escapeHtml(def.label)}</button>
+      </div>`;
+    }).join("");
+
+  panel.querySelectorAll(".trade-field-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.key;
+      const hiddenNow = loadOverviewHiddenStats();
+      if (hiddenNow.has(key)) hiddenNow.delete(key); else hiddenNow.add(key);
+      saveOverviewHiddenStats(hiddenNow);
+      btn.classList.toggle("active");
+      renderOverviewStats(lastOverviewData);
+    });
+  });
+
+  let dragKey = null;
+  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
+    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const dragging = panel.querySelector(".dragging");
+      if (!dragging || dragging === row) return;
+      const rect = row.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
+      saveOverviewStatOrder(newOrder);
+      renderOverviewStats(lastOverviewData);
+    });
+  });
+}
+
 async function openOverview() {
   state.view = "overview";
   state.currentDay = null;
@@ -1073,15 +1247,15 @@ async function openOverview() {
   await renderAccountChipRow("ov-account-chip-row");
 
   const data = await api(withFilter("/api/overview"));
+  renderOverviewStats(data);
 
-  const statGrid = document.getElementById("ov-stats");
-  statGrid.innerHTML = tile("Startkapital", fmtNum(data.start_balance) + " $")
-    + tile("Kontostand", fmtNum(data.current_balance) + " $", cls(data.current_balance - data.start_balance))
-    + tile("Netto gesamt", fmtSigned(data.total_net) + " $", cls(data.total_net))
-    + tile("Trades gesamt", data.total_trades)
-    + tile("Handelstage", data.trading_days)
-    + tile("Bester Tag", data.best_day ? `${data.best_day.day} (${fmtSigned(data.best_day.net_usd)} $)` : "–")
-    + tile("Schwächster Tag", data.worst_day ? `${data.worst_day.day} (${fmtSigned(data.worst_day.net_usd)} $)` : "–");
+  const toggle = document.getElementById("ov-stats-toggle");
+  const panel = document.getElementById("ov-stats-panel");
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    if (panel.hidden) renderOverviewStatsPanel();
+    panel.hidden = !panel.hidden;
+  };
 
   const chartWrap = document.getElementById("ov-chart");
   if (data.curve.length > 1) {
@@ -2437,14 +2611,30 @@ function journalBackToOverview() {
   state.journalQuery = "";
   state.journalTagKeys = [];
   state.journalMode = "all";
+  state.journalSearchScope = "journal";
   const search = document.getElementById("journal-search");
   if (search) search.value = "";
   document.querySelectorAll("#journal-mode-chips .newsbar-chip").forEach((c, i) => {
     c.classList.toggle("active", JOURNAL_MODES[i]?.key === "all");
   });
+  document.querySelectorAll("#journal-search-scope-chips .newsbar-chip").forEach(c => {
+    c.classList.toggle("active", c.dataset.scope === "journal");
+  });
+  updateJournalScopeUI();
   renderJournalTagFilter();
   updateJournalViewMode();
   renderJournalMonths();
+}
+
+/* Blendet die komplette Journal-Browsing-Zeile (Modus-Chips, Tag-Filter,
+   Datum+Eintrag-Button) aus, wenn der Suchbereich rein auf Notizbücher
+   eingeschraenkt ist - sie wirkt dann auf nichts Sichtbares und der
+   "+ Eintrag"-Button suggeriert sonst faelschlich, man koenne darueber einen
+   Notizbuch-Eintrag anlegen. Bei "both" bleibt sie an, da der Journal-Teil
+   der Ergebnisse weiterhin gefiltert wird. */
+function updateJournalScopeUI() {
+  const filterRow = document.querySelector(".journal-filter-row");
+  if (filterRow) filterRow.hidden = state.journalSearchScope === "notebooks";
 }
 
 async function openJournalMonth(monthKey) {
@@ -2530,11 +2720,29 @@ function journalMonthTileEl(m) {
 
 async function renderJournalList() {
   const listEl = document.getElementById("journal-list");
+  const nbListEl = document.getElementById("notebook-search-list");
   if (!listEl) return;
+  const scope = state.journalSearchScope;
+  const showJournal = scope !== "notebooks";
+  const showNotebooks = scope !== "journal";
+
+  listEl.hidden = !showJournal;
+  if (nbListEl) {
+    nbListEl.hidden = !showNotebooks;
+    if (showNotebooks) await renderNotebookSearchResults(nbListEl, scope === "both");
+    else nbListEl.innerHTML = "";
+  }
+  if (!showJournal) {
+    listEl.innerHTML = "";
+    state.journalSelectedKeys.clear();
+    updateJournalBulkBar();
+    return;
+  }
+
   const { entries } = await api(journalListQS());
-  listEl.innerHTML = "";
+  listEl.innerHTML = scope === "both" ? `<div class="newsbar-filter-group-title journal-list-section-label">Journal</div>` : "";
   if (!entries.length) {
-    listEl.innerHTML = `<div class="empty-state">Keine Einträge für diese Auswahl.</div>`;
+    listEl.innerHTML += `<div class="empty-state">Keine Einträge für diese Auswahl.</div>`;
     return;
   }
   // Auswahl auf tatsaechlich geladene, existierende Eintraege begrenzen -
@@ -2584,7 +2792,14 @@ async function renderJournalList() {
       ${meta ? `<div class="journal-item-meta">${meta}</div>` : ""}
       <div class="journal-item-preview${entry.id ? "" : " muted"}">${escapeHtml(journalPreview(entry))}</div>
       <div class="journal-item-tags">${entry.tags.map(tagChipHtml).join("")}</div>`;
-    item.addEventListener("click", () => selectJournalEntry(entry.ref_key));
+    // Bei aktiver Volltextsuche im Modal oeffnen statt in die Editor-Spalte zu
+    // laden: die Liste bleibt dann unveraendert im Hintergrund sichtbar und
+    // "Schliessen" fuehrt direkt zu den Suchergebnissen zurueck, statt dass
+    // man - wie zuvor - keinen Weg zurueck zur Suche hatte.
+    item.addEventListener("click", () => {
+      if (state.journalQuery) openJournalModal(entry.ref_key);
+      else selectJournalEntry(entry.ref_key);
+    });
     row.appendChild(item);
     listEl.appendChild(row);
   }
@@ -2705,6 +2920,18 @@ async function openJournal() {
     }, 300);
   });
 
+  const scopeChips = document.querySelectorAll("#journal-search-scope-chips .newsbar-chip");
+  scopeChips.forEach(chip => {
+    chip.classList.toggle("active", chip.dataset.scope === state.journalSearchScope);
+    chip.addEventListener("click", () => {
+      state.journalSearchScope = chip.dataset.scope;
+      scopeChips.forEach(c => c.classList.toggle("active", c === chip));
+      updateJournalScopeUI();
+      renderJournalList();
+    });
+  });
+  updateJournalScopeUI();
+
   const tagToggle = document.getElementById("journal-tag-toggle");
   const tagPanel = document.getElementById("journal-tag-panel");
   tagToggle.addEventListener("click", (e) => {
@@ -2795,6 +3022,53 @@ function saveNotebookExpandedState() {
 async function fetchNotebookNodes() {
   const { nodes } = await api("/api/notebooks");
   return nodes;
+}
+
+/* Notizbuch-Treffer der Journal-Suche (Scope "Notizbücher"/"Beides") - eigene
+   Liste neben #journal-list statt Einmischung in die Tages-Eintraege-Karten,
+   da Notizen weder Datum noch Trade-Bezug haben. */
+async function renderNotebookSearchResults(container, withLabel) {
+  const query = state.journalQuery;
+  if (!query) {
+    container.innerHTML = `<div class="empty-state">Suchbegriff eingeben, um Notizbücher zu durchsuchen.</div>`;
+    return;
+  }
+  const { notes } = await api(`/api/notebooks/search?q=${encodeURIComponent(query)}`);
+  container.innerHTML = withLabel ? `<div class="newsbar-filter-group-title journal-list-section-label">Notizbücher</div>` : "";
+  if (!notes.length) {
+    container.innerHTML += `<div class="empty-state">Keine Notizen gefunden.</div>`;
+    return;
+  }
+  for (const note of notes) {
+    const preview = (note.plain_text || "").replace(/\s+/g, " ").trim();
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "journal-item notebook-search-item";
+    item.innerHTML = `
+      <div class="journal-item-top"><span class="journal-item-date">${escapeHtml(note.name)}</span></div>
+      <div class="journal-item-meta">${escapeHtml(note.path || "Oberste Ebene")}</div>
+      <div class="journal-item-preview${preview ? "" : " muted"}">${escapeHtml(preview ? shortenLabel(preview, 110) : "(leer)")}</div>`;
+    item.addEventListener("click", () => openNotebookSearchResult(note.id, note.path));
+    container.appendChild(item);
+  }
+}
+
+/* Oeffnet einen Notizbuch-Suchtreffer im Modal statt auf den Notizbücher-Tab
+   umzuschalten - die Suchergebnisse bleiben dahinter unveraendert sichtbar,
+   "Schliessen" fuehrt also automatisch zur Suche zurueck (vorher: Tab-Wechsel
+   ohne Weg zurueck zu den Treffern). */
+async function openNotebookSearchResult(nodeId, path) {
+  await flushNotebookNote();
+  activeNotebookNote = null;
+  const overlay = document.getElementById("modal-overlay");
+  const body = document.getElementById("modal-body");
+  body.innerHTML = `<section class="view">
+      ${path ? `<div class="notebook-modal-path">${escapeHtml(path)}</div>` : ""}
+      <div class="notebook-editor-host" id="notebook-modal-host"></div>
+    </section>`;
+  overlay.classList.add("visible");
+  modalOnClose = () => { if (state.view === "journal") renderJournalList(); };
+  await mountNotebookEditor(document.getElementById("notebook-modal-host"), nodeId);
 }
 
 /* Alle Nachfahren eines Knotens aus der flachen Liste - iterativ ueber
@@ -3845,19 +4119,24 @@ async function openJournalModal(day) {
       <div class="journal-editor-host" id="journal-modal-host"></div>
     </section>`;
   overlay.classList.add("visible");
-  // Nach dem Schliessen die Monatsuebersicht neu laden, damit ein frisch
-  // angelegter/geloeschter Eintrag sofort im Icon/in der Liste auftaucht.
-  modalOnClose = () => { if (state.view === "month") renderMonth(); };
+  // Nach dem Schliessen die Monatsuebersicht bzw. (bei einem aus der
+  // Journal-Suche geoeffneten Eintrag) die Trefferliste neu laden, damit ein
+  // frisch angelegter/geloeschter Eintrag sofort sichtbar ist.
+  modalOnClose = () => {
+    if (state.view === "month") renderMonth();
+    else if (state.view === "journal") renderJournalList();
+  };
   await mountJournalEditor(document.getElementById("journal-modal-host"), day);
 }
 
 let modalOnClose = null;
 
 async function closeModal() {
-  // Der Journal-Editor im Modal wird gleich unsichtbar - vorher rausschreiben,
-  // und zwar abgewartet statt nur angestossen, damit ein anschliessendes
-  // Neuladen (modalOnClose) die gespeicherten Daten schon sieht.
+  // Journal- bzw. Notizbuch-Editor im Modal werden gleich unsichtbar - vorher
+  // rausschreiben, und zwar abgewartet statt nur angestossen, damit ein
+  // anschliessendes Neuladen (modalOnClose) die gespeicherten Daten schon sieht.
   await flushJournal();
+  await flushNotebookNote();
   document.getElementById("modal-overlay").classList.remove("visible");
   if (modalOnClose) {
     const cb = modalOnClose;
@@ -4346,9 +4625,12 @@ function analyticsWidgetCardHtml(widget) {
   const wideClass = ANALYTICS_WIDE_TYPES.has(widget.type) ? " analytics-widget-wide" : "";
   const bodyClass = (widget.type === "kpi" || widget.type === "streaks") ? " stat-grid" : "";
   return `
-    <div class="card analytics-widget${wideClass}" data-widget-id="${widget.id}">
+    <div class="card analytics-widget${wideClass}" data-widget-id="${widget.id}" draggable="true">
       <div class="analytics-widget-header">
-        <div class="analytics-widget-title">${escapeHtml(widget.title)}</div>
+        <div class="analytics-widget-header-left">
+          <span class="analytics-widget-handle" title="Ziehen zum Umsortieren">⠿</span>
+          <div class="analytics-widget-title">${escapeHtml(widget.title)}</div>
+        </div>
         <div class="analytics-widget-actions">
           <button type="button" class="analytics-widget-edit" title="Bearbeiten" aria-label="Auswertung bearbeiten">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
@@ -4388,6 +4670,44 @@ function mountAnalyticsGrid() {
     if (!widget) return;
     card.querySelector(".analytics-widget-edit").addEventListener("click", () => openAnalyticsWidgetEditor(widget));
     card.querySelector(".analytics-widget-remove").addEventListener("click", () => removeAnalyticsWidget(widget.id));
+    wireAnalyticsWidgetDrag(card);
+  });
+}
+
+/* Kacheln per Drag & Drop umsortieren - anders als die einspaltigen Listen
+   (Sidebar, Notizbuch-Baum) ist das Auswertungs-Grid zweispaltig, deshalb
+   entscheidet die Zielposition ueber Y (oberhalb/unterhalb der Karte) UND X
+   (linke/rechte Haelfte), nicht nur Y. Reihenfolge wird erst bei dragend aus
+   dem tatsaechlichen DOM gelesen und gespeichert - waehrend des Ziehens
+   bewegt sich das Element bereits live mit (wie bei .nav-item). */
+let analyticsDragEl = null;
+
+function analyticsCardGoesBefore(e, rect) {
+  if (e.clientY < rect.top) return true;
+  if (e.clientY > rect.bottom) return false;
+  return e.clientX < rect.left + rect.width / 2;
+}
+
+function wireAnalyticsWidgetDrag(card) {
+  card.addEventListener("dragstart", (e) => {
+    analyticsDragEl = card;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", card.dataset.widgetId);
+    card.classList.add("dragging");
+  });
+  card.addEventListener("dragend", () => {
+    card.classList.remove("dragging");
+    analyticsDragEl = null;
+    const ids = [...document.querySelectorAll("#analytics-grid .analytics-widget")].map(c => c.dataset.widgetId);
+    analyticsWidgets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    saveAnalyticsWidgets();
+  });
+  card.addEventListener("dragover", (e) => {
+    if (!analyticsDragEl || analyticsDragEl === card) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const before = analyticsCardGoesBefore(e, card.getBoundingClientRect());
+    card.parentElement.insertBefore(analyticsDragEl, before ? card : card.nextSibling);
   });
 }
 

@@ -230,9 +230,13 @@
   <section class="view">
     <header class="view-header">
       <h1>Übersicht</h1>
+      <div class="inline-filter ov-stats-filter">
+        <button type="button" class="inline-filter-toggle" id="ov-stats-toggle">Kacheln auswählen</button>
+        <div class="inline-filter-panel" id="ov-stats-panel" hidden></div>
+      </div>
     </header>
 
-    <div class="stat-grid" id="ov-stats"></div>
+    <div class="stat-grid stat-grid-fancy" id="ov-stats"></div>
 
     <div class="card">
       <div class="card-title-row">
@@ -439,17 +443,27 @@
 
     <div class="journal-diary-panel" id="journal-diary-panel">
       <div class="journal-toolbar">
-        <input type="search" id="journal-search" class="journal-search" placeholder="Volltextsuche…">
-        <div class="newsbar-chip-row journal-mode-row" id="journal-mode-chips"></div>
-        <div class="inline-filter journal-tag-filter">
-          <button type="button" class="inline-filter-toggle" id="journal-tag-toggle">
-            Tags <span class="inline-filter-count" id="journal-tag-count"></span>
-          </button>
-          <div class="inline-filter-panel" id="journal-tag-panel" hidden></div>
+        <div class="journal-toolbar-row journal-search-row">
+          <input type="search" id="journal-search" class="journal-search" placeholder="Volltextsuche…">
+          <span class="journal-search-scope-label">durchsuchen:</span>
+          <div class="newsbar-chip-row journal-search-scope-row" id="journal-search-scope-chips">
+            <button type="button" class="newsbar-chip active" data-scope="journal">Journal</button>
+            <button type="button" class="newsbar-chip" data-scope="notebooks">Notizbücher</button>
+            <button type="button" class="newsbar-chip" data-scope="both">Beides</button>
+          </div>
         </div>
-        <div class="journal-new">
-          <input type="date" id="journal-new-date">
-          <button type="button" class="btn btn-primary" id="journal-new-btn">+ Eintrag</button>
+        <div class="journal-toolbar-row journal-filter-row">
+          <div class="newsbar-chip-row journal-mode-row" id="journal-mode-chips"></div>
+          <div class="inline-filter journal-tag-filter">
+            <button type="button" class="inline-filter-toggle" id="journal-tag-toggle">
+              Tags <span class="inline-filter-count" id="journal-tag-count"></span>
+            </button>
+            <div class="inline-filter-panel" id="journal-tag-panel" hidden></div>
+          </div>
+          <div class="journal-new">
+            <input type="date" id="journal-new-date">
+            <button type="button" class="btn btn-primary" id="journal-new-btn">+ Eintrag</button>
+          </div>
         </div>
       </div>
 
@@ -473,6 +487,7 @@
       <div class="journal-layout" id="journal-layout" hidden>
         <aside class="journal-list-pane">
           <div class="journal-list" id="journal-list"></div>
+          <div class="journal-list notebook-search-list" id="notebook-search-list" hidden></div>
         </aside>
 
         <div class="journal-editor-pane">

@@ -1221,6 +1221,34 @@ def get_notebook_node(node_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def search_notebook_notes(query: str, limit: int = 50) -> list[dict]:
+    """Volltextsuche ueber Notizen (nicht Ordner) - Titel und Klartext-Inhalt.
+    Fuer die Journal-Suche mit Scope 'Notizbücher'/'Beides' (siehe main.py).
+    Jeder Treffer bekommt zusaetzlich seinen Ordnerpfad (path) - eine einzige
+    Zusatz-Query ueber alle Knoten statt einer Query pro Treffer, der Pfad
+    wird danach in Python durch Verfolgen von parent_id aufgebaut."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, parent_id, name, plain_text, updated_at FROM notebook_nodes
+               WHERE node_type = 'note' AND (name LIKE ? OR plain_text LIKE ?)
+               ORDER BY updated_at DESC LIMIT ?""",
+            (f"%{query}%", f"%{query}%", limit),
+        ).fetchall()
+        notes = [dict(r) for r in rows]
+        if not notes:
+            return notes
+        all_rows = conn.execute("SELECT id, parent_id, name FROM notebook_nodes").fetchall()
+    by_id = {r["id"]: r for r in all_rows}
+    for note in notes:
+        parts = []
+        cur = by_id.get(note["parent_id"])
+        while cur:
+            parts.append(cur["name"])
+            cur = by_id.get(cur["parent_id"])
+        note["path"] = " / ".join(reversed(parts))
+    return notes
+
+
 def create_notebook_node(parent_id: int | None, node_type: str, name: str) -> dict:
     now = datetime.now().isoformat(timespec="seconds")
     with get_conn() as conn:

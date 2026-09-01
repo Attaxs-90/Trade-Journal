@@ -423,6 +423,58 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .value.pos { color: var(--green); }
 .value.neg { color: var(--red); }
 
+/* Uebersicht: groessere, zentrierte Kacheln mit Gauge-/Ratio-Grafik fuer
+   Prozent- bzw. Verhaeltnis-Kennzahlen (Trefferquote, Handelstage % Gewinn,
+   Gewinn/Verlust-Verhaeltnis) - nur in #ov-stats, um die kompakteren
+   .stat-tile in den Analytics-Widgets nicht mit zu beeinflussen. */
+.stat-grid-fancy .stat-tile { align-items: center; text-align: center; gap: 8px; padding: 18px 16px; }
+.stat-grid-fancy .stat-tile .value { font-size: 26px; }
+.stat-grid-fancy .stat-tile { cursor: grab; user-select: none; -webkit-user-drag: element; }
+.stat-grid-fancy .stat-tile.dragging { opacity: 0.4; }
+.stat-gauge-track {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  margin-top: 2px;
+  background: linear-gradient(90deg, var(--red), #f0b429 50%, var(--green));
+}
+.stat-gauge-marker {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: #fff;
+  transform: translateX(-50%);
+}
+.stat-gauge-scale {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.stat-ratio-track {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.stat-ratio-win { background: var(--green); }
+.stat-ratio-loss { background: var(--red); }
+.stat-ratio-scale {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 11px;
+  font-weight: 600;
+}
+.stat-ratio-scale .pos { color: var(--green); }
+.stat-ratio-scale .neg { color: var(--red); }
+
 /* Cards */
 .card {
   background: var(--bg-elevated);
@@ -1363,12 +1415,25 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
    Suche und Filter wirken bewusst global und weichen bei Treffern automatisch
    in die Liste aus (siehe journalListMode() in app.js), egal ob man sich
    gerade in der Monats-Kachel-Uebersicht oder einem geoeffneten Monat befindet. */
-.journal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+/* Zwei getrennte Zeilen statt einer einzigen Flex-Wrap-Reihe: Suche+Scope
+   oben, Journal-Browsing-Filter (Modus/Tags/neuer Eintrag) unten mit
+   Trennlinie - sonst wirkt die Volltextsuche wie Teil der Eintrags-Filter
+   und suggeriert (v.a. im Notizbuch-Scope) faelschlich, "+ Eintrag" gehoere
+   zur Suche. */
+.journal-toolbar { margin-bottom: 14px; }
+.journal-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; }
+.journal-search-row { padding-top: 0; }
+.journal-filter-row { border-top: 1px solid var(--border); }
 .journal-search {
   width: 240px; max-width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 8px 10px; font-family: var(--font-sans); font-size: 13px;
 }
+.journal-search-scope-label { font-size: 12px; color: var(--text-faint); }
 .journal-mode-row { gap: 6px; }
+/* .journal-toolbar-row setzt display:flex unconditional - das schlaegt sonst
+   das [hidden] der UA-Stylesheet beim Ausblenden per Scope "Notizbücher"
+   (siehe updateJournalScopeUI in app.js). */
+.journal-filter-row[hidden] { display: none; }
 .journal-tag-filter { position: relative; flex: 0 0 auto; }
 
 .journal-breadcrumb:not([hidden]) { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12.5px; }
@@ -1435,6 +1500,8 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 }
 
 .journal-list { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
+.journal-list-section-label { margin: 4px 0 0; }
+.journal-list-section-label:first-child { margin-top: 0; }
 .journal-item-row { display: flex; align-items: flex-start; gap: 6px; }
 .journal-item-checkbox { margin-top: 13px; flex-shrink: 0; cursor: pointer; }
 .journal-item-checkbox-spacer { width: 13px; flex-shrink: 0; }
@@ -1462,6 +1529,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-item-net.neg { color: var(--red); }
 .journal-item-net.muted, .journal-item-preview.muted, .journal-cell .muted { color: var(--text-faint); font-weight: 400; }
 .journal-item-meta { font-size: 11px; color: var(--text-faint); }
+.notebook-modal-path { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
 .journal-item-preview { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
 .journal-item-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 
@@ -1899,8 +1967,13 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 @media (max-width: 900px) {
   .analytics-widget-wide { grid-column: span 1; }
 }
-.analytics-widget-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.analytics-widget { user-select: none; -webkit-user-drag: element; }
+.analytics-widget.dragging { opacity: 0.4; }
+.analytics-widget-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; cursor: grab; }
+.analytics-widget-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.analytics-widget-handle { color: var(--text-faint); font-size: 14px; flex-shrink: 0; }
 .analytics-widget-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+.analytics-widget-body { user-select: text; }
 .analytics-widget-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .analytics-widget-edit, .analytics-widget-remove {
   all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 6px;

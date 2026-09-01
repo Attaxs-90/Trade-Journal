@@ -282,6 +282,10 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
     total_trades = sum(d["trade_count"] for d in days)
     best_day = max(days, key=lambda d: d["net_usd"]) if days else None
     worst_day = min(days, key=lambda d: d["net_usd"]) if days else None
+    trades = db.list_trades_for_analytics(keys, _parse_tags(tags), tag_logic)
+    summary = an.trade_summary(trades)
+    equity = an.equity_and_drawdown(days, start_balance)
+    win_loss_ratio = round(summary["avg_win"] / summary["avg_loss"], 2) if summary["avg_loss"] else None
     return {
         "days": days,
         "curve": curve,
@@ -290,6 +294,13 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
         "trading_days": len(days),
         "best_day": best_day,
         "worst_day": worst_day,
+        "win_rate": summary["win_rate"],
+        "profit_factor": summary["profit_factor"],
+        "win_days_pct": equity["win_days_pct"],
+        "win_loss_ratio": win_loss_ratio,
+        "avg_win": summary["avg_win"],
+        "avg_loss": summary["avg_loss"],
+        "expectancy": summary["expectancy"],
         "start_balance": round(start_balance, 2),
         "current_balance": round(start_balance + total_net, 2),
     }
@@ -595,6 +606,14 @@ def api_delete_journal_template(template_id: int):
 @app.get("/api/notebooks")
 def api_list_notebooks():
     return {"nodes": db.list_notebook_nodes()}
+
+
+@app.get("/api/notebooks/search")
+def api_search_notebooks(q: str = ""):
+    query = q.strip()
+    if not query:
+        return {"notes": []}
+    return {"notes": db.search_notebook_notes(query)}
 
 
 @app.get("/api/notebooks/{node_id}")
