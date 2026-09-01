@@ -73,6 +73,10 @@ class NotesUpdate(BaseModel):
     notes: str
 
 
+class RiskUpdate(BaseModel):
+    risk_usd: float | None = None
+
+
 class AccountCreate(BaseModel):
     name: str
     platform: str  # "mt5" (Auto-Sync) oder eine manuelle Plattform wie "ninjatrader"
@@ -146,6 +150,24 @@ class NotebookNodeMove(BaseModel):
     parent_id: int | None = None
 
 
+class TodoListCreate(BaseModel):
+    name: str
+
+
+class TodoListUpdate(BaseModel):
+    name: str | None = None
+    visible: bool | None = None
+
+
+class TodoItemCreate(BaseModel):
+    text: str
+
+
+class TodoItemUpdate(BaseModel):
+    text: str | None = None
+    done: bool | None = None
+
+
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -197,6 +219,14 @@ def api_day_detail(day: str, accounts: str | None = None, tags: str | None = Non
 @app.put("/api/trades/{trade_id}/notes")
 def api_update_trade_notes(trade_id: int, payload: NotesUpdate):
     db.update_trade_notes(trade_id, payload.notes)
+    return {"ok": True}
+
+
+@app.put("/api/trades/{trade_id}/risk")
+def api_update_trade_risk(trade_id: int, payload: RiskUpdate):
+    if not db.get_trade(trade_id):
+        raise HTTPException(404, "Trade nicht gefunden.")
+    db.update_trade_risk(trade_id, payload.risk_usd)
     return {"ok": True}
 
 
@@ -639,6 +669,62 @@ async def api_upload_notebook_image(node_id: int, file: UploadFile = File(...)):
     except Exception:
         raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
     return {"filename": filename, "thumb_filename": thumb_filename}
+
+
+@app.get("/api/todo-lists")
+def api_list_todo_lists():
+    return {"lists": db.list_todo_lists()}
+
+
+@app.post("/api/todo-lists")
+def api_create_todo_list(payload: TodoListCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    return {"list": db.create_todo_list(name)}
+
+
+@app.put("/api/todo-lists/{list_id}")
+def api_update_todo_list(list_id: int, payload: TodoListUpdate):
+    if not db.get_todo_list(list_id):
+        raise HTTPException(404, "To-Do-Liste nicht gefunden.")
+    name = payload.name.strip() if payload.name is not None else None
+    if name == "":
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    return {"list": db.update_todo_list(list_id, name, payload.visible)}
+
+
+@app.delete("/api/todo-lists/{list_id}")
+def api_delete_todo_list(list_id: int):
+    db.delete_todo_list(list_id)
+    return {"ok": True}
+
+
+@app.post("/api/todo-lists/{list_id}/items")
+def api_create_todo_item(list_id: int, payload: TodoItemCreate):
+    if not db.get_todo_list(list_id):
+        raise HTTPException(404, "To-Do-Liste nicht gefunden.")
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(400, "Text darf nicht leer sein.")
+    return {"item": db.create_todo_item(list_id, text)}
+
+
+@app.put("/api/todo-items/{item_id}")
+def api_update_todo_item(item_id: int, payload: TodoItemUpdate):
+    text = payload.text.strip() if payload.text is not None else None
+    if text == "":
+        raise HTTPException(400, "Text darf nicht leer sein.")
+    item = db.update_todo_item(item_id, text, payload.done)
+    if not item:
+        raise HTTPException(404, "Eintrag nicht gefunden.")
+    return {"item": item}
+
+
+@app.delete("/api/todo-items/{item_id}")
+def api_delete_todo_item(item_id: int):
+    db.delete_todo_item(item_id)
+    return {"ok": True}
 
 
 @app.get("/api/news/calendar")

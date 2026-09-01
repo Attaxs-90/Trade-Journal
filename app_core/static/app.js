@@ -1227,7 +1227,7 @@ function renderTradesTable() {
   // eigenstaendiger Datenwert wie die uebrigen Spalten.
   const selectAllCb = document.createElement("input");
   selectAllCb.type = "checkbox";
-  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges"></th>` + order.map(key => {
+  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges"></th><th class="col-share"></th>` + order.map(key => {
     const field = TRADE_CARD_FIELDS.find(f => f.key === key);
     return `<th>${escapeHtml(field.label)}</th>`;
   }).join("");
@@ -1235,7 +1235,7 @@ function renderTradesTable() {
 
   tbody.innerHTML = "";
   if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="${order.length + 2}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${order.length + 3}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
     selectAllCb.disabled = true;
     updateTradesBulkBar();
     return;
@@ -1247,12 +1247,16 @@ function renderTradesTable() {
       + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">📷</span>` : "")
       + (t.has_journal ? `<span class="trade-card-badge" title="Journal-Eintrag (Bewertung/Review) vorhanden">🗒️</span>` : "");
     tr.innerHTML = `<td class="col-check"><input type="checkbox" class="trades-row-select" data-id="${t.id}"${tradesSelectedIds.has(t.id) ? " checked" : ""}></td>`
-      + `<td class="col-badges">${badges}</td>` + order.map(key => {
+      + `<td class="col-badges">${badges}</td>`
+      + `<td class="col-share"><button type="button" class="trade-share-row-btn" title="Als Bild teilen" aria-label="Als Bild teilen">📤</button></td>`
+      + order.map(key => {
       if (key === "tags") return `<td class="tag-cell"></td>`;
       const field = TRADE_CARD_FIELDS.find(f => f.key === key);
       return `<td>${field.render(t, { accountNames })}</td>`;
     }).join("");
     tr.addEventListener("click", () => openTrade(t.id));
+    const shareBtn = tr.querySelector(".trade-share-row-btn");
+    shareBtn.addEventListener("click", (e) => { e.stopPropagation(); openShareModal(t); });
     const tagCell = tr.querySelector(".tag-cell");
     if (tagCell) {
       tagCell.addEventListener("click", (e) => e.stopPropagation());
@@ -1407,6 +1411,9 @@ async function populateTrade(container, tradeId) {
 
   renderTradeTagCell(container.querySelector(".trade-tag-cell"), trade);
 
+  wireTradeRiskRow(container, trade);
+  container.querySelector(".trade-share-btn").onclick = () => openShareModal(trade);
+
   const noteInput = container.querySelector(".trade-note-input");
   noteInput.value = trade.notes || "";
   activeTradeNote = { tradeId: trade.id, input: noteInput, dirty: false };
@@ -1462,6 +1469,413 @@ document.addEventListener("keydown", (e) => {
   const btn = document.querySelector(e.key === "ArrowLeft" ? ".trade-prev" : ".trade-next");
   if (btn && !btn.disabled) btn.click();
 });
+
+/* Risiko-Eingabe (Basis der R-Multiple) auf der Trade-Detailseite - bei
+   MT5-Sync automatisch aus dem Stop-Loss des Eroeffnungs-Orders befuellt
+   (siehe _entry_risk_usd in mt5_adapter.py), sonst manuell nachtragbar. */
+function tradeRMultiple(trade) {
+  if (!trade.risk_usd || trade.risk_usd <= 0) return null;
+  return trade.net_usd / trade.risk_usd;
+}
+
+function wireTradeRiskRow(container, trade) {
+  const input = container.querySelector(".trade-risk-input");
+  const display = container.querySelector("#trade-risk-r-display");
+  const hint = container.querySelector(".trade-risk-hint");
+  input.value = trade.risk_usd != null ? trade.risk_usd : "";
+  hint.textContent = trade.source === "mt5" && trade.risk_usd != null
+    ? "Automatisch aus dem MT5-Stop-Loss ermittelt." : "";
+
+  function refresh() {
+    const r = tradeRMultiple(trade);
+    display.textContent = r === null ? "–" : `${fmtSigned(r, 2)}R`;
+    display.className = "trade-risk-r" + (r === null ? "" : ` ${cls(r)}`);
+  }
+  refresh();
+
+  input.oninput = () => {
+    const val = input.value === "" ? null : Number(input.value);
+    trade.risk_usd = (val === null || Number.isNaN(val)) ? null : val;
+    refresh();
+  };
+  input.onblur = async () => {
+    await api(`/api/trades/${trade.id}/risk`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ risk_usd: trade.risk_usd }),
+    });
+    hint.textContent = "";
+  };
+}
+
+/* ---------- Trade teilen (Canvas-Karte) ----------
+   Rendert einen Trade als Bild-Karte (Instrument, Richtung, Netto-$ oder
+   R-Multiple, Ein-/Ausstieg, Dauer) in einem von 5 Design-Themes, per PNG-
+   Download oder Zwischenablage teilbar. Reines Canvas 2D statt einer
+   Screenshot-Bibliothek - keine externen Assets/CDN noetig (siehe CLAUDE.md). */
+
+const SHARE_W = 1080, SHARE_H = 1350, SHARE_PAD = 70;
+const SHARE_FONT = "-apple-system, 'Segoe UI', Inter, Roboto, sans-serif";
+
+function shareHexToRgba(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16), g = parseInt(h.substring(2, 4), 16), b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function shareRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* Gemeinsames Layout (Badge, Instrument, grosse Kennzahl, Stat-Kacheln,
+   Wasserzeichen) - nur der Hintergrund/Motiv-Akzent unterscheidet die Themes
+   (siehe SHARE_THEMES[].drawBackground). */
+function shareDrawLayout(ctx, theme, data) {
+  const w = SHARE_W, h = SHARE_H;
+  ctx.clearRect(0, 0, w, h);
+  theme.drawBackground(ctx, w, h, data);
+
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "center";
+
+  const badgeText = data.direction === "Long" ? "▲ LONG" : "▼ SHORT";
+  ctx.font = "700 30px " + SHARE_FONT;
+  const badgeTextW = ctx.measureText(badgeText).width;
+  const badgePadX = 34, badgeH = 62;
+  const badgeW = badgeTextW + badgePadX * 2;
+  const badgeX = w / 2 - badgeW / 2;
+  const badgeY = h * 0.185;
+  ctx.fillStyle = shareHexToRgba(data.accent, 0.16);
+  shareRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+  ctx.fill();
+  ctx.strokeStyle = shareHexToRgba(data.accent, 0.6);
+  ctx.lineWidth = 2;
+  shareRoundRect(ctx, badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+  ctx.stroke();
+  ctx.fillStyle = data.accent;
+  ctx.textBaseline = "middle";
+  ctx.fillText(badgeText, w / 2, badgeY + badgeH / 2 + 2);
+  ctx.textBaseline = "alphabetic";
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 52px " + SHARE_FONT;
+  ctx.fillText(data.instrument, w / 2, badgeY + badgeH + 76);
+
+  ctx.font = "800 128px " + SHARE_FONT;
+  ctx.fillStyle = data.metricColor;
+  ctx.shadowColor = shareHexToRgba(data.metricColor, 0.55);
+  ctx.shadowBlur = 44;
+  ctx.fillText(data.metricValueText, w / 2, badgeY + badgeH + 236);
+  ctx.shadowBlur = 0;
+
+  const tiles = [
+    { label: "Einstieg", value: data.entryText },
+    { label: "Ausstieg", value: data.exitText },
+    { label: "Dauer", value: data.durationText },
+  ];
+  const gap = 20;
+  const tileW = (w - 2 * SHARE_PAD - 2 * gap) / 3;
+  const tileH = 128;
+  const tileY = h - SHARE_PAD - 70 - tileH;
+  tiles.forEach((t, i) => {
+    const x = SHARE_PAD + i * (tileW + gap);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+    shareRoundRect(ctx, x, tileY, tileW, tileH, 18);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.09)";
+    ctx.lineWidth = 1;
+    shareRoundRect(ctx, x, tileY, tileW, tileH, 18);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.font = "600 21px " + SHARE_FONT;
+    ctx.fillText(t.label, x + tileW / 2, tileY + 42);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 29px " + SHARE_FONT;
+    ctx.fillText(t.value, x + tileW / 2, tileY + 86);
+  });
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+  ctx.font = "600 20px " + SHARE_FONT;
+  ctx.textAlign = "right";
+  ctx.fillText("Trade Journal", w - SHARE_PAD, h - SHARE_PAD + 26);
+}
+
+const SHARE_THEMES = [
+  {
+    id: "midnight",
+    name: "Midnight Glow",
+    previewCss: "radial-gradient(circle at 50% 32%, #234a3d 0%, #0a0e14 68%)",
+    drawBackground(ctx, w, h, data) {
+      ctx.fillStyle = "#0a0e14";
+      ctx.fillRect(0, 0, w, h);
+      const glow = ctx.createRadialGradient(w / 2, h * 0.34, 20, w / 2, h * 0.34, h * 0.62);
+      glow.addColorStop(0, shareHexToRgba(data.accent, 0.32));
+      glow.addColorStop(1, "rgba(10, 14, 20, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.strokeStyle = shareHexToRgba(data.accent, 0.5);
+      ctx.lineWidth = 5;
+      ctx.lineJoin = "round";
+      ctx.shadowColor = shareHexToRgba(data.accent, 0.65);
+      ctx.shadowBlur = 26;
+      const pts = data.direction === "Long"
+        ? [[-40, h * 0.98], [w * 0.22, h * 0.86], [w * 0.4, h * 0.92], [w * 0.62, h * 0.58], [w * 0.82, h * 0.64], [w + 40, h * 0.22]]
+        : [[-40, h * 0.1], [w * 0.22, h * 0.24], [w * 0.4, h * 0.16], [w * 0.62, h * 0.46], [w * 0.82, h * 0.4], [w + 40, h * 0.86]];
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
+      ctx.stroke();
+      ctx.restore();
+    },
+  },
+  {
+    id: "neongrid",
+    name: "Neon Grid",
+    previewCss: "linear-gradient(180deg, #0a0d12 0%, #131a24 100%)",
+    drawBackground(ctx, w, h, data) {
+      ctx.fillStyle = "#0a0d12";
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.055)";
+      ctx.lineWidth = 1.5;
+      const vpX = w / 2, vpY = h * 0.12;
+      for (let i = -7; i <= 7; i++) {
+        ctx.beginPath();
+        ctx.moveTo(vpX + i * 110, h + 40);
+        ctx.lineTo(vpX + i * 16, vpY);
+        ctx.stroke();
+      }
+      for (let j = 0; j < 11; j++) {
+        const t = j / 10;
+        const y = vpY + (h - vpY) * Math.pow(t, 1.9);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+      const glow = ctx.createLinearGradient(0, data.direction === "Long" ? h : 0, 0, data.direction === "Long" ? 0 : h);
+      glow.addColorStop(0, shareHexToRgba(data.accent, 0.28));
+      glow.addColorStop(0.45, "rgba(10, 13, 18, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+    },
+  },
+  {
+    id: "aurora",
+    name: "Aurora Drift",
+    previewCss: "radial-gradient(circle at 30% 20%, #2a2560 0%, transparent 55%), radial-gradient(circle at 75% 75%, #1c3b32 0%, #0b0d16 60%)",
+    drawBackground(ctx, w, h, data) {
+      ctx.fillStyle = "#0b0d16";
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.filter = "blur(70px)";
+      const blob1 = ctx.createRadialGradient(w * 0.28, h * 0.22, 10, w * 0.28, h * 0.22, w * 0.5);
+      blob1.addColorStop(0, "rgba(120, 100, 255, 0.35)");
+      blob1.addColorStop(1, "rgba(120, 100, 255, 0)");
+      ctx.fillStyle = blob1;
+      ctx.fillRect(0, 0, w, h);
+      const blob2 = ctx.createRadialGradient(w * 0.75, h * 0.68, 10, w * 0.75, h * 0.68, w * 0.55);
+      blob2.addColorStop(0, shareHexToRgba(data.accent, 0.38));
+      blob2.addColorStop(1, shareHexToRgba(data.accent, 0));
+      ctx.fillStyle = blob2;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    },
+  },
+  {
+    id: "carbon",
+    name: "Carbon Line",
+    previewCss: "linear-gradient(135deg, #0c0c0c 0%, #16171a 100%)",
+    drawBackground(ctx, w, h, data) {
+      ctx.fillStyle = "#0c0c0c";
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
+      ctx.lineWidth = 1;
+      for (let x = -h; x < w; x += 26) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + h, h);
+        ctx.stroke();
+      }
+      ctx.restore();
+      const glow = ctx.createRadialGradient(w / 2, h * 0.3, 10, w / 2, h * 0.3, h * 0.5);
+      glow.addColorStop(0, shareHexToRgba(data.accent, 0.22));
+      glow.addColorStop(1, "rgba(12, 12, 12, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+      ctx.save();
+      ctx.strokeStyle = shareHexToRgba(data.accent, 0.7);
+      ctx.lineWidth = 4;
+      ctx.shadowColor = shareHexToRgba(data.accent, 0.6);
+      ctx.shadowBlur = 18;
+      const midY = h * (data.direction === "Long" ? 0.62 : 0.4);
+      const step = w / 7;
+      ctx.beginPath();
+      for (let i = 0; i <= 7; i++) {
+        const x = i * step;
+        const wobble = Math.sin(i * 1.7) * 30;
+        const trend = data.direction === "Long" ? -i * 14 : i * 14;
+        const y = midY + wobble + trend;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    },
+  },
+  {
+    id: "sunset",
+    name: "Sunset Pulse",
+    previewCss: "radial-gradient(circle at 50% 100%, #3a1f10 0%, #0d0b12 60%)",
+    drawBackground(ctx, w, h, data) {
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, "#0d0b12");
+      bg.addColorStop(1, "#161016");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      const glow = ctx.createRadialGradient(w / 2, h * 1.05, 10, w / 2, h * 1.05, h * 0.85);
+      glow.addColorStop(0, shareHexToRgba(data.accent, 0.4));
+      glow.addColorStop(1, "rgba(13, 11, 18, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+      let seed = data.instrument.length * 17 + (data.direction === "Long" ? 3 : 7);
+      const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+      ctx.save();
+      for (let i = 0; i < 26; i++) {
+        const x = rand() * w, y = rand() * h * 0.75;
+        const r = 2 + rand() * 4;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = shareHexToRgba(data.accent, 0.25 + rand() * 0.35);
+        ctx.fill();
+      }
+      ctx.restore();
+    },
+  },
+];
+
+let shareState = { trade: null, metric: "net", themeId: "midnight" };
+
+function shareDurationText(entryIso, exitIso) {
+  const ms = new Date(exitIso) - new Date(entryIso);
+  const hours = ms / 3600000;
+  if (hours < 1) return `${Math.round(ms / 60000)}m`;
+  return `${fmtNum(hours, 1)}h`;
+}
+
+function shareBuildData(trade, metric) {
+  const isNet = metric !== "r" || tradeRMultiple(trade) === null;
+  const value = isNet ? trade.net_usd : tradeRMultiple(trade);
+  const positive = value >= 0;
+  const accent = positive ? "#3ddc84" : "#ff6b6b";
+  return {
+    direction: trade.direction,
+    instrument: trade.instrument,
+    accent,
+    metricColor: accent,
+    metricValueText: isNet ? `${fmtSigned(trade.net_usd)} $` : `${fmtSigned(value, 2)}R`,
+    entryText: fmtNum(trade.entry_price),
+    exitText: fmtNum(trade.exit_price),
+    durationText: shareDurationText(trade.entry_time, trade.exit_time),
+  };
+}
+
+function shareRender() {
+  const canvas = document.getElementById("share-canvas");
+  const ctx = canvas.getContext("2d");
+  const theme = SHARE_THEMES.find(t => t.id === shareState.themeId) || SHARE_THEMES[0];
+  const data = shareBuildData(shareState.trade, shareState.metric);
+  shareDrawLayout(ctx, theme, data);
+}
+
+function shareFilename(trade) {
+  const safe = `${trade.instrument}_${trade.direction}`.replace(/[^a-z0-9_-]/gi, "");
+  return `trade-journal_${safe}_${trade.day}.png`;
+}
+
+function initShareModal() {
+  const overlay = document.getElementById("share-overlay");
+  const grid = document.getElementById("share-theme-grid");
+  grid.innerHTML = SHARE_THEMES.map(t => `
+    <button type="button" class="share-theme-swatch" data-theme="${t.id}" style="background:${t.previewCss}">
+      <span class="share-theme-swatch-label">${escapeHtml(t.name)}</span>
+    </button>
+  `).join("");
+  grid.querySelectorAll(".share-theme-swatch").forEach(btn => {
+    btn.addEventListener("click", () => {
+      shareState.themeId = btn.dataset.theme;
+      grid.querySelectorAll(".share-theme-swatch").forEach(b => b.classList.toggle("active", b === btn));
+      shareRender();
+    });
+  });
+
+  document.getElementById("share-metric-toggle").querySelectorAll(".share-metric-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      shareState.metric = btn.dataset.metric;
+      document.querySelectorAll(".share-metric-btn").forEach(b => b.classList.toggle("active", b === btn));
+      shareRender();
+    });
+  });
+
+  document.getElementById("share-close").addEventListener("click", closeShareModal);
+  attachOutsideClose(overlay, closeShareModal);
+
+  document.getElementById("share-download-btn").addEventListener("click", () => {
+    const canvas = document.getElementById("share-canvas");
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = shareFilename(shareState.trade);
+    a.click();
+  });
+
+  document.getElementById("share-copy-btn").addEventListener("click", async () => {
+    const status = document.getElementById("share-copy-status");
+    const canvas = document.getElementById("share-canvas");
+    try {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      status.textContent = "In Zwischenablage kopiert.";
+      status.className = "share-copy-status ok";
+    } catch (e) {
+      status.textContent = "Kopieren nicht unterstützt - bitte als PNG herunterladen.";
+      status.className = "share-copy-status error";
+    }
+  });
+}
+initShareModal();
+
+function openShareModal(trade) {
+  const hasR = tradeRMultiple(trade) !== null;
+  shareState = { trade, metric: "net", themeId: shareState.themeId || "midnight" };
+
+  const netBtn = document.querySelector('.share-metric-btn[data-metric="net"]');
+  const rBtn = document.querySelector('.share-metric-btn[data-metric="r"]');
+  netBtn.classList.add("active");
+  rBtn.classList.remove("active");
+  rBtn.disabled = !hasR;
+  document.getElementById("share-metric-hint").hidden = hasR;
+
+  const grid = document.getElementById("share-theme-grid");
+  grid.querySelectorAll(".share-theme-swatch").forEach(b => b.classList.toggle("active", b.dataset.theme === shareState.themeId));
+
+  document.getElementById("share-copy-status").textContent = "";
+  document.getElementById("share-copy-status").className = "share-copy-status";
+
+  shareRender();
+  document.getElementById("share-overlay").classList.add("visible");
+}
+
+function closeShareModal() {
+  document.getElementById("share-overlay").classList.remove("visible");
+}
 
 /* Felder der Trade-Karte in der Tagesansicht (linke Spalte) - Reihenfolge per
    Drag & Drop einstellbar, analog TRADE_CARD_FIELDS/tradeFieldOrder auf der
@@ -2866,6 +3280,232 @@ async function flushNotebookNote() {
   if (activeNotebookNote && activeNotebookNote.dirty) await saveNotebookNote();
 }
 
+/* ---------- To-Do-Listen ----------
+   Angelegt/verwaltet im Journal-Tab "To-Do-Listen" (Liste anlegen, Eintraege
+   hinzufuegen, umbenennen, sichtbar schalten, endgueltig loeschen). Das
+   rechte Menue (Newsbar) zeigt nur die als "visible" markierten Listen rein
+   lesend zum Abhaken - Klick auf den Text togglet done, ohne dass der
+   Eintrag verschwindet (siehe update_todo_item in db.py). Nach jeder
+   Aenderung wird beides neu geladen statt optimistisch aktualisiert, gleiches
+   Vorgehen wie beim Notizbuch (z.B. notebookRenameFlow -> renderNotebookTree). */
+
+async function refreshTodoUI() {
+  await loadTodoWidget();
+  if (state.view === "todos") await renderTodoManagePanel();
+}
+
+async function openTodos() {
+  state.view = "todos";
+  state.currentDay = null;
+  setActiveNav("todos");
+  await mountView("tpl-todos");
+  document.getElementById("todo-add-list-btn").addEventListener("click", () => todoListCreateFlow());
+  await renderTodoManagePanel();
+}
+
+async function loadTodoWidget() {
+  const section = document.getElementById("todo-widget-section");
+  const container = document.getElementById("todo-widget-lists");
+  if (!section || !container) return;
+  let lists;
+  try {
+    ({ lists } = await api("/api/todo-lists"));
+  } catch (e) {
+    return;
+  }
+  const visible = lists.filter(l => l.visible);
+  section.hidden = visible.length === 0;
+  container.innerHTML = "";
+  if (!visible.length) return;
+  for (const list of visible) {
+    const group = document.createElement("div");
+    group.className = "todo-widget-group";
+    const title = document.createElement("div");
+    title.className = "todo-widget-group-title";
+    title.textContent = list.name;
+    title.title = list.name;
+    group.appendChild(title);
+    const itemsEl = document.createElement("div");
+    itemsEl.className = "todo-widget-items";
+    if (!list.items.length) {
+      itemsEl.innerHTML = `<div class="todo-widget-empty">Keine Einträge.</div>`;
+    } else {
+      for (const item of list.items) itemsEl.appendChild(todoWidgetItemEl(item));
+    }
+    group.appendChild(itemsEl);
+    container.appendChild(group);
+  }
+}
+
+function todoWidgetItemEl(item) {
+  const row = document.createElement("div");
+  row.className = "todo-item" + (item.done ? " done" : "");
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.title = "Klicken zum Abhaken";
+  const text = document.createElement("span");
+  text.className = "todo-item-text";
+  text.textContent = item.text;
+  row.appendChild(text);
+  row.addEventListener("click", () => toggleTodoItemDone(item));
+  row.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    row.click();
+  });
+  return row;
+}
+
+async function toggleTodoItemDone(item) {
+  await api(`/api/todo-items/${item.id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ done: !item.done }),
+  });
+  await refreshTodoUI();
+}
+
+async function renderTodoManagePanel() {
+  const container = document.getElementById("todo-manage-lists");
+  const emptyEl = document.getElementById("todo-manage-empty");
+  if (!container) return;
+  const { lists } = await api("/api/todo-lists");
+  container.innerHTML = "";
+  emptyEl.hidden = lists.length > 0;
+  for (const list of lists) container.appendChild(todoManageCardEl(list));
+}
+
+function todoManageCardEl(list) {
+  const card = document.createElement("div");
+  card.className = "todo-manage-card";
+
+  const header = document.createElement("div");
+  header.className = "todo-manage-card-header";
+
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "todo-manage-card-name";
+  name.textContent = list.name;
+  name.title = "Klicken zum Umbenennen";
+  name.addEventListener("click", () => todoListRenameFlow(list));
+  header.appendChild(name);
+
+  const visibleLabel = document.createElement("label");
+  visibleLabel.className = "todo-visible-toggle";
+  visibleLabel.innerHTML = `
+    <span class="todo-switch">
+      <input type="checkbox" ${list.visible ? "checked" : ""}>
+      <span class="todo-switch-track"></span>
+    </span>
+    <span>Rechtes Menü</span>`;
+  visibleLabel.querySelector("input").addEventListener("change", (e) => todoListSetVisible(list.id, e.target.checked));
+  header.appendChild(visibleLabel);
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "nb-icon-btn nb-delete";
+  delBtn.textContent = "×";
+  delBtn.setAttribute("aria-label", "Liste löschen");
+  delBtn.addEventListener("click", () => todoListDeleteFlow(list));
+  header.appendChild(delBtn);
+
+  card.appendChild(header);
+
+  const addRow = document.createElement("form");
+  addRow.className = "todo-manage-add-row";
+  addRow.innerHTML = `<input type="text" placeholder="Neuer Eintrag…" autocomplete="off">
+    <button type="submit" class="btn btn-secondary">+ Eintrag</button>`;
+  addRow.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = addRow.querySelector("input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await api(`/api/todo-lists/${list.id}/items`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      await refreshTodoUI();
+    } finally {
+      input.disabled = false;
+    }
+  });
+  card.appendChild(addRow);
+
+  const itemsEl = document.createElement("div");
+  itemsEl.className = "todo-manage-items";
+  if (!list.items.length) {
+    itemsEl.innerHTML = `<div class="empty-state todo-manage-items-empty">Noch keine Einträge.</div>`;
+  } else {
+    for (const item of list.items) itemsEl.appendChild(todoManageItemEl(item));
+  }
+  card.appendChild(itemsEl);
+
+  return card;
+}
+
+function todoManageItemEl(item) {
+  const row = document.createElement("div");
+  row.className = "todo-manage-item" + (item.done ? " done" : "");
+
+  const text = document.createElement("span");
+  text.className = "todo-manage-item-text";
+  text.textContent = item.text;
+  text.title = "Klicken zum Abhaken";
+  text.addEventListener("click", () => toggleTodoItemDone(item));
+  row.appendChild(text);
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "nb-icon-btn nb-delete todo-manage-item-delete";
+  delBtn.textContent = "×";
+  delBtn.setAttribute("aria-label", "Eintrag endgültig löschen");
+  delBtn.addEventListener("click", () => todoItemDeleteFlow(item));
+  row.appendChild(delBtn);
+
+  return row;
+}
+
+async function todoListCreateFlow() {
+  const name = await promptDialog("Name der neuen To-Do-Liste:", "Neue Liste");
+  if (!name) return;
+  await api("/api/todo-lists", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  await refreshTodoUI();
+}
+
+async function todoListRenameFlow(list) {
+  const name = await promptDialog("Neuer Name der Liste:", list.name);
+  if (!name || name === list.name) return;
+  await api(`/api/todo-lists/${list.id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  await refreshTodoUI();
+}
+
+async function todoListSetVisible(listId, visible) {
+  await api(`/api/todo-lists/${listId}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visible }),
+  });
+  await refreshTodoUI();
+}
+
+async function todoListDeleteFlow(list) {
+  if (!await confirmDelete(`Soll die To-Do-Liste "${list.name}" samt allen Einträgen wirklich gelöscht werden?`)) return;
+  await api(`/api/todo-lists/${list.id}`, { method: "DELETE" });
+  await refreshTodoUI();
+}
+
+async function todoItemDeleteFlow(item) {
+  if (!await confirmDelete(`Eintrag "${item.text}" endgültig löschen?`, false)) return;
+  await api(`/api/todo-items/${item.id}`, { method: "DELETE" });
+  await refreshTodoUI();
+}
+
 /* ---------- Bilder & Lightbox ---------- */
 
 /* onDeleted (optional): Callback zum Neuladen der jeweiligen Ansicht nach dem
@@ -4184,6 +4824,7 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "overview") openOverview();
     if (el.dataset.view === "trades") openTrades();
     if (el.dataset.view === "journal") openJournal();
+    if (el.dataset.view === "todos") openTodos();
     if (el.dataset.view === "analytics") openAnalytics();
     if (el.dataset.view === "month") openMonth();
     if (el.dataset.view === "strategy") openStrategy();
@@ -4457,3 +5098,4 @@ function initNewsbar() {
   setInterval(loadNews, 5 * 60 * 1000);
 }
 initNewsbar();
+loadTodoWidget();

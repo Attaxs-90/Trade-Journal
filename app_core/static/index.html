@@ -52,6 +52,10 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><line x1="8" y1="2" x2="8" y2="22"/><line x1="11.5" y1="7" x2="15.5" y2="7"/><line x1="11.5" y1="11" x2="15.5" y2="11"/></svg></span>
         <span class="nav-label">Journal</span>
       </div>
+      <div class="nav-item" data-view="todos" title="To-Do-Listen" aria-label="To-Do-Listen" role="button" tabindex="0" draggable="true">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 20 6"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></span>
+        <span class="nav-label">To-Do-Listen</span>
+      </div>
       <div class="nav-item" data-view="analytics" title="Auswertungen" aria-label="Auswertungen" role="button" tabindex="0" draggable="true">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
         <span class="nav-label">Auswertungen</span>
@@ -155,6 +159,11 @@
         </div>
         <div class="newsbar-list" id="news-history"></div>
       </div>
+
+      <div class="newsbar-section todo-widget-section" id="todo-widget-section" hidden>
+        <div class="newsbar-section-title">To-Dos</div>
+        <div class="todo-widget-lists" id="todo-widget-lists"></div>
+      </div>
     </div>
   </aside>
 
@@ -177,6 +186,38 @@
       <button class="btn btn-secondary" id="lightbox-delete">Löschen</button>
     </div>
     <div class="lightbox-handle" id="lightbox-handle" title="Ziehen zum Vergrößern (zentriert)"></div>
+  </div>
+</div>
+
+<div class="share-overlay" id="share-overlay">
+  <div class="share-box">
+    <button class="modal-close share-close" id="share-close" aria-label="Schließen">&times;</button>
+    <div class="share-layout">
+      <div class="share-preview">
+        <canvas id="share-canvas" width="1080" height="1350"></canvas>
+      </div>
+      <div class="share-controls">
+        <div class="share-control-group">
+          <div class="share-control-title">Kennzahl</div>
+          <div class="share-metric-toggle" id="share-metric-toggle">
+            <button type="button" class="share-metric-btn active" data-metric="net">Netto $</button>
+            <button type="button" class="share-metric-btn" data-metric="r">R-Multiple</button>
+          </div>
+          <div class="share-metric-hint" id="share-metric-hint" hidden>
+            Für diesen Trade ist kein Risiko hinterlegt – R-Multiple auf der Trade-Seite eintragen.
+          </div>
+        </div>
+        <div class="share-control-group">
+          <div class="share-control-title">Design</div>
+          <div class="share-theme-grid" id="share-theme-grid"></div>
+        </div>
+        <div class="share-actions">
+          <button type="button" class="btn btn-primary" id="share-download-btn">Als PNG herunterladen</button>
+          <button type="button" class="btn btn-secondary" id="share-copy-btn">In Zwischenablage kopieren</button>
+          <div class="share-copy-status" id="share-copy-status"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -249,6 +290,7 @@
         <button type="button" class="btn btn-secondary trade-nav-btn trade-next" title="Nächster Trade (Pfeiltaste rechts)">→</button>
       </div>
       <div class="trade-header-links">
+        <button type="button" class="btn btn-secondary trade-share-btn">📤 Teilen</button>
         <button type="button" class="btn btn-secondary trade-back-to-list">← Zurück zu Trades</button>
         <button type="button" class="btn btn-secondary trade-back-to-day">Ganzer Tag →</button>
       </div>
@@ -259,6 +301,19 @@
     <div class="card">
       <div class="card-title">Tags</div>
       <div class="tag-cell trade-tag-cell"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row">
+        <div class="card-title">Risiko &amp; R-Multiple</div>
+      </div>
+      <div class="trade-risk-row">
+        <label class="trade-risk-label">Risiko ($)
+          <input type="number" class="trade-risk-input" step="0.01" min="0" placeholder="z. B. 50">
+        </label>
+        <div class="trade-risk-r" id="trade-risk-r-display">–</div>
+        <span class="trade-risk-hint"></span>
+      </div>
     </div>
 
     <div class="card">
@@ -442,6 +497,23 @@
         </div>
       </div>
     </div>
+
+  </section>
+</template>
+
+<template id="tpl-todos">
+  <section class="view view-todos">
+    <header class="view-header">
+      <h1>To-Do-Listen</h1>
+    </header>
+
+    <div class="todo-manage-toolbar">
+      <button type="button" class="btn btn-primary" id="todo-add-list-btn">+ Liste</button>
+    </div>
+    <div class="empty-state todo-manage-empty" id="todo-manage-empty" hidden>
+      Noch keine To-Do-Liste angelegt.
+    </div>
+    <div class="todo-manage-lists" id="todo-manage-lists"></div>
   </section>
 </template>
 

@@ -39,6 +39,29 @@ def _fetch_deals_stable(from_date: datetime, to_date: datetime, retries: int = 4
     return deals
 
 
+def _entry_risk_usd(entry, points: float, gross_usd: float) -> float | None:
+    """Naeherung des Risikos in $ aus dem Stop-Loss des Eroeffnungs-Orders -
+    Basis fuer die R-Multiple auf der Trade-Detailseite/Share-Karte. Nutzt
+    das $-pro-Punkt-Verhaeltnis dieses Trades (gross_usd/points) statt
+    Symbol-Kontraktspezifikationen abzufragen, analog zur bereits
+    vorhandenen "points"-Naeherung. None wenn kein SL gesetzt war oder
+    points 0 ist (Breakeven-Exit) - dann muss der Nutzer das Risiko manuell
+    eintragen (siehe update_trade_risk in db.py)."""
+    try:
+        orders = mt5.history_orders_get(ticket=entry.order)
+    except Exception:
+        return None
+    if not orders:
+        return None
+    sl = orders[0].sl
+    if not sl or not points:
+        return None
+    risk_points = abs(entry.price - sl)
+    if not risk_points:
+        return None
+    return round(risk_points * abs(gross_usd / points), 2)
+
+
 def _close_terminal():
     """mt5.shutdown() unten trennt nur die IPC-Verbindung zum Terminal, laesst
     das Terminal-Fenster aber offen (startet es sogar automatisch, falls es
@@ -109,6 +132,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                 net = exit_deal.profit + costs
                 direction = "Long" if entry.type == mt5.DEAL_TYPE_BUY else "Short"
                 points = (exit_deal.price - entry.price) if direction == "Long" else (entry.price - exit_deal.price)
+                risk_usd = _entry_risk_usd(entry, points, exit_deal.profit)
 
                 # utcfromtimestamp, NICHT fromtimestamp: MT5 liefert bereits
                 # Broker-Zeit. Eine zusaetzliche Umrechnung in die lokale
@@ -130,6 +154,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                     entry_order_id=f"mt5:{position_id}:{entry.ticket}",
                     exit_order_id=f"mt5:{position_id}:{exit_deal.ticket}",
                     source="mt5",
+                    risk_usd=risk_usd,
                 ))
         return {"trades": trades, "balance": balance}
     finally:

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS trades (
     source TEXT DEFAULT 'import',
     account_id INTEGER,
     volume REAL,
+    risk_usd REAL,
     UNIQUE(entry_order_id, exit_order_id)
 );
 
@@ -125,6 +126,28 @@ CREATE TABLE IF NOT EXISTS notebook_nodes (
     updated_at TEXT NOT NULL
 );
 
+-- To-Do-Listen: werden im Journal verwaltet (anlegen, Eintraege hinzufuegen,
+-- explizit loeschen), "visible" steuert ob eine Liste im rechten Menue
+-- (Newsbar) angezeigt wird. Erledigte Eintraege werden nur markiert (done/
+-- done_at), nicht geloescht - das passiert ausschliesslich explizit ueber
+-- delete_todo_item, damit Erledigtes als Historie erhalten bleibt.
+CREATE TABLE IF NOT EXISTS todo_lists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    visible INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS todo_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    list_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    done_at TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_day ON trades(day);
 CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id);
 CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
@@ -135,6 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_ref ON journal_entries(entry_type, ref_ke
 CREATE INDEX IF NOT EXISTS idx_journal_tags_entry ON journal_tags(entry_id);
 CREATE INDEX IF NOT EXISTS idx_journal_tags_tag ON journal_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_notebook_nodes_parent ON notebook_nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_todo_items_list ON todo_items(list_id);
 """
 
 # Versionierte Migrationen fuer bestehende Nutzer-Datenbanken (per PRAGMA user_version
@@ -226,6 +250,23 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     )""",                                                                     # -> Version 18
     "CREATE INDEX IF NOT EXISTS idx_notebook_nodes_parent ON notebook_nodes(parent_id)",  # -> Version 19
+    """CREATE TABLE IF NOT EXISTS todo_lists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        visible INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",                                                                     # -> Version 20
+    """CREATE TABLE IF NOT EXISTS todo_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        list_id INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        done INTEGER NOT NULL DEFAULT 0,
+        done_at TEXT,
+        created_at TEXT NOT NULL
+    )""",                                                                     # -> Version 21
+    "CREATE INDEX IF NOT EXISTS idx_todo_items_list ON todo_items(list_id)",  # -> Version 22
+    "ALTER TABLE trades ADD COLUMN risk_usd REAL",                            # -> Version 23
 ]
 
 
@@ -304,10 +345,11 @@ def init_db():
 def insert_trades(trades: list[dict], source: str = "import", account_id: int | None = None) -> int:
     """INSERT OR IGNORE ueber (entry_order_id, exit_order_id) - bereits vorhandene
     Trades werden beim erneuten Sync/Import nicht neu angelegt. Wurde ein Trade
-    dabei ignoriert, aber die eingehenden Daten liefern eine volume, die in der
-    DB noch fehlt (z. B. Trades von vor Einfuehrung des volume-Felds), wird sie
-    per UPDATE nachgetragen - so heilt ein erneuter Sync/Import fehlende Lots/
-    Kontrakte, ohne bestehende Zeilen zu duplizieren oder sonst zu veraendern."""
+    dabei ignoriert, aber die eingehenden Daten liefern eine volume/risk_usd, die
+    in der DB noch fehlt (z. B. Trades von vor Einfuehrung des jeweiligen Felds),
+    wird sie per UPDATE nachgetragen - so heilt ein erneuter Sync/Import
+    fehlende Lots/Kontrakte oder Risiko, ohne bestehende Zeilen zu duplizieren
+    oder sonst zu veraendern."""
     inserted = 0
     with get_conn() as conn:
         for t in trades:
@@ -315,25 +357,34 @@ def insert_trades(trades: list[dict], source: str = "import", account_id: int | 
             row.setdefault("source", source)
             row.setdefault("account_id", account_id)
             row.setdefault("volume", None)
+            row.setdefault("risk_usd", None)
             cur = conn.execute(
                 """INSERT OR IGNORE INTO trades
                 (day, instrument, direction, entry_time, exit_time, entry_price, exit_price,
                  exit_type, points, gross_usd, commission_usd, net_usd, entry_order_id, exit_order_id,
-                 source, account_id, volume)
+                 source, account_id, volume, risk_usd)
                 VALUES (:day, :instrument, :direction, :entry_time, :exit_time, :entry_price, :exit_price,
                  :exit_type, :points, :gross_usd, :commission_usd, :net_usd, :entry_order_id, :exit_order_id,
-                 :source, :account_id, :volume)""",
+                 :source, :account_id, :volume, :risk_usd)""",
                 row,
             )
             if cur.rowcount:
                 inserted += 1
-            elif row["volume"] is not None:
-                conn.execute(
-                    """UPDATE trades SET volume = :volume
-                       WHERE entry_order_id = :entry_order_id AND exit_order_id = :exit_order_id
-                       AND volume IS NULL""",
-                    row,
-                )
+            else:
+                if row["volume"] is not None:
+                    conn.execute(
+                        """UPDATE trades SET volume = :volume
+                           WHERE entry_order_id = :entry_order_id AND exit_order_id = :exit_order_id
+                           AND volume IS NULL""",
+                        row,
+                    )
+                if row["risk_usd"] is not None:
+                    conn.execute(
+                        """UPDATE trades SET risk_usd = :risk_usd
+                           WHERE entry_order_id = :entry_order_id AND exit_order_id = :exit_order_id
+                           AND risk_usd IS NULL""",
+                        row,
+                    )
     return inserted
 
 
@@ -805,6 +856,14 @@ def update_trade_notes(trade_id: int, notes: str):
         conn.execute("UPDATE trades SET notes = ? WHERE id = ?", (notes, trade_id))
 
 
+def update_trade_risk(trade_id: int, risk_usd: float | None):
+    """Manuelles Ueberschreiben/Nachtragen des Risikos (Basis fuer R-Multiple,
+    siehe Share-Karte) - z.B. wenn der MT5-Sync keinen Stop-Loss ermitteln
+    konnte oder der Trade per CSV importiert wurde."""
+    with get_conn() as conn:
+        conn.execute("UPDATE trades SET risk_usd = ? WHERE id = ?", (risk_usd, trade_id))
+
+
 def add_image(day: str, trade_id: int | None, filename: str, thumb_filename: str) -> int:
     with get_conn() as conn:
         cur = conn.execute(
@@ -1235,3 +1294,97 @@ def delete_notebook_node(node_id: int) -> int:
         placeholders = ",".join("?" for _ in ids)
         cur = conn.execute(f"DELETE FROM notebook_nodes WHERE id IN ({placeholders})", list(ids))
         return cur.rowcount
+
+
+# ---------- To-Do-Listen (verwaltet im Journal, angezeigt im rechten Menue) ----------
+
+def list_todo_lists() -> list[dict]:
+    """Alle Listen samt Eintraegen in zwei Queries statt einem Query pro Liste."""
+    with get_conn() as conn:
+        lists = [dict(r) for r in conn.execute(
+            "SELECT * FROM todo_lists ORDER BY position ASC, id ASC"
+        ).fetchall()]
+        items = conn.execute("SELECT * FROM todo_items ORDER BY id ASC").fetchall()
+    by_list: dict[int, list[dict]] = {}
+    for row in items:
+        by_list.setdefault(row["list_id"], []).append(dict(row))
+    for lst in lists:
+        lst["items"] = by_list.get(lst["id"], [])
+    return lists
+
+
+def get_todo_list(list_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM todo_lists WHERE id = ?", (list_id,)).fetchone()
+        if not row:
+            return None
+        lst = dict(row)
+        items = conn.execute(
+            "SELECT * FROM todo_items WHERE list_id = ? ORDER BY id ASC", (list_id,)
+        ).fetchall()
+    lst["items"] = [dict(i) for i in items]
+    return lst
+
+
+def create_todo_list(name: str) -> dict:
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        position = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM todo_lists").fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO todo_lists (name, visible, position, created_at) VALUES (?, 0, ?, ?)",
+            (name, position, now),
+        )
+        list_id = cur.lastrowid
+    return get_todo_list(list_id)
+
+
+def update_todo_list(list_id: int, name: str | None = None, visible: bool | None = None) -> dict | None:
+    fields, params = [], []
+    if name is not None:
+        fields.append("name = ?"); params.append(name)
+    if visible is not None:
+        fields.append("visible = ?"); params.append(1 if visible else 0)
+    if not fields:
+        return get_todo_list(list_id)
+    params.append(list_id)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE todo_lists SET {', '.join(fields)} WHERE id = ?", params)
+    return get_todo_list(list_id)
+
+
+def delete_todo_list(list_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM todo_items WHERE list_id = ?", (list_id,))
+        conn.execute("DELETE FROM todo_lists WHERE id = ?", (list_id,))
+
+
+def create_todo_item(list_id: int, text: str) -> dict:
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO todo_items (list_id, text, created_at) VALUES (?, ?, ?)",
+            (list_id, text, now),
+        )
+        item_id = cur.lastrowid
+        row = conn.execute("SELECT * FROM todo_items WHERE id = ?", (item_id,)).fetchone()
+    return dict(row)
+
+
+def update_todo_item(item_id: int, text: str | None = None, done: bool | None = None) -> dict | None:
+    fields, params = [], []
+    if text is not None:
+        fields.append("text = ?"); params.append(text)
+    if done is not None:
+        fields.append("done = ?"); params.append(1 if done else 0)
+        fields.append("done_at = ?")
+        params.append(datetime.now().isoformat(timespec="seconds") if done else None)
+    with get_conn() as conn:
+        if fields:
+            conn.execute(f"UPDATE todo_items SET {', '.join(fields)} WHERE id = ?", params + [item_id])
+        row = conn.execute("SELECT * FROM todo_items WHERE id = ?", (item_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_todo_item(item_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM todo_items WHERE id = ?", (item_id,))
