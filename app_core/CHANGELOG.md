@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.0
+- Neuer Menüpunkt "To-Do-Listen": Listen anlegen/verwalten, Einträge per Klick
+  auf den Text abhaken (bleiben ausgegraut erhalten, Löschen nur explizit),
+  Sichtbarkeit einzelner Listen im rechten Menü (Newsbar) steuerbar.
+- Trades lassen sich als Bild-Karte teilen (Netto $ oder R-Multiple, 5
+  Design-Themes, PNG-Download/Zwischenablage) - Share-Button in der
+  Trades-Übersicht und auf der Einzel-Trade-Seite. Neues Risiko-Feld je Trade
+  als Basis der R-Multiple: bei MT5-Sync automatisch aus dem Stop-Loss des
+  Eröffnungs-Orders ermittelt, sonst manuell auf der Trade-Seite eintragbar.
+- Übersicht: neue Kennzahlen-Kacheln (Trefferquote, Profit-Faktor, Handelstage
+  % Gewinn, Gewinn/Verlust-Verhältnis, Erwartungswert) - einzeln
+  ein-/ausblendbar und per Drag & Drop anordenbar, mit Gradient-Gauge bzw.
+  zweifarbiger Balkengrafik für Prozent-/Verhältnis-Kennzahlen.
+- Auswertungen: Kacheln im Dashboard per Drag & Drop umsortierbar.
+- Journal-Suche durchsucht jetzt wahlweise auch die Notizbücher (neuer
+  Scope-Schalter Journal/Notizbücher/Beides), Treffer zeigen den Ordnerpfad
+  und öffnen in einem schließbaren Fenster statt die Seite zu verlassen.
+
 ## 1.6.0
 - Journal neu strukturiert: das Tagebuch öffnet jetzt auf einer Jahr/Monat-
   Kachel-Übersicht (Eintragsanzahl, Ø-Bewertung, Netto-Ergebnis, Hinweis auf
