@@ -151,12 +151,13 @@ JOURNAL_DIMENSIONS = {"rating", "mood", "followed_plan"}
 def build_context(trades: list[dict]) -> dict:
     """Gemeinsamer Kontext fuer breakdown(): Konto-Namen + Journal-Tagesdaten,
     je einmal geladen statt pro Dimension/Trade neu."""
-    accounts = {a["id"]: a["name"] for a in db.list_accounts()}
-    if not trades:
-        return {"accounts": accounts, "journal": {}}
-    days = [t["day"] for t in trades]
-    journal = db.journal_day_details(min(days), max(days))
-    return {"accounts": accounts, "journal": journal}
+    with db.get_conn():  # beide Abfragen ueber eine Verbindung
+        accounts = {a["id"]: a["name"] for a in db.list_accounts()}
+        if not trades:
+            return {"accounts": accounts, "journal": {}}
+        days = [t["day"] for t in trades]
+        journal = db.journal_day_details(min(days), max(days))
+        return {"accounts": accounts, "journal": journal}
 
 
 def trade_summary(trades: list[dict]) -> dict:

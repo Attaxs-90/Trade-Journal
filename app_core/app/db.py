@@ -1,5 +1,6 @@
 import shutil
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -270,8 +271,28 @@ MIGRATIONS: list[str] = [
 ]
 
 
+# Wiederverwendung der Verbindung innerhalb eines Aufrufs: viele Funktionen hier
+# sind aus mehreren kleineren zusammengesetzt (get_trade -> _attach_tags +
+# _attach_image_flags, list_days -> journal_map, ...). Jede oeffnete frueher ihre
+# eigene Verbindung samt PRAGMA-Setup - /api/overview kam so auf rund ein Dutzend.
+# Verschachtelte "with get_conn()" liefern jetzt dieselbe Verbindung; nur der
+# aeusserste Block committet und schliesst. Der Zustand liegt thread-lokal, weil
+# FastAPI synchrone Endpoints in einem Threadpool ausfuehrt - jeder Request hat
+# damit garantiert seine eigene Verbindung, sqlite3-Objekte wandern nie zwischen
+# Threads.
+_local = threading.local()
+
+
 @contextmanager
 def get_conn():
+    existing = getattr(_local, "conn", None)
+    if existing is not None:
+        # Verschachtelter Aufruf: mitbenutzen, aber NICHT committen/schliessen -
+        # das bleibt Sache des aeussersten Blocks, damit dessen Transaktion
+        # nicht mittendrin halb festgeschrieben wird.
+        yield existing
+        return
+
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     # WAL: nebenlaeufige Lesezugriffe blockieren keine Schreiboperation (und umgekehrt);
@@ -279,10 +300,12 @@ def get_conn():
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA busy_timeout = 10000")
+    _local.conn = conn
     try:
         yield conn
         conn.commit()
     finally:
+        _local.conn = None
         conn.close()
 
 
@@ -436,10 +459,24 @@ def delete_account(account_id: int):
         conn.execute("DELETE FROM broker_accounts WHERE id = ?", (account_id,))
 
 
-def delete_trade(trade_id: int):
+def delete_trade(trade_id: int) -> list[dict]:
+    """Loescht einen Trade samt allem, was ausschliesslich an ihm haengt:
+    Tag-Zuordnungen, seine Trade-Bewertung im Journal (entry_type 'trade',
+    ref_key = Trade-Id als String) und seine Bild-Zeilen. Ohne das blieben
+    verwaiste Journal-Eintraege und Bilder zurueck, die in keiner Ansicht mehr
+    erreichbar sind, aber weiter im Tagesview auftauchen bzw. Plattenplatz
+    belegen. Gibt die geloeschten Bild-Zeilen zurueck, damit der Aufrufer die
+    JPEG-Dateien loeschen kann - die Dateiverwaltung liegt bewusst in
+    images.py, nicht hier (gleiche Aufteilung wie bei api_delete_image)."""
     with get_conn() as conn:
+        images = [dict(r) for r in conn.execute(
+            "SELECT * FROM images WHERE trade_id = ?", (trade_id,)
+        ).fetchall()]
+        conn.execute("DELETE FROM images WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trade_tags WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    delete_journal_entry("trade", str(trade_id))
+    return images
 
 
 def set_last_sync(account_id: int, ts: str):
@@ -663,22 +700,22 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
                FROM trades WHERE {vol_clause} GROUP BY day, source""",
             params,
         ).fetchall()
-    volumes_by_day: dict[str, list[dict]] = {}
-    for r in vol_rows:
-        volumes_by_day.setdefault(r["day"], []).append({"source": r["source"], "total": r["total"]})
-    journal = journal_map("day")  # eine Query fuer alle Tage, nicht eine je Tag
-    result = []
-    for r in rows:
-        d = dict(r)
-        raw = d.pop("account_ids_raw")
-        d["account_ids"] = [int(x) for x in raw.split(",")] if raw else []
-        d["has_unassigned"] = d.pop("unassigned_count") > 0
-        d["volumes"] = volumes_by_day.get(d["day"], [])
-        entry = journal.get(d["day"])
-        d["has_journal"] = entry is not None
-        d["journal_rating"] = entry["rating"] if entry else None
-        result.append(d)
-    return result
+        volumes_by_day: dict[str, list[dict]] = {}
+        for r in vol_rows:
+            volumes_by_day.setdefault(r["day"], []).append({"source": r["source"], "total": r["total"]})
+        journal = journal_map("day")  # eine Query fuer alle Tage, nicht eine je Tag
+        result = []
+        for r in rows:
+            d = dict(r)
+            raw = d.pop("account_ids_raw")
+            d["account_ids"] = [int(x) for x in raw.split(",")] if raw else []
+            d["has_unassigned"] = d.pop("unassigned_count") > 0
+            d["volumes"] = volumes_by_day.get(d["day"], [])
+            entry = journal.get(d["day"])
+            d["has_journal"] = entry is not None
+            d["journal_rating"] = entry["rating"] if entry else None
+            result.append(d)
+        return result
 
 
 TRADE_SORT_COLUMNS = {"day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd"}
@@ -732,17 +769,16 @@ def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | Non
                ORDER BY {sort_col} {sort_dir}, entry_time {sort_dir} LIMIT ? OFFSET ?""",
             params + [limit, offset],
         ).fetchall()
-    trades = _attach_tags([dict(r) for r in rows])
-    return _attach_journal_flags(_attach_image_flags(trades)), total
+        trades = _attach_tags([dict(r) for r in rows])
+        return _attach_journal_flags(_attach_image_flags(trades)), total
 
 
 def get_trade(trade_id: int) -> dict | None:
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM trades WHERE id = ?", (trade_id,)).fetchone()
-    if not row:
-        return None
-    trades = _attach_image_flags(_attach_tags([dict(row)]))
-    return trades[0]
+        if not row:
+            return None
+        return _attach_image_flags(_attach_tags([dict(row)]))[0]
 
 
 def get_images_for_trade(trade_id: int) -> list[dict]:
@@ -760,9 +796,6 @@ def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = N
     dieselben Filter/Sortierung liefern wuerde - per Tupel-Vergleich (Sortierspalte,
     entry_time) statt Offset, damit der Sprung auch ueber Seitengrenzen der
     paginierten Trades-Uebersicht hinweg korrekt bleibt."""
-    current = get_trade(trade_id)
-    if not current:
-        return None
     clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
     where = f"AND {clause}" if clause else ""
     sort_col = TRADE_SORT_COLUMNS.get(sort, "day")
@@ -775,13 +808,20 @@ def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = N
     op = ">" if forward else "<"
     query_dir = "ASC" if forward else "DESC"
     with get_conn() as conn:
+        # Nur die beiden Sortierwerte des aktuellen Trades noetig - kein
+        # get_trade(), das zusaetzlich Tags und Bild-Flags nachladen wuerde.
+        current = conn.execute(
+            f"SELECT {sort_col} as sort_value, entry_time FROM trades WHERE id = ?", (trade_id,)
+        ).fetchone()
+        if not current:
+            return None
         row = conn.execute(
             f"""SELECT id FROM trades
                WHERE ({sort_col}, entry_time) {op} (?, ?) {where}
                ORDER BY {sort_col} {query_dir}, entry_time {query_dir} LIMIT 1""",
-            [current[sort_col], current["entry_time"]] + params,
+            [current["sort_value"], current["entry_time"]] + params,
         ).fetchone()
-    return row["id"] if row else None
+        return row["id"] if row else None
 
 
 def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
@@ -792,7 +832,7 @@ def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: li
             f"SELECT * FROM trades WHERE day = ? {where} ORDER BY entry_time ASC",
             [day] + params,
         ).fetchall()
-    return _attach_tags([dict(r) for r in rows])
+        return _attach_tags([dict(r) for r in rows])
 
 
 def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
@@ -815,7 +855,7 @@ def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: l
         rows = conn.execute(
             f"SELECT * FROM trades {where} ORDER BY day ASC, entry_time ASC", params
         ).fetchall()
-    return _attach_tags([dict(r) for r in rows])
+        return _attach_tags([dict(r) for r in rows])
 
 
 def journal_day_details(start: str | None = None, end: str | None = None) -> dict[str, dict]:
@@ -960,12 +1000,12 @@ def get_journal_entry(entry_type: str, ref_key: str) -> dict | None:
             "SELECT * FROM journal_entries WHERE entry_type = ? AND ref_key = ?",
             (entry_type, ref_key),
         ).fetchone()
-    if not row:
-        return None
-    entry = _attach_journal_tags([dict(row)])[0]
-    if entry_type == "day":
-        entry["day_stats"] = _day_totals([ref_key]).get(ref_key)
-    return entry
+        if not row:
+            return None
+        entry = _attach_journal_tags([dict(row)])[0]
+        if entry_type == "day":
+            entry["day_stats"] = _day_totals([ref_key]).get(ref_key)
+        return entry
 
 
 def delete_journal_entry(entry_type: str, ref_key: str):
@@ -1033,7 +1073,7 @@ def upsert_journal_entry(entry_type: str, ref_key: str, title: str = "", content
             "INSERT OR IGNORE INTO journal_tags (entry_id, tag_id) VALUES (?, ?)",
             [(entry_id, tid) for tid in tag_ids],
         )
-    return get_journal_entry(entry_type, ref_key)
+        return get_journal_entry(entry_type, ref_key)
 
 
 def _journal_gaps(start: str | None, end: str | None, limit: int) -> list[dict]:
@@ -1065,16 +1105,24 @@ def _journal_gaps(start: str | None, end: str | None, limit: int) -> list[dict]:
 
 def list_journal_entries(entry_type: str = "day", start: str | None = None, end: str | None = None,
                           query: str | None = None, tag_keys: list[str] | None = None,
-                          mode: str = "all", limit: int = 300) -> list[dict]:
+                          mode: str = "all", limit: int = 300) -> tuple[list[dict], bool]:
     """Journal-Liste mit Zeitraum-, Volltext- und Tag-Filter. mode steuert den
     Bezug zu den Trades: 'with_trades'/'without_trades' filtern die Eintraege,
     'gaps' zeigt umgekehrt Handelstage, zu denen noch kein Eintrag existiert.
     Der globale Konten-/Tag-Filter der Auswertungsseiten greift hier bewusst
-    nicht - ein Journal-Eintrag gehoert zum Kalendertag, nicht zu einem Konto."""
+    nicht - ein Journal-Eintrag gehoert zum Kalendertag, nicht zu einem Konto.
+
+    Gibt (entries, truncated) zurueck - analog zu list_trades(), das ebenfalls
+    Ergebnis und Gesamtinformation als Tupel liefert. truncated meldet, dass das
+    Limit gegriffen hat und aeltere Eintraege fehlen; frueher verschwanden die
+    kommentarlos, sodass eine Suche unvollstaendige Treffer als vollstaendig
+    ausgab. Erkannt wird das ueber eine Zeile mehr als angefordert (LIMIT+1),
+    die danach wieder abgeschnitten wird - kein zusaetzlicher COUNT-Query."""
     if entry_type not in JOURNAL_TYPES:
         entry_type = "day"
     if mode == "gaps" and entry_type == "day":
-        return _journal_gaps(start, end, limit)
+        gaps = _journal_gaps(start, end, limit + 1)
+        return gaps[:limit], len(gaps) > limit
 
     parts = ["entry_type = ?"]
     params: list = [entry_type]
@@ -1097,18 +1145,19 @@ def list_journal_entries(entry_type: str = "day", start: str | None = None, end:
         rows = conn.execute(
             f"""SELECT * FROM journal_entries WHERE {' AND '.join(parts)}
                ORDER BY ref_key DESC LIMIT ?""",
-            params + [limit],
+            params + [limit + 1],
         ).fetchall()
-    entries = [dict(r) for r in rows]
-    if entry_type == "day":
-        totals = _day_totals([e["ref_key"] for e in entries])
-        for e in entries:
-            e["day_stats"] = totals.get(e["ref_key"])
-        if mode == "with_trades":
-            entries = [e for e in entries if e["day_stats"]]
-        elif mode == "without_trades":
-            entries = [e for e in entries if not e["day_stats"]]
-    return _attach_journal_tags(entries)
+        truncated = len(rows) > limit
+        entries = [dict(r) for r in rows[:limit]]
+        if entry_type == "day":
+            totals = _day_totals([e["ref_key"] for e in entries])
+            for e in entries:
+                e["day_stats"] = totals.get(e["ref_key"])
+            if mode == "with_trades":
+                entries = [e for e in entries if e["day_stats"]]
+            elif mode == "without_trades":
+                entries = [e for e in entries if not e["day_stats"]]
+        return _attach_journal_tags(entries), truncated
 
 
 def journal_month_summary() -> list[dict]:
@@ -1257,8 +1306,7 @@ def create_notebook_node(parent_id: int | None, node_type: str, name: str) -> di
                VALUES (?, ?, ?, ?, ?)""",
             (parent_id, node_type, name, now, now),
         )
-        node_id = cur.lastrowid
-    return get_notebook_node(node_id)
+        return get_notebook_node(cur.lastrowid)
 
 
 def update_notebook_node(node_id: int, name: str | None = None, content_html: str | None = None,
@@ -1276,7 +1324,7 @@ def update_notebook_node(node_id: int, name: str | None = None, content_html: st
     params.append(node_id)
     with get_conn() as conn:
         conn.execute(f"UPDATE notebook_nodes SET {', '.join(fields)} WHERE id = ?", params)
-    return get_notebook_node(node_id)
+        return get_notebook_node(node_id)
 
 
 def _notebook_descendant_ids(conn, node_id: int) -> set[int]:
@@ -1298,19 +1346,16 @@ def move_notebook_node(node_id: int, parent_id: int | None) -> dict:
     """Verschiebt einen Knoten unter einen neuen Elternknoten (None = oberste
     Ebene). Verhindert Zyklen: ein Ordner darf nicht in sich selbst oder einen
     eigenen Nachfahren verschoben werden."""
-    if parent_id is not None:
-        if parent_id == node_id:
-            raise ValueError("Ein Knoten kann nicht in sich selbst verschoben werden.")
-        with get_conn() as conn:
-            descendants = _notebook_descendant_ids(conn, node_id)
-        if parent_id in descendants:
-            raise ValueError("Ein Ordner kann nicht in einen eigenen Unterordner verschoben werden.")
+    if parent_id == node_id:
+        raise ValueError("Ein Knoten kann nicht in sich selbst verschoben werden.")
     with get_conn() as conn:
+        if parent_id is not None and parent_id in _notebook_descendant_ids(conn, node_id):
+            raise ValueError("Ein Ordner kann nicht in einen eigenen Unterordner verschoben werden.")
         conn.execute(
             "UPDATE notebook_nodes SET parent_id = ?, updated_at = ? WHERE id = ?",
             (parent_id, datetime.now().isoformat(timespec="seconds"), node_id),
         )
-    return get_notebook_node(node_id)
+        return get_notebook_node(node_id)
 
 
 def delete_notebook_node(node_id: int) -> int:
@@ -1350,8 +1395,8 @@ def get_todo_list(list_id: int) -> dict | None:
         items = conn.execute(
             "SELECT * FROM todo_items WHERE list_id = ? ORDER BY id ASC", (list_id,)
         ).fetchall()
-    lst["items"] = [dict(i) for i in items]
-    return lst
+        lst["items"] = [dict(i) for i in items]
+        return lst
 
 
 def create_todo_list(name: str) -> dict:
@@ -1362,8 +1407,7 @@ def create_todo_list(name: str) -> dict:
             "INSERT INTO todo_lists (name, visible, position, created_at) VALUES (?, 0, ?, ?)",
             (name, position, now),
         )
-        list_id = cur.lastrowid
-    return get_todo_list(list_id)
+        return get_todo_list(cur.lastrowid)
 
 
 def update_todo_list(list_id: int, name: str | None = None, visible: bool | None = None) -> dict | None:
@@ -1377,7 +1421,7 @@ def update_todo_list(list_id: int, name: str | None = None, visible: bool | None
     params.append(list_id)
     with get_conn() as conn:
         conn.execute(f"UPDATE todo_lists SET {', '.join(fields)} WHERE id = ?", params)
-    return get_todo_list(list_id)
+        return get_todo_list(list_id)
 
 
 def delete_todo_list(list_id: int) -> None:
@@ -1393,9 +1437,8 @@ def create_todo_item(list_id: int, text: str) -> dict:
             "INSERT INTO todo_items (list_id, text, created_at) VALUES (?, ?, ?)",
             (list_id, text, now),
         )
-        item_id = cur.lastrowid
-        row = conn.execute("SELECT * FROM todo_items WHERE id = ?", (item_id,)).fetchone()
-    return dict(row)
+        row = conn.execute("SELECT * FROM todo_items WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
 
 
 def update_todo_item(item_id: int, text: str | None = None, done: bool | None = None) -> dict | None:
@@ -1410,7 +1453,7 @@ def update_todo_item(item_id: int, text: str | None = None, done: bool | None = 
         if fields:
             conn.execute(f"UPDATE todo_items SET {', '.join(fields)} WHERE id = ?", params + [item_id])
         row = conn.execute("SELECT * FROM todo_items WHERE id = ?", (item_id,)).fetchone()
-    return dict(row) if row else None
+        return dict(row) if row else None
 
 
 def delete_todo_item(item_id: int) -> None:

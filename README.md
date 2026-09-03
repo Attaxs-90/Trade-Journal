@@ -30,7 +30,7 @@ trade-journal/
 ├── CLAUDE.md           Konventionen für die Weiterentwicklung
 └── app_core/           Kompletter Code (Backend, Frontend, Doku)
     ├── app/             Python-Backend (FastAPI)
-    ├── static/          Frontend (HTML/CSS/JS, kein Build-Schritt)
+    ├── static/          Frontend (HTML/CSS, ES-Module in js/, kein Build-Schritt)
     └── README.md        Nutzer-Anleitung
 ```
 
