@@ -11,14 +11,20 @@ import { renderAccountFilter } from './filters.js';
    folgenreiche Loeschungen (Konto, Vorlage) bleibt sie an, fuer den Journal-
    Eintrag reicht ein einfacher Ja-Klick, weil der Inhalt selbst der einzige
    Verlust ist und die zwei Klicks (Loeschen-Button + Ja) schon vor
-   Versehentlichem schuetzen. */
+   Versehentlichem schuetzen.
+
+   message wird hier escaped, nicht bei den Aufrufern: jeder von ihnen baut
+   den Text aus einem Nutzer-Namen (Konto, Tag, Liste, To-Do-Eintrag, Notiz),
+   und ein einzelnes vergessenes escapeHtml() an einer der ueber zehn
+   Aufrufstellen reichte, damit ein Name wie "Prop & Co <Swing>" im Dialog
+   verstuemmelt erscheint. Kein Aufrufer uebergibt absichtlich Markup. */
 export function confirmDelete(message, requireTyping = true) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay visible";
     overlay.innerHTML = `
       <div class="modal-card confirm-card">
-        <div class="confirm-message">${message}</div>
+        <div class="confirm-message">${escapeHtml(message)}</div>
         <div class="confirm-actions">
           <button class="btn btn-secondary confirm-no">Nein</button>
           <button class="btn btn-danger confirm-yes">Ja</button>
@@ -58,14 +64,15 @@ export function confirmDelete(message, requireTyping = true) {
 /* Einfacher Ja/Nein-Dialog fuer nicht-destruktive Entscheidungen (z.B.
    "trotzdem weiter, obwohl ungespeichert?") - wie confirmDelete(msg, false),
    aber mit einem regulaeren statt rot eingefaerbten Bestaetigen-Button, damit
-   eine haeufige, harmlose Aktion nicht wie eine Loeschung aussieht. */
+   eine haeufige, harmlose Aktion nicht wie eine Loeschung aussieht.
+   message wird escaped, siehe confirmDelete(). */
 export function confirmContinue(message, yesLabel = "Weiter") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay visible";
     overlay.innerHTML = `
       <div class="modal-card confirm-card">
-        <div class="confirm-message">${message}</div>
+        <div class="confirm-message">${escapeHtml(message)}</div>
         <div class="confirm-actions">
           <button class="btn btn-secondary confirm-no">Abbrechen</button>
           <button class="btn btn-primary confirm-yes">${escapeHtml(yesLabel)}</button>

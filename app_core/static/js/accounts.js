@@ -1,6 +1,6 @@
 /* Konten-Seite, Broker-Sync und CSV-Import. */
 
-import { api, state } from './core.js';
+import { api, escapeHtml, state } from './core.js';
 import { mountView, setActiveNav } from './overview.js';
 
 /* ---------- Konten & Sync ---------- */
@@ -38,6 +38,6 @@ export async function renderImportAccountSelect() {
   const current = select.value;
   const accounts = await api("/api/accounts");
   select.innerHTML = '<option value="">Kein Konto (freier Import)</option>'
-    + accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join("");
+    + accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
   if (accounts.some(a => String(a.id) === current)) select.value = current;
 }

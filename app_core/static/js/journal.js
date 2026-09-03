@@ -4,7 +4,7 @@ import { monthLabel, openJournalModal } from './calendar.js';
 import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, cls, escapeHtml, fmtDate, fmtSigned, state, tile } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { buildTagChipGroups, getTags } from './filters.js';
-import { activeNotebookNote, clearNbDrag, nbDrag, notebookCreateDirect, notebookMoveTo, renderNotebookSearchResults, renderNotebookTree, saveNotebookNote, switchJournalTab } from './notebooks.js';
+import { activeNotebookNote, clearNbDrag, nbDrag, notebookCreateDirect, notebookMoveTo, renderNotebookSearchResults, saveNotebookNote, switchJournalTab } from './notebooks.js';
 import { mountView, setActiveNav } from './overview.js';
 import { tagChipHtml } from './tags.js';
 

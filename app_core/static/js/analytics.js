@@ -3,7 +3,7 @@
 import { getPlatforms, renderImportAccountSelect } from './accounts.js';
 import { closeModal } from './calendar.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, state, tagsQS, tile } from './core.js';
+import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, showAppError, state, tagsQS, tile } from './core.js';
 import { deleteAccountFlow } from './dialogs.js';
 import { refreshCurrentView, renderAccountFilter, renderTagFilter } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
@@ -343,45 +343,19 @@ function mountAnalyticsGrid() {
     if (!widget) return;
     card.querySelector(".analytics-widget-edit").addEventListener("click", () => openAnalyticsWidgetEditor(widget));
     card.querySelector(".analytics-widget-remove").addEventListener("click", () => removeAnalyticsWidget(widget.id));
-    wireAnalyticsWidgetDrag(card);
   });
+  wireAnalyticsWidgetDrag(grid);
 }
 
-/* Kacheln per Drag & Drop umsortieren - anders als die einspaltigen Listen
+/* Kacheln per Drag & Drop umsortieren: anders als die einspaltigen Listen
    (Sidebar, Notizbuch-Baum) ist das Auswertungs-Grid zweispaltig, deshalb
-   entscheidet die Zielposition ueber Y (oberhalb/unterhalb der Karte) UND X
-   (linke/rechte Haelfte), nicht nur Y. Reihenfolge wird erst bei dragend aus
-   dem tatsaechlichen DOM gelesen und gespeichert - waehrend des Ziehens
-   bewegt sich das Element bereits live mit (wie bei .nav-item). */
-let analyticsDragEl = null;
-
-function analyticsCardGoesBefore(e, rect) {
-  if (e.clientY < rect.top) return true;
-  if (e.clientY > rect.bottom) return false;
-  return e.clientX < rect.left + rect.width / 2;
-}
-
-function wireAnalyticsWidgetDrag(card) {
-  card.addEventListener("dragstart", (e) => {
-    analyticsDragEl = card;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", card.dataset.widgetId);
-    card.classList.add("dragging");
-  });
-  card.addEventListener("dragend", () => {
-    card.classList.remove("dragging");
-    analyticsDragEl = null;
-    const ids = [...document.querySelectorAll("#analytics-grid .analytics-widget")].map(c => c.dataset.widgetId);
+   grid:true - die Zielposition entscheidet ueber Y (oberhalb/unterhalb der
+   Karte) UND X (linke/rechte Haelfte), nicht nur ueber Y. */
+function wireAnalyticsWidgetDrag(grid) {
+  makeSortable(grid, ".analytics-widget", (ids) => {
     analyticsWidgets.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
     saveAnalyticsWidgets();
-  });
-  card.addEventListener("dragover", (e) => {
-    if (!analyticsDragEl || analyticsDragEl === card) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const before = analyticsCardGoesBefore(e, card.getBoundingClientRect());
-    card.parentElement.insertBefore(analyticsDragEl, before ? card : card.nextSibling);
-  });
+  }, { grid: true, keyAttr: "widgetId" });
 }
 
 function removeAnalyticsWidget(id) {
@@ -521,7 +495,7 @@ export async function openAccounts() {
 
   const platforms = await getPlatforms();
   const platformSelect = document.getElementById("account-platform-select");
-  platformSelect.innerHTML = platforms.map(p => `<option value="${p.key}">${p.name}</option>`).join("");
+  platformSelect.innerHTML = platforms.map(p => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.name)}</option>`).join("");
 
   const credentialFields = [
     document.getElementById("account-login"),
@@ -557,7 +531,7 @@ export async function openAccounts() {
       await renderAccountFilter();
       await renderImportAccountSelect();
     } catch (err) {
-      alert(err.message);
+      showAppError(err.message);
     }
   });
 

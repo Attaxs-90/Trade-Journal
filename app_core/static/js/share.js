@@ -1,7 +1,7 @@
 /* Trade als Bild-Karte teilen (Canvas) und die Trade-Karten der Tagesansicht. */
 
 import { obsTile } from './calendar.js';
-import { api, attachOutsideClose, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, fmtTime, fmtVolume, state, tile, withFilter } from './core.js';
+import { api, attachOutsideClose, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, fmtTime, fmtVolume, makeSortable, readStoredArray, state, tile, withFilter, writeStored } from './core.js';
 import { getAccountOptions } from './filters.js';
 import { renderDayImages } from './images.js';
 import { mountJournalEditor } from './journal.js';
@@ -401,14 +401,14 @@ const DAY_TRADE_FIELDS = [
 const DAY_TRADE_FIELD_KEYS = DAY_TRADE_FIELDS.map(f => f.key);
 
 function loadDayTradeFieldOrder() {
-  const saved = JSON.parse(localStorage.getItem("dayTradeFieldOrder") || "null");
+  const saved = readStoredArray("dayTradeFieldOrder");
   if (!Array.isArray(saved)) return [...DAY_TRADE_FIELD_KEYS];
   const known = saved.filter(k => DAY_TRADE_FIELD_KEYS.includes(k));
   for (const k of DAY_TRADE_FIELD_KEYS) if (!known.includes(k)) known.push(k);
   return known;
 }
 function saveDayTradeFieldOrder(order) {
-  localStorage.setItem("dayTradeFieldOrder", JSON.stringify(order));
+  writeStored("dayTradeFieldOrder", order);
 }
 
 /* container-scoped statt ueber Ids: dieselbe Tagesansicht kann gleichzeitig
@@ -425,24 +425,9 @@ function renderDayTradeFieldOrderPanel(container, onReorder) {
       </div>`;
     }).join("");
 
-  let dragKey = null;
-  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
-    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
-    row.addEventListener("dragend", () => row.classList.remove("dragging"));
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      const dragging = panel.querySelector(".dragging");
-      if (!dragging || dragging === row) return;
-      const rect = row.getBoundingClientRect();
-      const before = e.clientY < rect.top + rect.height / 2;
-      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
-    });
-    row.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
-      saveDayTradeFieldOrder(newOrder);
-      onReorder();
-    });
+  makeSortable(panel, ".trade-field-order-row", (order) => {
+    saveDayTradeFieldOrder(order);
+    onReorder();
   });
 }
 

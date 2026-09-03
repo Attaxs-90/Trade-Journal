@@ -2,9 +2,9 @@
 
 import { shortenLabel } from './analytics.js';
 import { setModalOnClose } from './calendar.js';
-import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, attachOutsideClose, escapeHtml, state } from './core.js';
+import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, attachOutsideClose, escapeHtml, showAppError, state, writeStored } from './core.js';
 import { confirmDelete, promptDialog } from './dialogs.js';
-import { initQuillFormats, mountJournalEditor, renderJournalList } from './journal.js';
+import { initQuillFormats, renderJournalList } from './journal.js';
 
 /* ---------- Notizbuecher: frei verschachtelbare Ordner/Notizen ----------
    Zweiter Bereich neben dem Tages-Tagebuch, fuer Inhalte ohne Kalenderbezug
@@ -34,7 +34,7 @@ export function loadNotebookExpandedState() {
   }
 }
 function saveNotebookExpandedState() {
-  localStorage.setItem("notebookExpanded", JSON.stringify([...state.notebookExpanded]));
+  writeStored("notebookExpanded", [...state.notebookExpanded]);
 }
 
 async function fetchNotebookNodes() {
@@ -292,7 +292,7 @@ export async function notebookMoveTo(draggedId, targetParentId) {
       body: JSON.stringify({ parent_id: targetParentId }),
     });
   } catch (e) {
-    alert(e.message);
+    showAppError(e.message);
     return;
   }
   if (targetParentId !== null) { state.notebookExpanded.add(targetParentId); saveNotebookExpandedState(); }

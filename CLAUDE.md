@@ -139,7 +139,35 @@ von dort die übrigen Module. Vorher lag alles in einer einzelnen `app.js` mit
   anderen Modul zuweisen.
 - **`main.js` enthält nur die reihenfolgekritische Startsequenz.** Die Module
   registrieren ihre eigenen Event-Listener beim Laden; der gespeicherte Filter-
-  und Ansichtszustand muss aber stehen, bevor `openOverview()` rendert.
+  und Ansichtszustand muss aber stehen, bevor `openOverview()` rendert. Dort
+  hängen auch die globalen Fehler-Handler.
+
+### Helfer in core.js, die es schon gibt
+
+Vor einer neuen Umsetzung hier nachsehen (siehe erste Dauerregel):
+
+- **`makeSortable(container, selector, onReorder, {grid, keyAttr})`** für jede
+  Drag-&-Drop-Umsortierung. Ersetzte sechs fast gleiche Implementierungen.
+  `grid: true` für mehrspaltige Raster (Übersichts-Kacheln, Auswertungs-
+  Widgets), sonst einspaltige Liste. Gespeichert wird bei `dragend`, nicht bei
+  `drop` — wird außerhalb der Liste losgelassen, bleibt die per `dragover`
+  bereits vollzogene Verschiebung sonst sichtbar, aber ungespeichert stehen.
+  Der Notizbuch-Baum nutzt das bewusst **nicht**: dort wird in Ordner
+  hinein verschoben, nicht umsortiert.
+- **`readStoredArray(key)` / `writeStored(key, wert)`** für gespeicherte Listen
+  (Reihenfolgen, ausgeblendete Spalten). Beide fangen Fehler ab — ein
+  beschädigter Eintrag darf höchstens die Vorliebe kosten, nicht den Start.
+  **Achtung:** `theme`, `fontOption`, `sidebarCollapsed` und `newsbarCollapsed`
+  liegen als rohe Strings im localStorage, weil das Inline-Skript im `<head>`
+  sie vor dem ersten Rendern liest. Die dürfen nicht auf `writeStored`
+  (JSON) umgestellt werden.
+- **`showAppError(msg)` / `clearAppError()`** für den Fehlerstreifen. Die
+  Render-Funktionen fangen ihre `api()`-Fehler nicht einzeln ab; ein
+  `unhandledrejection`-Handler in `main.js` meldet zentral. `mountView()` räumt
+  den Streifen beim Ansichtswechsel weg. Kein `alert()` mehr im Code.
+- **`escapeHtml(s)`** für alles, was aus der Datenbank ins Markup geht.
+  `confirmDelete()`/`confirmContinue()`/`promptDialog()` escapen ihre Nachricht
+  bereits selbst — dort also **nicht** doppelt escapen.
 
 ## Release
 
