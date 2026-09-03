@@ -1,6 +1,6 @@
 /* Einstellungen: Schriftart, ein-/ausklappbare Karten, Journal-Vorlagen, Tag-Verwaltung. */
 
-import { api, cls, escapeHtml, fmtNum, fmtSigned, safeColor, state } from './core.js';
+import { api, cls, escapeHtml, fmtNum, fmtSigned, safeColor, showAppError, state } from './core.js';
 import { confirmDelete, deleteAccountFlow } from './dialogs.js';
 import { getTags, invalidateTagsCache, renderTagFilter } from './filters.js';
 import { JOURNAL_TOOLBAR, flushJournal, getJournalTemplates, initQuillFormats } from './journal.js';
@@ -207,7 +207,7 @@ async function renderJournalTemplatesSettings() {
       resetForm();
       await renderList();
     } catch (err) {
-      alert(err.message);
+      showAppError(err.message);
     }
   };
   cancelBtn.onclick = resetForm;
@@ -218,22 +218,40 @@ async function renderJournalTemplatesSettings() {
 
 /* ---------- Tags-Verwaltung (Einstellungen) ---------- */
 
+/* Mit Namen statt nur Hex-Werten: die Farbfelder haben keinen sichtbaren Text,
+   ein Screenreader las bisher zehnmal nur "Schaltflaeche" vor. Der Name ist die
+   einzige Moeglichkeit, sie auseinanderzuhalten. */
 const TAG_PRESET_COLORS = [
-  "#6c95ff", "#3ddc84", "#ff6b6b", "#ffa94d", "#ffd43b",
-  "#c792ea", "#4dd4d0", "#ff8fc7", "#8b93a1", "#4f8cff",
+  { hex: "#6c95ff", name: "Hellblau" },
+  { hex: "#3ddc84", name: "Grün" },
+  { hex: "#ff6b6b", name: "Rot" },
+  { hex: "#ffa94d", name: "Orange" },
+  { hex: "#ffd43b", name: "Gelb" },
+  { hex: "#c792ea", name: "Violett" },
+  { hex: "#4dd4d0", name: "Türkis" },
+  { hex: "#ff8fc7", name: "Rosa" },
+  { hex: "#8b93a1", name: "Grau" },
+  { hex: "#4f8cff", name: "Blau" },
 ];
 
 let editingTagId = null;
 
 function renderTagSwatches(selectedColor) {
   const row = document.getElementById("tag-swatch-row");
-  row.innerHTML = TAG_PRESET_COLORS.map(c =>
-    `<button type="button" class="tag-swatch${c.toLowerCase() === (selectedColor || "").toLowerCase() ? " active" : ""}" style="background:${c}" data-color="${c}"></button>`
-  ).join("");
+  row.innerHTML = TAG_PRESET_COLORS.map(c => {
+    // aria-pressed statt nur der CSS-Klasse "active": welche Farbe gewaehlt
+    // ist, war bisher rein visuell erkennbar.
+    const active = c.hex.toLowerCase() === (selectedColor || "").toLowerCase();
+    return `<button type="button" class="tag-swatch${active ? " active" : ""}" style="background:${c.hex}"`
+      + ` data-color="${c.hex}" aria-label="Farbe ${escapeHtml(c.name)}" aria-pressed="${active}"></button>`;
+  }).join("");
   row.querySelectorAll(".tag-swatch").forEach(btn => {
     btn.addEventListener("click", () => {
       document.getElementById("tag-color-input").value = btn.dataset.color;
-      row.querySelectorAll(".tag-swatch").forEach(b => b.classList.toggle("active", b === btn));
+      row.querySelectorAll(".tag-swatch").forEach(b => {
+        b.classList.toggle("active", b === btn);
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
     });
   });
 }
@@ -276,7 +294,7 @@ async function renderTagsSettings() {
       await renderTagsList();
       await renderTagFilter();
     } catch (err) {
-      alert(err.message);
+      showAppError(err.message);
     }
   };
 
@@ -364,7 +382,7 @@ async function renderSettingsAccountDelete() {
   select.disabled = false;
   btn.disabled = false;
   document.getElementById("settings-account-hint").textContent = "";
-  select.innerHTML = accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join("");
+  select.innerHTML = accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("");
 
   btn.onclick = async () => {
     const acc = accounts.find(a => String(a.id) === select.value);

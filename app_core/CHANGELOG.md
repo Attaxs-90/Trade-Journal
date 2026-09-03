@@ -16,6 +16,16 @@
   über 5.000 Zeilen), weiterhin ohne Build-Schritt.
 - Vorbereitung auf künftige Python-Versionen: die zur Entfernung vorgemerkten
   UTC-Funktionen ersetzt.
+- Fehlgeschlagene Server-Anfragen werden jetzt sichtbar gemeldet. Bisher blieb
+  eine Ansicht in so einem Fall einfach ohne Daten stehen - nicht davon zu
+  unterscheiden, dass es nichts anzuzeigen gab.
+- Namen mit Sonderzeichen (z. B. "Prop & Co <Swing>") werden in
+  Bestätigungsdialogen und Konto-Auswahllisten korrekt angezeigt statt
+  verstümmelt.
+- Farbfelder der Tag-Verwaltung haben jetzt Namen für Screenreader, die
+  Konto-Auswahl beim Löschen eine Beschriftung.
+- Eine beschädigte gespeicherte Reihenfolge kostet nur noch diese Einstellung,
+  statt den Start der Oberfläche abzubrechen.
 
 ## 1.7.0
 - Neuer Menüpunkt "To-Do-Listen": Listen anlegen/verwalten, Einträge per Klick

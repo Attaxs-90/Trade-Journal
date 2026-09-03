@@ -169,6 +169,16 @@
 
 </div>
 
+<!-- Fehlerstreifen fuer fehlgeschlagene Server-Anfragen. Liegt fest im HTML
+     statt per JS erzeugt zu werden, damit er auch dann noch angezeigt werden
+     kann, wenn beim Rendern einer Ansicht etwas schiefgelaufen ist.
+     aria-live=assertive, weil die Meldung erklaert, warum sichtbare Daten
+     fehlen - das soll ein Screenreader nicht erst beim naechsten Fokus melden. -->
+<div class="app-error" id="app-error" role="alert" aria-live="assertive" hidden>
+  <span class="app-error-text" id="app-error-text"></span>
+  <button type="button" class="app-error-close" id="app-error-close" aria-label="Meldung schließen">×</button>
+</div>
+
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal-card">
     <button class="modal-close" id="modal-close" aria-label="Schließen">&times;</button>
@@ -649,7 +659,7 @@
       </button>
       <div class="settings-card-body">
         <div class="account-form">
-          <select id="settings-account-select"></select>
+          <select id="settings-account-select" aria-label="Zu löschendes Konto"></select>
           <button type="button" class="btn btn-danger" id="settings-account-delete-btn">Konto löschen</button>
         </div>
         <div class="account-hint" id="settings-account-hint"></div>
@@ -671,8 +681,8 @@
           <datalist id="tag-group-options"></datalist>
           <input type="text" name="name" id="tag-name-input" placeholder="Tag-Name (z. B. Winner)" autocomplete="off" required>
           <div class="tag-color-row">
-            <div class="tag-swatch-row" id="tag-swatch-row"></div>
-            <input type="color" id="tag-color-input" value="#6c95ff" title="Eigene Farbe">
+            <div class="tag-swatch-row" id="tag-swatch-row" role="group" aria-label="Farbe auswählen"></div>
+            <input type="color" id="tag-color-input" value="#6c95ff" title="Eigene Farbe" aria-label="Eigene Farbe">
           </div>
           <button type="submit" class="btn btn-primary" id="tag-form-submit">Tag anlegen</button>
           <button type="button" class="btn btn-secondary" id="tag-form-cancel" hidden>Abbrechen</button>

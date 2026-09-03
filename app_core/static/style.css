@@ -628,6 +628,42 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   text-align: center;
 }
 
+/* Fehlerstreifen fuer fehlgeschlagene Server-Anfragen. Schwebt oben mittig
+   ueber dem Inhalt, statt Platz im Layout zu belegen - er erscheint selten und
+   soll die Ansicht darunter nicht verschieben. z-index ueber den Overlays, weil
+   eine Aktion aus einem Dialog heraus fehlschlagen kann. */
+.app-error {
+  align-items: flex-start;
+  background: var(--red-fill);
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  left: 50%;
+  max-width: min(680px, calc(100vw - 40px));
+  padding: 11px 12px 11px 15px;
+  position: fixed;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+.app-error-text { line-height: 1.45; }
+.app-error-close {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 17px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.app-error-close:hover { background: var(--bg-hover); color: var(--text); }
+
 /* Hinweis, dass die Journal-Liste serverseitig gedeckelt wurde (siehe
    list_journal_entries) - sonst wirkt ein abgeschnittenes Ergebnis vollstaendig. */
 .journal-list-truncated-hint {

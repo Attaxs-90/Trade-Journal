@@ -1,7 +1,7 @@
 /* Uebersichtsseite mit Kennzahlen-Kacheln und Equity-Kurve, plus mountView(). */
 
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { api, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, state, tile, withFilter } from './core.js';
+import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, makeSortable, readStoredArray, state, tile, withFilter, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { getAccountOptions, renderAccountChipRow, renderTagFilter } from './filters.js';
 import { clearActiveJournal, flushJournal } from './journal.js';
@@ -24,6 +24,7 @@ export async function mountView(templateId) {
   clearActiveJournal();
   await flushNotebookNote();
   clearActiveNotebookNote();
+  clearAppError();  // neue Ansicht - eine Meldung der vorherigen ist erledigt
   const content = document.getElementById("content");
   content.innerHTML = "";
   content.appendChild(document.getElementById(templateId).content.cloneNode(true));
@@ -61,7 +62,7 @@ function loadOverviewHiddenStats() {
   return new Set();
 }
 function saveOverviewHiddenStats(hiddenSet) {
-  localStorage.setItem("overviewHiddenStats", JSON.stringify([...hiddenSet]));
+  writeStored("overviewHiddenStats", [...hiddenSet]);
 }
 
 /* Reihenfolge der Kacheln - analog zu tradeFieldOrder/analyticsWidgets:
@@ -78,38 +79,12 @@ function loadOverviewStatOrder() {
   return [...OVERVIEW_STAT_KEYS];
 }
 function saveOverviewStatOrder(order) {
-  localStorage.setItem("overviewStatOrder", JSON.stringify(order));
+  writeStored("overviewStatOrder", order);
 }
 
-/* Drag & Drop der Kacheln im Grid - 2-achsige Positionsbestimmung wie bei den
-   Auswertungen-Widgets (analyticsCardGoesBefore), da #ov-stats ein
-   mehrspaltiges Grid ist, kein einspaltiges wie die Trade-Feldreihenfolge. */
-let overviewStatDragEl = null;
-function overviewStatGoesBefore(e, rect) {
-  if (e.clientY < rect.top) return true;
-  if (e.clientY > rect.bottom) return false;
-  return e.clientX < rect.left + rect.width / 2;
-}
-function wireOverviewStatDrag(tileEl) {
-  tileEl.addEventListener("dragstart", (e) => {
-    overviewStatDragEl = tileEl;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", tileEl.dataset.statKey);
-    tileEl.classList.add("dragging");
-  });
-  tileEl.addEventListener("dragend", () => {
-    tileEl.classList.remove("dragging");
-    overviewStatDragEl = null;
-    const keys = [...document.querySelectorAll("#ov-stats .stat-tile")].map(t => t.dataset.statKey);
-    saveOverviewStatOrder(keys);
-  });
-  tileEl.addEventListener("dragover", (e) => {
-    if (!overviewStatDragEl || overviewStatDragEl === tileEl) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const before = overviewStatGoesBefore(e, tileEl.getBoundingClientRect());
-    tileEl.parentElement.insertBefore(overviewStatDragEl, before ? tileEl : tileEl.nextSibling);
-  });
+/* #ov-stats ist ein mehrspaltiges Grid, daher grid:true (siehe makeSortable). */
+function wireOverviewStatDrag(grid) {
+  makeSortable(grid, ".stat-tile", saveOverviewStatOrder, { grid: true, keyAttr: "statKey" });
 }
 
 function gaugeTile(label, pct, valueText) {
@@ -154,7 +129,7 @@ function renderOverviewStats(data) {
       // `<div class="stat-tile">`.
       return html.replace('<div class="stat-tile">', `<div class="stat-tile" draggable="true" data-stat-key="${key}">`);
     }).join("");
-  grid.querySelectorAll(".stat-tile").forEach(wireOverviewStatDrag);
+  wireOverviewStatDrag(grid);
 }
 
 function renderOverviewStatsPanel() {
@@ -183,24 +158,9 @@ function renderOverviewStatsPanel() {
     });
   });
 
-  let dragKey = null;
-  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
-    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
-    row.addEventListener("dragend", () => row.classList.remove("dragging"));
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      const dragging = panel.querySelector(".dragging");
-      if (!dragging || dragging === row) return;
-      const rect = row.getBoundingClientRect();
-      const before = e.clientY < rect.top + rect.height / 2;
-      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
-    });
-    row.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
-      saveOverviewStatOrder(newOrder);
-      renderOverviewStats(lastOverviewData);
-    });
+  makeSortable(panel, ".trade-field-order-row", (order) => {
+    saveOverviewStatOrder(order);
+    renderOverviewStats(lastOverviewData);
   });
 }
 
@@ -260,8 +220,8 @@ const TRADE_CARD_FIELD_KEYS = TRADE_CARD_FIELDS.map(f => f.key);
 /* Reihenfolge gilt global fuer jede Trade-Karte (nicht pro Sitzung) - deshalb
    in localStorage statt in state, analog zu overviewHiddenColumns. */
 function loadTradeFieldOrder() {
-  const saved = JSON.parse(localStorage.getItem("tradeFieldOrder") || "null");
-  if (!Array.isArray(saved)) return [...TRADE_CARD_FIELD_KEYS];
+  const saved = readStoredArray("tradeFieldOrder");
+  if (!saved) return [...TRADE_CARD_FIELD_KEYS];
   // Unbekannte/entfernte Keys rausfiltern, neu hinzugekommene Felder hinten anhaengen -
   // sonst verschwindet ein neues Feld fuer Bestandsnutzer mit gespeicherter Reihenfolge.
   const known = saved.filter(k => TRADE_CARD_FIELD_KEYS.includes(k));
@@ -269,19 +229,19 @@ function loadTradeFieldOrder() {
   return known;
 }
 function saveTradeFieldOrder(order) {
-  localStorage.setItem("tradeFieldOrder", JSON.stringify(order));
+  writeStored("tradeFieldOrder", order);
 }
 
 /* Gespeichert werden die AUSGEBLENDETEN Felder, nicht die sichtbaren - analog
    zu overviewHiddenColumns (siehe CLAUDE.md), sonst waere ein neu
    hinzugekommenes Feld fuer Bestandsnutzer mit gespeicherter Auswahl unsichtbar. */
 function loadTradeFieldHidden() {
-  const saved = JSON.parse(localStorage.getItem("tradeFieldHidden") || "null");
-  if (!Array.isArray(saved)) return new Set();
+  const saved = readStoredArray("tradeFieldHidden");
+  if (!saved) return new Set();
   return new Set(saved.filter(k => TRADE_CARD_FIELD_KEYS.includes(k)));
 }
 function saveTradeFieldHidden(hiddenSet) {
-  localStorage.setItem("tradeFieldHidden", JSON.stringify([...hiddenSet]));
+  writeStored("tradeFieldHidden", [...hiddenSet]);
 }
 
 function renderTradeFieldOrderPanel() {
@@ -313,24 +273,9 @@ function renderTradeFieldOrderPanel() {
     });
   });
 
-  let dragKey = null;
-  panel.querySelectorAll(".trade-field-order-row").forEach(row => {
-    row.addEventListener("dragstart", () => { dragKey = row.dataset.key; row.classList.add("dragging"); });
-    row.addEventListener("dragend", () => row.classList.remove("dragging"));
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      const dragging = panel.querySelector(".dragging");
-      if (!dragging || dragging === row) return;
-      const rect = row.getBoundingClientRect();
-      const before = e.clientY < rect.top + rect.height / 2;
-      row.parentNode.insertBefore(dragging, before ? row : row.nextSibling);
-    });
-    row.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const newOrder = [...panel.querySelectorAll(".trade-field-order-row")].map(r => r.dataset.key);
-      saveTradeFieldOrder(newOrder);
-      renderTradesTable();
-    });
+  makeSortable(panel, ".trade-field-order-row", (order) => {
+    saveTradeFieldOrder(order);
+    renderTradesTable();
   });
 }
 

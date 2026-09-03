@@ -104,3 +104,98 @@ export const JOURNAL_AUTOSAVE_MS = 1500;
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+/* Macht die Kinder eines Containers per Drag & Drop umsortierbar.
+
+   Ersetzt sechs fast gleiche Umsetzungen (Sidebar-Menue, Uebersichts-Kacheln
+   und deren Auswahlliste, Trade-Feldreihenfolge auf der Trades-Seite und in
+   der Tagesansicht, Auswertungs-Widgets). Die beiden Grid-Varianten hatten
+   ihre Einfuegepunkt-Berechnung sogar zeilengleich doppelt.
+
+   grid=false (Standard): einspaltige Liste, die Mitte der Zeile entscheidet.
+   grid=true: mehrspaltiges Raster - erst ueber/unter der Kachel pruefen, dann
+   links/rechts von ihrer Mitte.
+
+   onReorder bekommt die neue Schluesselreihenfolge (aus data-<keyAttr>) und
+   wird bei dragend aufgerufen, nicht bei drop: wird ausserhalb der Liste
+   losgelassen, bleibt die per dragover schon vollzogene Verschiebung sichtbar
+   stehen - ein drop-Handler haette sie dann nicht gespeichert. */
+export function makeSortable(container, itemSelector, onReorder, { grid = false, keyAttr = "key" } = {}) {
+  const keys = () => [...container.querySelectorAll(itemSelector)].map(el => el.dataset[keyAttr]);
+  container.querySelectorAll(itemSelector).forEach(item => {
+    item.addEventListener("dragstart", (e) => {
+      item.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        // Firefox startet einen Drag nur, wenn Daten gesetzt sind.
+        e.dataTransfer.setData("text/plain", item.dataset[keyAttr] || "");
+      }
+    });
+    item.addEventListener("dragend", () => {
+      item.classList.remove("dragging");
+      onReorder(keys());
+    });
+    item.addEventListener("dragover", (e) => {
+      const dragging = container.querySelector(".dragging");
+      if (!dragging || dragging === item) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const rect = item.getBoundingClientRect();
+      const before = grid
+        ? (e.clientY < rect.top ? true : e.clientY > rect.bottom ? false : e.clientX < rect.left + rect.width / 2)
+        : e.clientY < rect.top + rect.height / 2;
+      item.parentElement.insertBefore(dragging, before ? item : item.nextSibling);
+    });
+  });
+}
+
+/* Zeigt eine fehlgeschlagene Aktion im Fehlerstreifen an (siehe #app-error in
+   index.html). Vorher endete ein Fehler beim Laden einer Ansicht stumm: die
+   Seite baute ihr Geruest auf, die Daten fehlten, und weder Kacheln noch eine
+   Meldung erschienen - fuer den Nutzer nicht von "keine Daten vorhanden" zu
+   unterscheiden.
+
+   Der Streifen bleibt stehen, bis er weggeklickt wird oder eine neue Ansicht
+   geladen wird (mountView ruft clearAppError) - nicht schon beim naechsten
+   erfolgreichen Request, denn eine Ansicht laedt mehrere Endpoints, und ein
+   spaeterer Erfolg macht die vorher fehlenden Daten nicht wieder sichtbar.
+   textContent statt innerHTML: die Meldung kommt aus dem "detail" des Servers
+   und kann einen Konto- oder Tag-Namen enthalten. */
+export function showAppError(message) {
+  const box = document.getElementById("app-error");
+  if (!box) return;
+  document.getElementById("app-error-text").textContent = message;
+  box.hidden = false;
+}
+
+export function clearAppError() {
+  const box = document.getElementById("app-error");
+  if (box) box.hidden = true;
+}
+
+document.getElementById("app-error-close")?.addEventListener("click", clearAppError);
+
+/* Liest eine gespeicherte Liste (Reihenfolge, ausgeblendete Spalten, ...) aus
+   dem localStorage. null, wenn nichts gespeichert ist ODER der Wert unbrauchbar
+   ist - ein beschaedigter Eintrag darf hoechstens die gespeicherte Vorliebe
+   kosten, nicht den Start der App: applyNavOrder() laeuft direkt beim Laden,
+   ein Fehler dort haette die Initialisierung abgebrochen. Ersetzt vier Stellen,
+   die JSON.parse ungeschuetzt aufriefen, waehrend zehn andere es bereits
+   kapselten. */
+export function readStoredArray(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "null");
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Gegenstueck zu readStoredArray(): ein voller localStorage (Quota) oder ein
+   Browser, der Speichern verbietet, darf die Aktion selbst nicht scheitern
+   lassen - die Auswahl gilt dann nur fuer diese Sitzung. */
+export function writeStored(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) { /* Vorliebe nicht speicherbar - kein Grund abzubrechen */ }
+}

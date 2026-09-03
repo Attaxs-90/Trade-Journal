@@ -85,7 +85,7 @@ export async function renderAccountFilter(panelId = "ov-account-filter-panel", c
   for (const opt of options) {
     const label = document.createElement("label");
     label.className = "filter-item";
-    label.innerHTML = `<input type="checkbox" data-key="${opt.key}"> ${opt.name}`;
+    label.innerHTML = `<input type="checkbox" data-key="${escapeHtml(opt.key)}"> ${escapeHtml(opt.name)}`;
     const input = label.querySelector("input");
     input.checked = state.filterMode === "selected" && state.filterKeys.includes(opt.key);
     input.addEventListener("change", () => {

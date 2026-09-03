@@ -3,7 +3,7 @@
 import { openBacktesting, openStrategy } from './accounts.js';
 import { openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
-import { state } from './core.js';
+import { makeSortable, readStoredArray, state, writeStored } from './core.js';
 import { flushJournal, openJournal } from './journal.js';
 import { openOverview, openTrades } from './overview.js';
 import { openSettings } from './settings.js';
@@ -20,8 +20,8 @@ function applyNavOrder() {
   const nav = document.querySelector(".nav");
   const items = [...nav.querySelectorAll(".nav-item")];
   const knownViews = items.map(el => el.dataset.view);
-  const saved = JSON.parse(localStorage.getItem("navOrder") || "null");
-  if (!Array.isArray(saved)) return;
+  const saved = readStoredArray("navOrder");
+  if (!saved) return;
   const order = saved.filter(v => knownViews.includes(v));
   for (const v of knownViews) if (!order.includes(v)) order.push(v);
   for (const view of order) {
@@ -29,9 +29,8 @@ function applyNavOrder() {
     if (el) nav.appendChild(el);
   }
 }
-function saveNavOrder() {
-  const order = [...document.querySelectorAll(".nav-item")].map(el => el.dataset.view);
-  localStorage.setItem("navOrder", JSON.stringify(order));
+function saveNavOrder(order) {
+  writeStored("navOrder", order);
 }
 applyNavOrder();
 
@@ -61,18 +60,9 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
   });
-  el.addEventListener("dragstart", () => el.classList.add("dragging"));
-  el.addEventListener("dragend", () => { el.classList.remove("dragging"); saveNavOrder(); });
-  el.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    const nav = document.querySelector(".nav");
-    const dragging = nav.querySelector(".dragging");
-    if (!dragging || dragging === el) return;
-    const rect = el.getBoundingClientRect();
-    const before = e.clientY < rect.top + rect.height / 2;
-    nav.insertBefore(dragging, before ? el : el.nextSibling);
-  });
 });
+
+makeSortable(document.querySelector(".nav"), ".nav-item", saveNavOrder, { keyAttr: "view" });
 
 /* Globaler Konten-Status-Klick fuehrt zur Uebersicht, wo der Filter sitzt -
    Tastatur-Aktivierung analog zu .nav-item (ebenfalls ein div[role=button]). */
