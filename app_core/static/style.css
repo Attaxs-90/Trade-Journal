@@ -632,7 +632,11 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
    ueber dem Inhalt, statt Platz im Layout zu belegen - er erscheint selten und
    soll die Ansicht darunter nicht verschieben. z-index ueber den Overlays, weil
    eine Aktion aus einem Dialog heraus fehlschlagen kann. */
-.app-error {
+/* :not([hidden]) am display-Setzer (Hausstil, siehe .journal-layout,
+   .notebook-panel): eine Klasse mit display ueberstimmt sonst die
+   Browser-Regel [hidden] { display: none }, und der leere Streifen stuende
+   dauerhaft auf jeder Seite. */
+.app-error:not([hidden]) {
   align-items: flex-start;
   background: var(--red-fill);
   border: 1px solid var(--red);
@@ -1547,7 +1551,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   text-align: left;
 }
 
-.journal-list { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
+.journal-list:not([hidden]) { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
 .journal-list-section-label { margin: 4px 0 0; }
 .journal-list-section-label:first-child { margin-top: 0; }
 .journal-item-row { display: flex; align-items: flex-start; gap: 6px; }
