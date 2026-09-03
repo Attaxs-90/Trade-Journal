@@ -1,9 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import db, news
@@ -46,18 +46,26 @@ MAX_CSV_BYTES = 25 * 1024 * 1024   # 25 MB - grosszuegig fuer Tages-/Wochenexpor
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB - deckt auch hochaufgeloeste Screenshots ab
 
 
-def _parse_accounts(accounts: str | None) -> list[str] | None:
-    if not accounts:
+def _parse_keys(raw: str | None) -> list[str] | None:
+    """Zerlegt einen kommaseparierten Filter-Parameter (?accounts=2,5,csv bzw.
+    ?tags=1,4) in seine Schluessel. None/leer = keine Einschraenkung. Konten und
+    Tags teilen sich dieselbe Zerlegung - die Bedeutung der Schluessel
+    unterscheiden erst db._account_filter() und db._tag_filter()."""
+    if not raw:
         return None
-    keys = [k for k in accounts.split(",") if k]
+    keys = [k for k in raw.split(",") if k]
     return keys or None
 
 
-def _parse_tags(tags: str | None) -> list[str] | None:
-    if not tags:
-        return None
-    keys = [k for k in tags.split(",") if k]
-    return keys or None
+def _check_day(day: str) -> str:
+    """Validiert einen Tages-Parameter als ISO-Datum. Ohne das landen ueber die
+    URL beliebige Zeichenketten als images.day/journal ref_key in der Datenbank
+    und tauchen danach in keiner Kalender- oder Tagesansicht mehr auf."""
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Datum muss im Format JJJJ-MM-TT vorliegen.")
+    return day
 
 
 async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
@@ -101,7 +109,11 @@ class ReassignTrades(BaseModel):
 
 class TagCreate(BaseModel):
     name: str
-    color: str
+    # Die Farbe wird im Frontend direkt in ein style="background:..."-Attribut
+    # geschrieben. Ohne feste Form koennte hier beliebiger Text stehen und aus
+    # dem Attribut ausbrechen - deshalb nur echte Hex-Farben zulassen (der
+    # Farbwaehler der Tag-Verwaltung liefert ohnehin genau dieses Format).
+    color: str = Field(pattern=r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
     tag_group: str = ""
 
 
@@ -188,7 +200,7 @@ async def import_csv(file: UploadFile = File(...), account_id: int | None = Form
 
 @app.get("/api/days")
 def api_list_days(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return db.list_days(_parse_accounts(accounts), _parse_tags(tags), tag_logic)
+    return db.list_days(_parse_keys(accounts), _parse_keys(tags), tag_logic)
 
 
 @app.get("/api/trades")
@@ -197,7 +209,7 @@ def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_lo
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     trades, total = db.list_trades(
-        _parse_accounts(accounts), _parse_tags(tags), tag_logic,
+        _parse_keys(accounts), _parse_keys(tags), tag_logic,
         offset=(page - 1) * page_size, limit=page_size, sort=sort, direction=dir,
     )
     return {"trades": trades, "total": total, "page": page, "page_size": page_size}
@@ -205,7 +217,7 @@ def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_lo
 
 @app.get("/api/days/{day}")
 def api_day_detail(day: str, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    trades = db.get_day_trades(day, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
+    trades = db.get_day_trades(day, _parse_keys(accounts), _parse_keys(tags), tag_logic)
     images = db.get_images_for_day(day)
     # Auch ohne Trades erreichbar, wenn es an dem Tag ein Bild oder einen
     # Journal-Eintrag gibt (z.B. ueber den Quill-Editor eingebettetes Bild an
@@ -232,7 +244,10 @@ def api_update_trade_risk(trade_id: int, payload: RiskUpdate):
 
 @app.delete("/api/trades/{trade_id}")
 def api_delete_trade(trade_id: int):
-    db.delete_trade(trade_id)
+    if not db.get_trade(trade_id):
+        raise HTTPException(404, "Trade nicht gefunden.")
+    for image in db.delete_trade(trade_id):
+        delete_image_files(image["filename"], image["thumb_filename"])
     return {"ok": True}
 
 
@@ -256,15 +271,15 @@ def api_trade_neighbor(trade_id: int, to: str = "next", accounts: str | None = N
     if to not in ("next", "prev"):
         raise HTTPException(400, "to muss 'next' oder 'prev' sein.")
     neighbor_id = db.adjacent_trade_id(
-        trade_id, to, _parse_accounts(accounts), _parse_tags(tags), tag_logic, sort, dir
+        trade_id, to, _parse_keys(accounts), _parse_keys(tags), tag_logic, sort, dir
     )
     return {"id": neighbor_id}
 
 
 @app.get("/api/overview")
 def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    keys = _parse_accounts(accounts)
-    days = db.list_days(keys, _parse_tags(tags), tag_logic)
+    keys = _parse_keys(accounts)
+    days = db.list_days(keys, _parse_keys(tags), tag_logic)
 
     # Startkapital: bei einer Konto-Auswahl nur deren Startkapital summieren
     # (der Magic-Key "csv" fuer nicht zugeordnete Trades hat keins), sonst
@@ -272,23 +287,29 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
     # diesem Basiswert starten statt bei 0.
     start_balance = compute_start_balance(keys)
 
-    days_sorted = sorted(days, key=lambda d: d["day"])
-    cum = start_balance
-    curve = []
-    for d in days_sorted:
-        cum += d["net_usd"]
-        curve.append({"day": d["day"], "cum_net": round(cum, 2)})
-    total_net = round(sum(d["net_usd"] for d in days), 2)
-    total_trades = sum(d["trade_count"] for d in days)
-    best_day = max(days, key=lambda d: d["net_usd"]) if days else None
-    worst_day = min(days, key=lambda d: d["net_usd"]) if days else None
-    trades = db.list_trades_for_analytics(keys, _parse_tags(tags), tag_logic)
-    summary = an.trade_summary(trades)
+    # equity_and_drawdown() sortiert die Tage und baut daraus bereits die
+    # kumulierte Kurve - die wird hier uebernommen statt ein zweites Mal
+    # aufgebaut. Alles Uebrige (Summen, bester/schwaechster Tag) faellt in
+    # einem einzigen Durchlauf ueber dieselbe Liste mit ab.
     equity = an.equity_and_drawdown(days, start_balance)
+    total_net = 0.0
+    total_trades = 0
+    best_day = worst_day = None
+    for d in days:
+        total_net += d["net_usd"]
+        total_trades += d["trade_count"]
+        if best_day is None or d["net_usd"] > best_day["net_usd"]:
+            best_day = d
+        if worst_day is None or d["net_usd"] < worst_day["net_usd"]:
+            worst_day = d
+    total_net = round(total_net, 2)
+
+    trades = db.list_trades_for_analytics(keys, _parse_keys(tags), tag_logic)
+    summary = an.trade_summary(trades)
     win_loss_ratio = round(summary["avg_win"] / summary["avg_loss"], 2) if summary["avg_loss"] else None
     return {
         "days": days,
-        "curve": curve,
+        "curve": equity["curve"],
         "total_net": total_net,
         "total_trades": total_trades,
         "trading_days": len(days),
@@ -314,15 +335,15 @@ def api_analytics_dimensions():
 @app.get("/api/analytics/summary")
 def api_analytics_summary(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
                            start: str | None = None, end: str | None = None):
-    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
     return an.trade_summary(trades)
 
 
 @app.get("/api/analytics/equity")
 def api_analytics_equity(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
                           start: str | None = None, end: str | None = None):
-    keys = _parse_accounts(accounts)
-    days = db.list_days(keys, _parse_tags(tags), tag_logic)
+    keys = _parse_keys(accounts)
+    days = db.list_days(keys, _parse_keys(tags), tag_logic)
     if start:
         days = [d for d in days if d["day"] >= start]
     if end:
@@ -335,7 +356,7 @@ def api_analytics_breakdown(dimension: str, accounts: str | None = None, tags: s
                              tag_logic: str = "or", start: str | None = None, end: str | None = None):
     if dimension not in an.DIMENSIONS:
         raise HTTPException(400, f"Unbekannte Dimension '{dimension}'.")
-    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
     ctx = an.build_context(trades)
     return {"dimension": dimension, "label": an.DIMENSIONS[dimension]["label"], "rows": an.breakdown(trades, dimension, ctx)}
 
@@ -343,18 +364,18 @@ def api_analytics_breakdown(dimension: str, accounts: str | None = None, tags: s
 @app.get("/api/analytics/distribution")
 def api_analytics_distribution(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
                                 start: str | None = None, end: str | None = None, bins: int = 10):
-    trades = db.list_trades_for_analytics(_parse_accounts(accounts), _parse_tags(tags), tag_logic, start, end)
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
     return an.pnl_distribution(trades, min(max(bins, 4), 24))
 
 
 @app.get("/api/week/{iso_year}/{iso_week}")
 def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return build_week_payload(iso_year, iso_week, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
+    return build_week_payload(iso_year, iso_week, _parse_keys(accounts), _parse_keys(tags), tag_logic)
 
 
 @app.get("/api/month/{year}/{month}")
 def api_month(year: int, month: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return build_month_payload(year, month, _parse_accounts(accounts), _parse_tags(tags), tag_logic)
+    return build_month_payload(year, month, _parse_keys(accounts), _parse_keys(tags), tag_logic)
 
 
 @app.get("/api/accounts")
@@ -421,7 +442,13 @@ def api_sync_account(account_id: int, full: bool = False):
     if not account:
         raise HTTPException(404, "Konto nicht gefunden.")
 
-    to_date = datetime.utcnow()
+    # Bewusst naiv (tzinfo entfernt): MT5 erwartet naive Zeitstempel, und
+    # last_sync wird als naives ISO-Datum gespeichert - ein aware datetime hier
+    # wuerde beim naechsten Sync in fromisoformat(last_sync) - timedelta auf
+    # einen Vergleich aware/naiv laufen. datetime.utcnow() lieferte genau das
+    # (naives UTC), ist aber seit Python 3.12 deprecated und zur Entfernung
+    # vorgemerkt - now(UTC) plus explizites Abstreifen ist der Ersatz.
+    to_date = datetime.now(UTC).replace(tzinfo=None)
     if account["last_sync"] and not full:
         from_date = datetime.fromisoformat(account["last_sync"]) - timedelta(days=1)
     else:
@@ -444,6 +471,9 @@ def api_sync_account(account_id: int, full: bool = False):
 
 @app.post("/api/days/{day}/images")
 async def api_upload_image(day: str, file: UploadFile = File(...), trade_id: int | None = Form(None)):
+    _check_day(day)
+    if trade_id is not None and not db.get_trade(trade_id):
+        raise HTTPException(404, "Trade nicht gefunden.")
     raw = await _read_upload(file, MAX_IMAGE_BYTES)
     try:
         filename, thumb_filename = save_image(raw)
@@ -513,10 +543,7 @@ def _check_journal_ref(entry_type: str, ref_key: str) -> tuple[str, str]:
     if entry_type not in db.JOURNAL_TYPES:
         raise HTTPException(400, "Unbekannter Journal-Typ.")
     if entry_type == "day":
-        try:
-            datetime.strptime(ref_key, "%Y-%m-%d")
-        except ValueError:
-            raise HTTPException(400, "Datum muss im Format JJJJ-MM-TT vorliegen.")
+        _check_day(ref_key)
     elif entry_type == "trade" and not ref_key.isdigit():
         raise HTTPException(400, "Trade-Bewertung braucht eine numerische Trade-ID.")
     return entry_type, ref_key
@@ -532,9 +559,10 @@ def _clamp_score(value: int | None) -> int | None:
 @app.get("/api/journal")
 def api_list_journal(type: str = "day", start: str | None = None, end: str | None = None,
                       q: str | None = None, tags: str | None = None, mode: str = "all"):
-    return {"entries": db.list_journal_entries(
-        type, start, end, (q or "").strip() or None, _parse_tags(tags), mode
-    )}
+    entries, truncated = db.list_journal_entries(
+        type, start, end, (q or "").strip() or None, _parse_keys(tags), mode
+    )
+    return {"entries": entries, "truncated": truncated}
 
 
 @app.get("/api/journal/months")

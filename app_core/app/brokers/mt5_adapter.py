@@ -2,7 +2,7 @@
 per Investor-/Read-Only-Login aus. Es werden keine Order- oder Handelsrechte benoetigt."""
 import subprocess
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 try:
     import MetaTrader5 as mt5
@@ -12,6 +12,16 @@ except ImportError:
 
 class MT5Error(Exception):
     pass
+
+
+def _broker_time(epoch_seconds: int) -> datetime:
+    """MT5-Zeitstempel in ein naives datetime in Broker-Zeit umrechnen. Der
+    Zeitstempel ist bereits Broker-Zeit, wird von MT5 aber wie ein UTC-Epoch
+    geliefert - deshalb in UTC interpretieren und die Zeitzone danach wieder
+    abstreifen, statt in die lokale Zone umzurechnen (siehe Aufrufstelle).
+    Ersetzt datetime.utcfromtimestamp(), das seit Python 3.12 deprecated und
+    zur Entfernung vorgemerkt ist, bei identischem Ergebnis."""
+    return datetime.fromtimestamp(epoch_seconds, UTC).replace(tzinfo=None)
 
 
 def _ensure_available():
@@ -134,15 +144,15 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                 points = (exit_deal.price - entry.price) if direction == "Long" else (entry.price - exit_deal.price)
                 risk_usd = _entry_risk_usd(entry, points, exit_deal.profit)
 
-                # utcfromtimestamp, NICHT fromtimestamp: MT5 liefert bereits
-                # Broker-Zeit. Eine zusaetzliche Umrechnung in die lokale
+                # _broker_time, NICHT fromtimestamp() ohne Zeitzone: MT5 liefert
+                # bereits Broker-Zeit. Eine zusaetzliche Umrechnung in die lokale
                 # Zeitzone schiebt spaet geschlossene Trades auf den Folgetag.
                 trades.append(dict(
-                    day=datetime.utcfromtimestamp(exit_deal.time).date().isoformat(),
+                    day=_broker_time(exit_deal.time).date().isoformat(),
                     instrument=exit_deal.symbol,
                     direction=direction,
-                    entry_time=datetime.utcfromtimestamp(entry.time).isoformat(),
-                    exit_time=datetime.utcfromtimestamp(exit_deal.time).isoformat(),
+                    entry_time=_broker_time(entry.time).isoformat(),
+                    exit_time=_broker_time(exit_deal.time).isoformat(),
                     entry_price=entry.price,
                     exit_price=exit_deal.price,
                     exit_type=("Teilausstieg" if len(exits) > 1 else "Close"),

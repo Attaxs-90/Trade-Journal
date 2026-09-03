@@ -705,6 +705,10 @@
 
 
 <script src="vendor/quill.js"></script>
-<script src="app.js"></script>
+<!-- Native ES-Module, weiterhin ohne Build-Schritt: der Browser laedt js/main.js
+     und von dort aus die uebrigen Module. type="module" laedt implizit deferred,
+     das DOM steht also vor dem ersten Modul-Code. Quill bleibt ein klassisches
+     Script, weil es sein Global "Quill" selbst setzt. -->
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

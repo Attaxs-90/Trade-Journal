@@ -15,11 +15,19 @@ def _group_by_day(trades: list[dict]) -> dict[str, list[dict]]:
 
 
 def day_stats(trades: list[dict]) -> dict:
-    cum = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    lowest = 0.0
-    highest = 0.0
+    """Alle Tageskennzahlen in einem einzigen Durchlauf. Trades kommen nach
+    entry_time sortiert herein (siehe db.get_day_trades), was der Gap-Berechnung
+    zwischen aufeinanderfolgenden Trades zugrunde liegt. Jeder Zeitstempel wird
+    genau einmal geparst - fromisoformat() lief vorher zweimal je Trade, in
+    getrennten Schleifen fuer Dauer und Gap."""
+    cum = peak = max_dd = lowest = highest = 0.0
+    total_points = total_net = duration_sum = 0.0
+    # None statt 0.0: bei ueberlappenden Trades ist der Abstand negativ, und
+    # der groesste Abstand darf dann auch negativ bleiben statt auf 0 zu springen.
+    max_gap = None
+    long_count = short_count = 0
+    price_low = price_high = None
+    prev_exit = None
     series = []
 
     for t in trades:
@@ -35,34 +43,43 @@ def day_stats(trades: list[dict]) -> dict:
         if cum > highest:
             highest = cum
 
-    durations = []
-    for t in trades:
-        e = dt.fromisoformat(t["entry_time"])
-        x = dt.fromisoformat(t["exit_time"])
-        durations.append((x - e).total_seconds())
+        total_points += t["points"]
+        total_net += t["net_usd"]
+        if t["direction"] == "Long":
+            long_count += 1
+        elif t["direction"] == "Short":
+            short_count += 1
 
-    gaps = []
-    for i in range(1, len(trades)):
-        prev_exit = dt.fromisoformat(trades[i - 1]["exit_time"])
-        this_entry = dt.fromisoformat(trades[i]["entry_time"])
-        gaps.append((this_entry - prev_exit).total_seconds())
+        entry = dt.fromisoformat(t["entry_time"])
+        exit_ = dt.fromisoformat(t["exit_time"])
+        duration_sum += (exit_ - entry).total_seconds()
+        if prev_exit is not None:
+            gap = (entry - prev_exit).total_seconds()
+            if max_gap is None or gap > max_gap:
+                max_gap = gap
+        prev_exit = exit_
 
-    prices = [t["entry_price"] for t in trades] + [t["exit_price"] for t in trades]
+        for price in (t["entry_price"], t["exit_price"]):
+            if price_low is None or price < price_low:
+                price_low = price
+            if price_high is None or price > price_high:
+                price_high = price
 
+    n = len(trades)
     return dict(
         cumulative_series=series,
-        total_points=round(sum(t["points"] for t in trades), 2),
-        total_net=round(sum(t["net_usd"] for t in trades), 2),
-        trade_count=len(trades),
+        total_points=round(total_points, 2),
+        total_net=round(total_net, 2),
+        trade_count=n,
         lowest_cum=round(lowest, 2),
         highest_cum=round(highest, 2),
         max_drawdown=round(max_dd, 2),
-        avg_duration_sec=round(sum(durations) / len(durations), 1) if durations else 0,
-        max_gap_sec=round(max(gaps), 1) if gaps else 0,
-        long_count=sum(1 for t in trades if t["direction"] == "Long"),
-        short_count=sum(1 for t in trades if t["direction"] == "Short"),
-        price_low=min(prices) if prices else 0,
-        price_high=max(prices) if prices else 0,
+        avg_duration_sec=round(duration_sum / n, 1) if n else 0,
+        max_gap_sec=round(max_gap, 1) if max_gap is not None else 0,
+        long_count=long_count,
+        short_count=short_count,
+        price_low=price_low if price_low is not None else 0,
+        price_high=price_high if price_high is not None else 0,
     )
 
 
@@ -72,8 +89,9 @@ def compute_start_balance(account_keys: list[str] | None) -> float:
     der Trades, damit Kurve/Kontostand deckungsgleich mit dem echten Broker-
     Konto bleiben. Nur ohne Sync zaehlt das manuell eingetragene starting_balance.
     Gemeinsam genutzt von der Uebersicht und den Auswertungen (kein Duplikat)."""
-    all_accounts = db.list_accounts()
-    net_totals = db.account_net_totals()
+    with db.get_conn():  # beide Abfragen ueber eine Verbindung
+        all_accounts = db.list_accounts()
+        net_totals = db.account_net_totals()
     if account_keys is None:
         included = all_accounts
     else:

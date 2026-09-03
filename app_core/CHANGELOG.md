@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1
+- Fix: Beim Löschen eines Trades blieben seine Bewertung im Journal und seine
+  Bilder als nicht mehr erreichbare Reste zurück (Bilddateien belegten weiter
+  Plattenplatz). Beides wird jetzt mitgelöscht.
+- Fix: Ein Bild-Upload akzeptierte jedes beliebige Datum in der Adresse und
+  legte es unter einem Tag ab, der in keinem Kalender mehr auftauchte.
+- Journal: Die Liste ist serverseitig auf die 300 neuesten Einträge begrenzt -
+  bisher fehlten ältere kommentarlos, eine Suche sah dadurch vollständig aus,
+  obwohl sie es nicht war. Jetzt weist ein Hinweis darauf hin.
+- Tag-Farben werden geprüft, statt ungefiltert ins Seiten-Markup zu wandern.
+- Übersicht und Tagesansicht berechnen ihre Kennzahlen in einem Durchlauf statt
+  in mehreren; Datenbankzugriffe eines Aufrufs teilen sich eine Verbindung.
+- Frontend in ES-Module unter `static/js/` aufgeteilt (vorher eine Datei mit
+  über 5.000 Zeilen), weiterhin ohne Build-Schritt.
+- Vorbereitung auf künftige Python-Versionen: die zur Entfernung vorgemerkten
+  UTC-Funktionen ersetzt.
+
 ## 1.7.0
 - Neuer Menüpunkt "To-Do-Listen": Listen anlegen/verwalten, Einträge per Klick
   auf den Text abhaken (bleiben ausgegraut erhalten, Löschen nur explizit),

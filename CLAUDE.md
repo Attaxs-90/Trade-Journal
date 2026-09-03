@@ -116,6 +116,31 @@ konkreten Bugs oder Performance-Problems:
 ohne Netz laufen, ein CDN kommt nicht in Frage. Kein Build-Step, die Dateien
 werden direkt eingebunden und mitcommittet.
 
+## Frontend: native ES-Module
+
+`static/js/` enthält das Frontend als native ES-Module — weiterhin **ohne
+Build-Schritt**, der Browser lädt `js/main.js` (`<script type="module">`) und
+von dort die übrigen Module. Vorher lag alles in einer einzelnen `app.js` mit
+über 5.000 Zeilen.
+
+- **`core.js` importiert nichts** und muss das bleiben. Es hält den globalen
+  `state`, `api()`, die Formatierer und die Filter-Querystrings. Die übrigen
+  Module importieren sich gegenseitig frei und bilden dabei Zyklen — das ist
+  für Funktionen unkritisch (Deklarationen werden gehoistet, Bindings sind
+  live). Für `const`/`let` gilt das **nicht**: ein Wert, den ein anderes Modul
+  schon beim Laden auswertet, landet im Zyklus in der Temporal Dead Zone.
+  Genau deshalb liegen `JOURNAL_FONTS`/`JOURNAL_SIZES` in `core.js` und nicht
+  in `journal.js` — `notebooks.js` baut daraus zur Ladezeit seine
+  Quill-Toolbar. Neue modulübergreifende Konstanten gehören nach `core.js`.
+- **Importierte `let`-Bindings sind im importierenden Modul schreibgeschützt.**
+  Für die vier Variablen, die von außen gesetzt werden, gibt es deshalb Setter
+  im Heimatmodul: `clearActiveJournal()`, `clearActiveNotebookNote()`,
+  `clearNbDrag()`, `setModalOnClose()`. Keine dieser Variablen direkt aus einem
+  anderen Modul zuweisen.
+- **`main.js` enthält nur die reihenfolgekritische Startsequenz.** Die Module
+  registrieren ihre eigenen Event-Listener beim Laden; der gespeicherte Filter-
+  und Ansichtszustand muss aber stehen, bevor `openOverview()` rendert.
+
 ## Release
 
 `VERSION` hochzählen, `CHANGELOG.md` ergänzen, `app_core/build_release.ps1`
