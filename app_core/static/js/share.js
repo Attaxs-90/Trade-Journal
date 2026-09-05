@@ -36,13 +36,56 @@ function shareRoundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+/* Hintergrund-Motive: feste Bild-Vorlagen (Vorlagen/Bilder Hintergrund Trade
+   weiterleiten/) statt generierter Canvas-Grafik - je Theme ein Long- (gruen)
+   und ein Short-Motiv (rot), passend zur Trade-Richtung. */
+const SHARE_BG = {
+  clean: { Long: "/img/share-bg/long-clean.png", Short: "/img/share-bg/short-clean.png" },
+  future: { Long: "/img/share-bg/long-bull-future.png", Short: "/img/share-bg/short-bear-future.png" },
+  realistic: { Long: "/img/share-bg/long-bull-realistic.png", Short: "/img/share-bg/short-bear-realistic.png" },
+};
+
+const shareImageCache = new Map();
+function shareLoadImage(src) {
+  let entry = shareImageCache.get(src);
+  if (!entry) {
+    entry = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+    shareImageCache.set(src, entry);
+  }
+  return entry;
+}
+
+/* Bild im "cover"-Fit zentriert einpassen, dann per Verlauf oben/unten
+   abdunkeln - sonst sind Badge-Text und Stat-Kacheln auf hellen Bildstellen
+   schlecht lesbar. */
+async function shareDrawBackgroundImage(ctx, w, h, src) {
+  ctx.fillStyle = "#0a0e14";
+  ctx.fillRect(0, 0, w, h);
+  const img = await shareLoadImage(src);
+  if (!img) return;
+  const scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale, dh = img.height * scale;
+  ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  const fade = ctx.createLinearGradient(0, 0, 0, h);
+  fade.addColorStop(0, "rgba(0, 0, 0, 0.4)");
+  fade.addColorStop(0.45, "rgba(0, 0, 0, 0.05)");
+  fade.addColorStop(0.7, "rgba(0, 0, 0, 0.25)");
+  fade.addColorStop(1, "rgba(0, 0, 0, 0.78)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, w, h);
+}
+
 /* Gemeinsames Layout (Badge, Instrument, grosse Kennzahl, Stat-Kacheln,
-   Wasserzeichen) - nur der Hintergrund/Motiv-Akzent unterscheidet die Themes
-   (siehe SHARE_THEMES[].drawBackground). */
-function shareDrawLayout(ctx, theme, data) {
+   Wasserzeichen) - nur das Hintergrundmotiv unterscheidet die Themes. */
+async function shareDrawLayout(ctx, theme, data) {
   const w = SHARE_W, h = SHARE_H;
   ctx.clearRect(0, 0, w, h);
-  theme.drawBackground(ctx, w, h, data);
+  await shareDrawBackgroundImage(ctx, w, h, SHARE_BG[theme.id][data.direction]);
 
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "center";
@@ -110,162 +153,12 @@ function shareDrawLayout(ctx, theme, data) {
 }
 
 const SHARE_THEMES = [
-  {
-    id: "midnight",
-    name: "Midnight Glow",
-    previewCss: "radial-gradient(circle at 50% 32%, #234a3d 0%, #0a0e14 68%)",
-    drawBackground(ctx, w, h, data) {
-      ctx.fillStyle = "#0a0e14";
-      ctx.fillRect(0, 0, w, h);
-      const glow = ctx.createRadialGradient(w / 2, h * 0.34, 20, w / 2, h * 0.34, h * 0.62);
-      glow.addColorStop(0, shareHexToRgba(data.accent, 0.32));
-      glow.addColorStop(1, "rgba(10, 14, 20, 0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-      ctx.save();
-      ctx.strokeStyle = shareHexToRgba(data.accent, 0.5);
-      ctx.lineWidth = 5;
-      ctx.lineJoin = "round";
-      ctx.shadowColor = shareHexToRgba(data.accent, 0.65);
-      ctx.shadowBlur = 26;
-      const pts = data.direction === "Long"
-        ? [[-40, h * 0.98], [w * 0.22, h * 0.86], [w * 0.4, h * 0.92], [w * 0.62, h * 0.58], [w * 0.82, h * 0.64], [w + 40, h * 0.22]]
-        : [[-40, h * 0.1], [w * 0.22, h * 0.24], [w * 0.4, h * 0.16], [w * 0.62, h * 0.46], [w * 0.82, h * 0.4], [w + 40, h * 0.86]];
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
-      ctx.stroke();
-      ctx.restore();
-    },
-  },
-  {
-    id: "neongrid",
-    name: "Neon Grid",
-    previewCss: "linear-gradient(180deg, #0a0d12 0%, #131a24 100%)",
-    drawBackground(ctx, w, h, data) {
-      ctx.fillStyle = "#0a0d12";
-      ctx.fillRect(0, 0, w, h);
-      ctx.save();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.055)";
-      ctx.lineWidth = 1.5;
-      const vpX = w / 2, vpY = h * 0.12;
-      for (let i = -7; i <= 7; i++) {
-        ctx.beginPath();
-        ctx.moveTo(vpX + i * 110, h + 40);
-        ctx.lineTo(vpX + i * 16, vpY);
-        ctx.stroke();
-      }
-      for (let j = 0; j < 11; j++) {
-        const t = j / 10;
-        const y = vpY + (h - vpY) * Math.pow(t, 1.9);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-      ctx.restore();
-      const glow = ctx.createLinearGradient(0, data.direction === "Long" ? h : 0, 0, data.direction === "Long" ? 0 : h);
-      glow.addColorStop(0, shareHexToRgba(data.accent, 0.28));
-      glow.addColorStop(0.45, "rgba(10, 13, 18, 0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-    },
-  },
-  {
-    id: "aurora",
-    name: "Aurora Drift",
-    previewCss: "radial-gradient(circle at 30% 20%, #2a2560 0%, transparent 55%), radial-gradient(circle at 75% 75%, #1c3b32 0%, #0b0d16 60%)",
-    drawBackground(ctx, w, h, data) {
-      ctx.fillStyle = "#0b0d16";
-      ctx.fillRect(0, 0, w, h);
-      ctx.save();
-      ctx.filter = "blur(70px)";
-      const blob1 = ctx.createRadialGradient(w * 0.28, h * 0.22, 10, w * 0.28, h * 0.22, w * 0.5);
-      blob1.addColorStop(0, "rgba(120, 100, 255, 0.35)");
-      blob1.addColorStop(1, "rgba(120, 100, 255, 0)");
-      ctx.fillStyle = blob1;
-      ctx.fillRect(0, 0, w, h);
-      const blob2 = ctx.createRadialGradient(w * 0.75, h * 0.68, 10, w * 0.75, h * 0.68, w * 0.55);
-      blob2.addColorStop(0, shareHexToRgba(data.accent, 0.38));
-      blob2.addColorStop(1, shareHexToRgba(data.accent, 0));
-      ctx.fillStyle = blob2;
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
-    },
-  },
-  {
-    id: "carbon",
-    name: "Carbon Line",
-    previewCss: "linear-gradient(135deg, #0c0c0c 0%, #16171a 100%)",
-    drawBackground(ctx, w, h, data) {
-      ctx.fillStyle = "#0c0c0c";
-      ctx.fillRect(0, 0, w, h);
-      ctx.save();
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
-      ctx.lineWidth = 1;
-      for (let x = -h; x < w; x += 26) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + h, h);
-        ctx.stroke();
-      }
-      ctx.restore();
-      const glow = ctx.createRadialGradient(w / 2, h * 0.3, 10, w / 2, h * 0.3, h * 0.5);
-      glow.addColorStop(0, shareHexToRgba(data.accent, 0.22));
-      glow.addColorStop(1, "rgba(12, 12, 12, 0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-      ctx.save();
-      ctx.strokeStyle = shareHexToRgba(data.accent, 0.7);
-      ctx.lineWidth = 4;
-      ctx.shadowColor = shareHexToRgba(data.accent, 0.6);
-      ctx.shadowBlur = 18;
-      const midY = h * (data.direction === "Long" ? 0.62 : 0.4);
-      const step = w / 7;
-      ctx.beginPath();
-      for (let i = 0; i <= 7; i++) {
-        const x = i * step;
-        const wobble = Math.sin(i * 1.7) * 30;
-        const trend = data.direction === "Long" ? -i * 14 : i * 14;
-        const y = midY + wobble + trend;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    },
-  },
-  {
-    id: "sunset",
-    name: "Sunset Pulse",
-    previewCss: "radial-gradient(circle at 50% 100%, #3a1f10 0%, #0d0b12 60%)",
-    drawBackground(ctx, w, h, data) {
-      const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, "#0d0b12");
-      bg.addColorStop(1, "#161016");
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
-      const glow = ctx.createRadialGradient(w / 2, h * 1.05, 10, w / 2, h * 1.05, h * 0.85);
-      glow.addColorStop(0, shareHexToRgba(data.accent, 0.4));
-      glow.addColorStop(1, "rgba(13, 11, 18, 0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-      let seed = data.instrument.length * 17 + (data.direction === "Long" ? 3 : 7);
-      const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-      ctx.save();
-      for (let i = 0; i < 26; i++) {
-        const x = rand() * w, y = rand() * h * 0.75;
-        const r = 2 + rand() * 4;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = shareHexToRgba(data.accent, 0.25 + rand() * 0.35);
-        ctx.fill();
-      }
-      ctx.restore();
-    },
-  },
+  { id: "clean", name: "Clean Chart" },
+  { id: "future", name: "Bull & Bear" },
+  { id: "realistic", name: "Realistic" },
 ];
 
-let shareState = { trade: null, metric: "net", themeId: "midnight" };
+let shareState = { trade: null, metric: "net", themeId: "clean" };
 
 function shareDurationText(entryIso, exitIso) {
   const ms = new Date(exitIso) - new Date(entryIso);
@@ -291,12 +184,12 @@ function shareBuildData(trade, metric) {
   };
 }
 
-function shareRender() {
+async function shareRender() {
   const canvas = document.getElementById("share-canvas");
   const ctx = canvas.getContext("2d");
   const theme = SHARE_THEMES.find(t => t.id === shareState.themeId) || SHARE_THEMES[0];
   const data = shareBuildData(shareState.trade, shareState.metric);
-  shareDrawLayout(ctx, theme, data);
+  await shareDrawLayout(ctx, theme, data);
 }
 
 function shareFilename(trade) {
@@ -308,7 +201,7 @@ function initShareModal() {
   const overlay = document.getElementById("share-overlay");
   const grid = document.getElementById("share-theme-grid");
   grid.innerHTML = SHARE_THEMES.map(t => `
-    <button type="button" class="share-theme-swatch" data-theme="${t.id}" style="background:${t.previewCss}">
+    <button type="button" class="share-theme-swatch" data-theme="${t.id}" style="background-image:url('${SHARE_BG[t.id].Long}')">
       <span class="share-theme-swatch-label">${escapeHtml(t.name)}</span>
     </button>
   `).join("");
