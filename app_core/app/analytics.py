@@ -74,6 +74,15 @@ def _bucket_account(t: dict, ctx: dict) -> list[tuple[str, str, object]]:
     return [(str(aid), name, aid)]
 
 
+def _bucket_strategy(t: dict, ctx: dict) -> list[tuple[str, str, object]]:
+    sid = t.get("strategy_id")
+    if sid is None:
+        # Eigener Eimer statt Weglassen - "Ohne Strategie" ist eine Aussage,
+        # analog zu "Nicht zugeordnet" beim Konto.
+        return [("none", "Ohne Strategie", 9999)]
+    return [(str(sid), ctx["strategies"].get(sid, f"Strategie {sid}"), sid)]
+
+
 def _bucket_tag(t: dict, ctx: dict) -> list[tuple[str, str, object]]:
     tags = t.get("tags") or []
     if not tags:
@@ -135,6 +144,7 @@ DIMENSIONS: dict[str, dict] = {
     "instrument": {"label": "Instrument", "bucket": _bucket_instrument, "sort": "net_desc"},
     "direction": {"label": "Richtung (Long/Short)", "bucket": _bucket_direction, "sort": "sort_key"},
     "account": {"label": "Konto", "bucket": _bucket_account, "sort": "net_desc"},
+    "strategy": {"label": "Strategie", "bucket": _bucket_strategy, "sort": "net_desc"},
     "tag": {"label": "Tag", "bucket": _bucket_tag, "sort": "net_desc"},
     "duration": {"label": "Haltedauer", "bucket": _bucket_duration, "sort": "sort_key"},
     "volume": {"label": "Positionsgroesse", "bucket": _bucket_volume, "sort": "sort_key"},
@@ -153,11 +163,13 @@ def build_context(trades: list[dict]) -> dict:
     je einmal geladen statt pro Dimension/Trade neu."""
     with db.get_conn():  # beide Abfragen ueber eine Verbindung
         accounts = {a["id"]: a["name"] for a in db.list_accounts()}
+        # Auch archivierte Strategien, sonst stuenden deren Trades ohne Namen da.
+        strategies = {s["id"]: s["name"] for s in db.list_strategies(include_archived=True)}
         if not trades:
-            return {"accounts": accounts, "journal": {}}
+            return {"accounts": accounts, "strategies": strategies, "journal": {}}
         days = [t["day"] for t in trades]
         journal = db.journal_day_details(min(days), max(days))
-        return {"accounts": accounts, "journal": journal}
+        return {"accounts": accounts, "strategies": strategies, "journal": journal}
 
 
 def trade_summary(trades: list[dict]) -> dict:

@@ -180,6 +180,60 @@ class TodoItemUpdate(BaseModel):
     done: bool | None = None
 
 
+class StrategyCreate(BaseModel):
+    name: str
+
+
+class StrategyUpdate(BaseModel):
+    name: str | None = None
+    archived: bool | None = None
+    is_default: bool | None = None
+
+
+class OrderUpdate(BaseModel):
+    order: list[int]
+
+
+class RuleGroupCreate(BaseModel):
+    name: str
+
+
+class RuleCreate(BaseModel):
+    text: str
+    group_id: int | None = None
+
+
+class RuleUpdate(BaseModel):
+    text: str | None = None
+    group_id: int | None = None
+    clear_group: bool = False   # None allein hiesse "nicht aendern", siehe db.update_rule
+    archived: bool | None = None
+
+
+class RuleReplace(BaseModel):
+    text: str
+
+
+class TradeStrategyUpdate(BaseModel):
+    strategy_id: int | None = None
+
+
+class TradeRuleStatusUpdate(BaseModel):
+    rule_id: int
+    followed: bool | None = None   # None = Bewertung zuruecknehmen (unbeantwortet)
+
+
+class BulkStrategyAssign(BaseModel):
+    trade_ids: list[int]
+    strategy_id: int | None = None
+
+
+class BulkRuleStatus(BaseModel):
+    trade_ids: list[int]
+    rule_id: int
+    followed: bool | None = None
+
+
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -772,6 +826,212 @@ def api_update_todo_item(item_id: int, payload: TodoItemUpdate):
 def api_delete_todo_item(item_id: int):
     db.delete_todo_item(item_id)
     return {"ok": True}
+
+
+# ---------- Strategien ----------
+# Eine Strategie buendelt Regeln (optional gruppiert); ein Trade hat hoechstens
+# eine. Loeschen ist bewusst zweigleisig: archived=1 ueber PUT ist der
+# Normalfall (Trades und Auswertung bleiben), DELETE entkoppelt die Trades und
+# wirft Regeln samt Bewertungen weg.
+
+def _require_strategy(strategy_id: int) -> dict:
+    strategy = db.get_strategy(strategy_id)
+    if not strategy:
+        raise HTTPException(404, "Strategie nicht gefunden.")
+    return strategy
+
+
+def _derive_followed_plan(strategy: dict | None, status: dict[str, int]) -> bool | None:
+    """"Plan befolgt" wird am Trade nicht mehr eingegeben, sondern aus den
+    Regeln abgeleitet: Ja, wenn jede beantwortete Regel auf Ja steht. None
+    heisst "keine Aussage" - kein Trade ohne Strategie und keiner, bei dem noch
+    keine Regel beantwortet ist, soll als "Plan gebrochen" gelten.
+    Unbeantwortete Regeln zaehlen bewusst nicht als Verstoss (sie decken auch
+    den Fall "Regel hier nicht anwendbar" ab, siehe SCHEMA in db.py)."""
+    if not strategy:
+        return None
+    rule_ids = {str(r["id"]) for r in strategy["ungrouped_rules"]}
+    for group in strategy["groups"]:
+        rule_ids.update(str(r["id"]) for r in group["rules"])
+    answered = [v for rid, v in status.items() if rid in rule_ids]
+    if not answered:
+        return None
+    return all(v == 1 for v in answered)
+
+
+def _require_name(name: str) -> str:
+    cleaned = name.strip()
+    if not cleaned:
+        raise HTTPException(400, "Name darf nicht leer sein.")
+    return cleaned
+
+
+@app.get("/api/strategies")
+def api_list_strategies(include_archived: bool = False):
+    return {"strategies": db.list_strategies(include_archived)}
+
+
+@app.post("/api/strategies")
+def api_create_strategy(payload: StrategyCreate):
+    return {"strategy": db.create_strategy(_require_name(payload.name))}
+
+
+@app.get("/api/strategies/{strategy_id}")
+def api_get_strategy(strategy_id: int, include_archived: bool = False):
+    """Liefert Strategie, Regelbaum, Kopfzahlen und Regel-Statistik in einer
+    Antwort - die Strategie-Seite braucht ohnehin alles zusammen."""
+    _require_strategy(strategy_id)
+    return {
+        "strategy": db.get_strategy_tree(strategy_id, include_archived),
+        "summary": db.strategy_summary(strategy_id),
+        "rule_stats": db.strategy_rule_stats(strategy_id, include_archived=True),
+    }
+
+
+@app.put("/api/strategies/{strategy_id}")
+def api_update_strategy(strategy_id: int, payload: StrategyUpdate):
+    _require_strategy(strategy_id)
+    name = _require_name(payload.name) if payload.name is not None else None
+    return {"strategy": db.update_strategy(strategy_id, name, payload.archived, payload.is_default)}
+
+
+@app.delete("/api/strategies/{strategy_id}")
+def api_delete_strategy(strategy_id: int):
+    _require_strategy(strategy_id)
+    db.delete_strategy(strategy_id)
+    return {"ok": True}
+
+
+@app.post("/api/strategies/order")
+def api_set_strategy_order(payload: OrderUpdate):
+    db.set_strategy_order(payload.order)
+    return {"ok": True}
+
+
+@app.post("/api/strategies/{strategy_id}/groups")
+def api_create_rule_group(strategy_id: int, payload: RuleGroupCreate):
+    _require_strategy(strategy_id)
+    return {"group": db.create_rule_group(strategy_id, _require_name(payload.name))}
+
+
+@app.put("/api/rule-groups/{group_id}")
+def api_rename_rule_group(group_id: int, payload: RuleGroupCreate):
+    if not db.get_rule_group(group_id):
+        raise HTTPException(404, "Gruppe nicht gefunden.")
+    db.rename_rule_group(group_id, _require_name(payload.name))
+    return {"ok": True}
+
+
+@app.delete("/api/rule-groups/{group_id}")
+def api_delete_rule_group(group_id: int):
+    if not db.get_rule_group(group_id):
+        raise HTTPException(404, "Gruppe nicht gefunden.")
+    db.delete_rule_group(group_id)   # Regeln bleiben, siehe db.delete_rule_group
+    return {"ok": True}
+
+
+@app.post("/api/strategies/{strategy_id}/groups/order")
+def api_set_rule_group_order(strategy_id: int, payload: OrderUpdate):
+    _require_strategy(strategy_id)
+    db.set_rule_group_order(strategy_id, payload.order)
+    return {"ok": True}
+
+
+@app.post("/api/strategies/{strategy_id}/rules")
+def api_create_rule(strategy_id: int, payload: RuleCreate):
+    _require_strategy(strategy_id)
+    if payload.group_id is not None:
+        group = db.get_rule_group(payload.group_id)
+        if not group or group["strategy_id"] != strategy_id:
+            raise HTTPException(400, "Gruppe gehoert nicht zu dieser Strategie.")
+    return {"rule": db.create_rule(strategy_id, _require_name(payload.text), payload.group_id)}
+
+
+@app.put("/api/rules/{rule_id}")
+def api_update_rule(rule_id: int, payload: RuleUpdate):
+    rule = db.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(404, "Regel nicht gefunden.")
+    if payload.group_id is not None:
+        group = db.get_rule_group(payload.group_id)
+        if not group or group["strategy_id"] != rule["strategy_id"]:
+            raise HTTPException(400, "Gruppe gehoert nicht zu dieser Strategie.")
+    text = _require_name(payload.text) if payload.text is not None else None
+    return {"rule": db.update_rule(rule_id, text, payload.group_id, payload.clear_group, payload.archived)}
+
+
+@app.post("/api/rules/{rule_id}/replace")
+def api_replace_rule(rule_id: int, payload: RuleReplace):
+    if not db.get_rule(rule_id):
+        raise HTTPException(404, "Regel nicht gefunden.")
+    return {"rule": db.replace_rule(rule_id, _require_name(payload.text))}
+
+
+@app.delete("/api/rules/{rule_id}")
+def api_delete_rule(rule_id: int):
+    if not db.get_rule(rule_id):
+        raise HTTPException(404, "Regel nicht gefunden.")
+    db.delete_rule(rule_id)
+    return {"ok": True}
+
+
+@app.post("/api/strategies/{strategy_id}/rules/order")
+def api_set_rule_order(strategy_id: int, payload: OrderUpdate):
+    _require_strategy(strategy_id)
+    db.set_rule_order(strategy_id, payload.order)
+    return {"ok": True}
+
+
+# ---------- Strategie am Trade ----------
+
+@app.put("/api/trades/{trade_id}/strategy")
+def api_set_trade_strategy(trade_id: int, payload: TradeStrategyUpdate):
+    if not db.get_trade(trade_id):
+        raise HTTPException(404, "Trade nicht gefunden.")
+    if payload.strategy_id is not None:
+        _require_strategy(payload.strategy_id)
+    db.set_trade_strategy(trade_id, payload.strategy_id)
+    return {"ok": True}
+
+
+@app.get("/api/trades/{trade_id}/rule-status")
+def api_get_trade_rule_status(trade_id: int):
+    trade = db.get_trade(trade_id)
+    if not trade:
+        raise HTTPException(404, "Trade nicht gefunden.")
+    status = db.get_trade_rule_status(trade_id)
+    strategy = db.get_strategy_tree(trade["strategy_id"]) if trade["strategy_id"] else None
+    return {"strategy": strategy, "status": status, "followed_plan": _derive_followed_plan(strategy, status)}
+
+
+@app.put("/api/trades/{trade_id}/rule-status")
+def api_set_trade_rule_status(trade_id: int, payload: TradeRuleStatusUpdate):
+    trade = db.get_trade(trade_id)
+    if not trade:
+        raise HTTPException(404, "Trade nicht gefunden.")
+    rule = db.get_rule(payload.rule_id)
+    if not rule:
+        raise HTTPException(404, "Regel nicht gefunden.")
+    if rule["strategy_id"] != trade["strategy_id"]:
+        raise HTTPException(400, "Regel gehoert nicht zur Strategie dieses Trades.")
+    db.set_trade_rule_status(trade_id, payload.rule_id, payload.followed)
+    status = db.get_trade_rule_status(trade_id)
+    strategy = db.get_strategy_tree(trade["strategy_id"]) if trade["strategy_id"] else None
+    return {"status": status, "followed_plan": _derive_followed_plan(strategy, status)}
+
+
+@app.post("/api/trades/bulk-strategy")
+def api_bulk_set_trade_strategy(payload: BulkStrategyAssign):
+    if payload.strategy_id is not None:
+        _require_strategy(payload.strategy_id)
+    return {"updated": db.bulk_set_trade_strategy(payload.trade_ids, payload.strategy_id)}
+
+
+@app.post("/api/trades/bulk-rule-status")
+def api_bulk_set_trade_rule_status(payload: BulkRuleStatus):
+    if not db.get_rule(payload.rule_id):
+        raise HTTPException(404, "Regel nicht gefunden.")
+    return {"updated": db.bulk_set_trade_rule_status(payload.trade_ids, payload.rule_id, payload.followed)}
 
 
 @app.get("/api/news/calendar")
