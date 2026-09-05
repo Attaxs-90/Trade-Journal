@@ -139,7 +139,13 @@ function barChartSvg(rows, metric, w = 1000, h = 260) {
   const avgLabelLen = rows.reduce((sum, r) => sum + shortenLabel(r.label).length, 0) / n || 6;
   const labelPxNeeded = Math.max(34, avgLabelLen * 6.2 + 8);
   const maxAxisLabels = Math.max(1, Math.floor((w - padL - padR) / labelPxNeeded));
-  const axisLabelStep = Math.max(1, Math.ceil(n / maxAxisLabels));
+  // Bei wenigen Kategorien lieber kuerzen als weglassen: ein Balken ohne
+  // Beschriftung laesst sich nicht zuordnen. Bei drei Strategien mit langen
+  // Namen fiel sonst ausgerechnet die mittlere weg (gleiches Problem bei
+  // "Konto" mit "Nicht zugeordnet"). Erst darueber greift das Auslassen,
+  // das fuer 24 Stunden-Balken gedacht ist.
+  const ALWAYS_LABEL_UP_TO = 8;
+  const axisLabelStep = n <= ALWAYS_LABEL_UP_TO ? 1 : Math.max(1, Math.ceil(n / maxAxisLabels));
 
   let barsSvg = "", labelsSvg = "", hitSvg = "";
   rows.forEach((r, i) => {
@@ -162,7 +168,12 @@ function barChartSvg(rows, metric, w = 1000, h = 260) {
       barsSvg += `<text x="${cx.toFixed(1)}" y="${labelY.toFixed(1)}" fill="${text}" font-size="11" font-weight="600" text-anchor="middle">${valueLabel}</text>`;
     }
     if (i % axisLabelStep === 0) {
-      labelsSvg += `<text x="${cx.toFixed(1)}" y="${h - padB + 18}" fill="${faint}" font-size="10" text-anchor="middle">${escapeHtml(shortenLabel(r.label))}</text>`;
+      // Auf den Abstand zur naechsten ANGEZEIGTEN Beschriftung kuerzen, nicht
+      // auf eine Balkenbreite: wenn oben ausgeduennt wurde, steht jedem Label
+      // ein Vielfaches davon zur Verfuegung (sonst wuerde "07:00" bei 17
+      // Balken auf "07…" gestutzt, obwohl reichlich Platz ist).
+      const maxChars = Math.max(3, Math.floor((bandW * axisLabelStep - 2) / 6.2));
+      labelsSvg += `<text x="${cx.toFixed(1)}" y="${h - padB + 18}" fill="${faint}" font-size="10" text-anchor="middle">${escapeHtml(shortenLabel(r.label, Math.min(13, maxChars)))}</text>`;
     }
     hitSvg += `<rect class="chart-dot-hit" x="${(cx - bandW / 2).toFixed(1)}" y="${padT}" width="${bandW.toFixed(1)}" height="${h - padT - padB}" fill="transparent" data-day="${escapeHtml(r.label)}" data-value="${raw == null ? "" : v}" data-count="${r.trade_count}" />`;
   });
