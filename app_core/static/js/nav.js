@@ -1,6 +1,7 @@
 /* Sidebar-Navigation und Reihenfolge der Menuepunkte. */
 
-import { openBacktesting, openStrategy } from './accounts.js';
+import { openBacktesting } from './accounts.js';
+import { openStrategy } from './strategies.js';
 import { openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
 import { makeSortable, readStoredArray, state, writeStored } from './core.js';

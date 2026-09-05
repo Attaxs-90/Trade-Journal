@@ -622,8 +622,24 @@
   <section class="view">
     <header class="view-header">
       <h1>Strategie</h1>
+      <div class="view-header-actions">
+        <label class="strategy-archived-toggle">
+          <input type="checkbox" id="strategy-show-archived"> Archivierte zeigen
+        </label>
+        <button type="button" class="btn btn-primary" id="strategy-add-btn">+ Strategie</button>
+      </div>
     </header>
-    <div class="empty-state">Work in Progress – hier kommt bald mehr.</div>
+
+    <!-- Zweispaltig: links die Strategien, rechts die gewaehlte im Detail.
+         Gleiche Aufteilung wie Journal/Notizbuecher, damit der Wechsel
+         zwischen Strategien keinen Seitenwechsel kostet. -->
+    <div class="strategy-layout">
+      <aside class="strategy-list-pane">
+        <div class="newsbar-filter-group-title">Ziehen zum Umsortieren</div>
+        <div class="strategy-list" id="strategy-list"></div>
+      </aside>
+      <div class="strategy-detail" id="strategy-detail"></div>
+    </div>
   </section>
 </template>
 

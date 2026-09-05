@@ -2065,3 +2065,76 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   border-radius: 4px;
 }
 
+
+/* ---------- Strategie-Seite ---------- */
+/* Zweispaltig wie die Journal-Seite: links die Strategien, rechts die gewaehlte
+   im Detail - der Wechsel zwischen Strategien kostet so keinen Seitenwechsel. */
+.strategy-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.strategy-list-pane {
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.strategy-list { display: flex; flex-direction: column; gap: 6px; }
+.strategy-list-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid transparent; cursor: pointer;
+}
+.strategy-list-item:hover { background: var(--bg-hover); }
+.strategy-list-item.active { background: var(--accent-fill); border-color: var(--accent); }
+.strategy-list-item.archived .strategy-list-name { color: var(--text-faint); }
+.strategy-list-item.dragging { opacity: 0.5; }
+.strategy-list-handle { color: var(--text-faint); cursor: grab; font-size: 12px; line-height: 18px; }
+.strategy-list-body { min-width: 0; flex: 1; }
+.strategy-list-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.strategy-list-meta { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.strategy-list-meta .pos { color: var(--green); }
+.strategy-list-meta .neg { color: var(--red); }
+.strategy-badge {
+  background: var(--accent-fill); border-radius: 4px; color: var(--accent);
+  font-size: 10px; font-weight: 600; padding: 1px 5px; text-transform: uppercase;
+}
+.strategy-badge.muted { background: var(--bg-hover); color: var(--text-faint); }
+
+.strategy-detail { display: flex; flex-direction: column; gap: 16px; }
+.strategy-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.strategy-detail-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.strategy-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
+.strategy-hint {
+  background: var(--bg-hover); border-radius: 6px; color: var(--text-dim);
+  font-size: 12px; margin-top: 10px; padding: 8px 10px;
+}
+.strategy-archived-toggle { color: var(--text-dim); display: flex; align-items: center; gap: 6px; font-size: 12px; }
+
+/* Regelgruppen und Regeln */
+.rule-group { border: 1px solid var(--border); border-radius: 8px; margin-top: 10px; }
+.rule-group.dragging { opacity: 0.5; }
+.rule-group-head {
+  align-items: center; background: var(--bg-hover); border-radius: 7px 7px 0 0; display: flex;
+  gap: 8px; padding: 7px 10px;
+}
+.rule-group-handle { color: var(--text-faint); cursor: grab; font-size: 12px; }
+.rule-group-name { flex: 1; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.rule-group-actions { display: flex; gap: 2px; }
+.rule-rows { display: flex; flex-direction: column; }
+/* Flex mit Umbruch statt fester Grid-Spalten: wie breit diese Zeile wird,
+   haengt von Sidebar- UND Newsbar-Zustand ab, das laesst sich mit einer
+   Viewport-Media-Query nicht treffen. Mit festen Spalten blieben dem Regeltext
+   bei eingeklappter Newsbar 5 px, und er brach senkrecht Zeichen fuer Zeichen
+   um. Jetzt rutschen bei Platzmangel die Kennzahlen in die naechste Zeile. */
+.rule-row {
+  align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap;
+  gap: 6px 12px; padding: 8px 10px;
+}
+.rule-row:first-child { border-top: none; }
+.rule-row.dragging { opacity: 0.5; }
+.rule-handle { color: var(--text-faint); cursor: grab; font-size: 12px; }
+.rule-text { flex: 1 1 180px; font-size: 13px; min-width: 0; overflow-wrap: break-word; }
+.rule-stat { display: flex; flex: 0 0 auto; flex-direction: column; line-height: 1.25; min-width: 92px; }
+.rule-stat-main { font-size: 13px; font-weight: 600; }
+.rule-stat-sub { color: var(--text-faint); font-size: 10px; }
+.rule-stat-empty { color: var(--text-faint); font-size: 11px; }
+.rule-actions { display: flex; gap: 2px; margin-left: auto; }
+
+@media (max-width: 1100px) {
+  .strategy-layout { grid-template-columns: 1fr; }
+}
