@@ -6,6 +6,7 @@ import { imageThumbEl, uploadImage } from './images.js';
 import { activeJournal, mountJournalEditor, saveJournal } from './journal.js';
 import { mountView, openTrades, setActiveNav } from './overview.js';
 import { openDay, openShareModal } from './share.js';
+import { renderTradeStrategyPanel } from './strategies.js';
 import { renderTradeTagCell } from './tags.js';
 
 /* ---------- Einzel-Trade-Seite ---------- */
@@ -73,6 +74,7 @@ export async function populateTrade(container, tradeId) {
     + tile("Exit-Typ", trade.exit_type || "–");
 
   renderTradeTagCell(container.querySelector(".trade-tag-cell"), trade);
+  await renderTradeStrategyPanel(container.querySelector(".trade-strategy-host"), trade);
 
   wireTradeRiskRow(container, trade);
   container.querySelector(".trade-share-btn").onclick = () => openShareModal(trade);

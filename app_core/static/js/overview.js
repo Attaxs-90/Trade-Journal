@@ -7,6 +7,7 @@ import { getAccountOptions, renderAccountChipRow, renderTagFilter } from './filt
 import { clearActiveJournal, flushJournal } from './journal.js';
 import { clearActiveNotebookNote, flushNotebookNote } from './notebooks.js';
 import { openShareModal } from './share.js';
+import { bulkAssignStrategy, bulkRateRule } from './strategies.js';
 import { renderTradeTagCell } from './tags.js';
 import { openTrade } from './trades.js';
 
@@ -414,6 +415,12 @@ export async function openTrades(page = 1) {
     renderTradesTable();
   };
   document.getElementById("trades-bulk-delete-journal").onclick = () => bulkDeleteTradeJournalEntries();
+  // Nach einer Sammelaktion die Tabelle neu laden - Strategie und
+  // Journal-/Bild-Markierungen stehen in den Trade-Zeilen.
+  document.getElementById("trades-bulk-strategy-btn").onclick = () =>
+    bulkAssignStrategy([...tradesSelectedIds], () => openTrades(state.tradesPage || 1));
+  document.getElementById("trades-bulk-rule-btn").onclick = () =>
+    bulkRateRule([...tradesSelectedIds], () => openTrades(state.tradesPage || 1));
 
   const totalPages = Math.max(1, Math.ceil(result.total / TRADES_PAGE_SIZE));
   const pagination = document.getElementById("trades-pagination");

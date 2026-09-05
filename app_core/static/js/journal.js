@@ -168,13 +168,14 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
       <div class="journal-metrics">
         ${journalScoreRow(isTrade ? "Trade-Bewertung" : "Tagesbewertung", "rating", entry ? entry.rating : null, RATING_LABELS)}
         ${journalScoreRow("Verfassung", "mood", entry ? entry.mood : null, MOOD_LABELS)}
+        ${isTrade ? "" : `
         <div class="journal-metric" data-metric="plan">
           <span class="journal-metric-label">Plan befolgt</span>
           <div class="journal-score-row">
             <button type="button" class="journal-plan-btn" data-plan="1">Ja</button>
             <button type="button" class="journal-plan-btn" data-plan="0">Nein</button>
           </div>
-        </div>
+        </div>`}
       </div>
       <div class="journal-templates"></div>
       <div class="journal-quill"></div>
