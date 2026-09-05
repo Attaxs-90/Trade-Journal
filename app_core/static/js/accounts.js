@@ -12,13 +12,6 @@ export async function getPlatforms() {
   return cachedPlatforms;
 }
 
-export async function openStrategy() {
-  state.view = "strategy";
-  state.currentDay = null;
-  setActiveNav("strategy");
-  await mountView("tpl-strategy");
-}
-
 export async function openBacktesting() {
   state.view = "backtesting";
   state.currentDay = null;

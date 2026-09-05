@@ -21,6 +21,7 @@ import './calendar.js';
 import './chart.js';
 import './accounts.js';
 import './analytics.js';
+import './strategies.js';
 import './nav.js';
 import { initNewsbar } from './news.js';
 
