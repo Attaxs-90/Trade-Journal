@@ -57,7 +57,24 @@ try {
     Expand-Archive -Path $zipPath -DestinationPath $stagingPath -Force
 
     Write-Host "Spiele neue Programmdateien ein..."
-    robocopy $stagingPath $PSScriptRoot /E /NFL /NDL /NJH /NJS | Out-Null
+    # app\ und static\ werden GESPIEGELT (/MIR), nicht nur ueberschrieben:
+    # /E kopiert und ersetzt zwar, loescht aber nie - Dateien, die es in der
+    # neuen Version nicht mehr gibt, blieben dadurch fuer immer liegen (so
+    # ueberlebte z. B. die alte static\app.js die Aufteilung in static\js\).
+    # Beide Ordner enthalten ausschliesslich Programmcode und stecken
+    # vollstaendig im Paket; Nutzerdaten liegen ausserhalb von app_core\.
+    foreach ($dir in @("app", "static")) {
+        robocopy (Join-Path $stagingPath $dir) (Join-Path $PSScriptRoot $dir) /MIR /NFL /NDL /NJH /NJS | Out-Null
+        if ($LASTEXITCODE -ge 8) {
+            Write-Host "Fehler beim Kopieren - Update wurde NICHT vollstaendig eingespielt."
+            exit 0
+        }
+    }
+    # Die losen Dateien im Wurzelverzeichnis werden nur kopiert, NICHT
+    # gespiegelt: dort liegen auch Dateien, die nicht Teil des Pakets sind
+    # (update.bat, dev_reset.*, build_release.ps1). Ohne /E und /S greift
+    # robocopy ohnehin nur die oberste Ebene ab.
+    robocopy $stagingPath $PSScriptRoot /XD "app" "static" /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         Write-Host "Fehler beim Kopieren - Update wurde NICHT vollstaendig eingespielt."
         exit 0
