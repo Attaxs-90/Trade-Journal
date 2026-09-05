@@ -1,6 +1,5 @@
 /* Sidebar-Navigation und Reihenfolge der Menuepunkte. */
 
-import { openBacktesting } from './accounts.js';
 import { openStrategy } from './strategies.js';
 import { openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
@@ -57,7 +56,6 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "analytics") openAnalytics();
     if (el.dataset.view === "month") openMonth();
     if (el.dataset.view === "strategy") openStrategy();
-    if (el.dataset.view === "backtesting") openBacktesting();
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "settings") openSettings();
   });

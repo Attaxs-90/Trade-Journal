@@ -1,3 +1,6 @@
+import concurrent.futures
+import logging
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,7 +20,21 @@ from . import analytics as an
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="Trade Journal")
+logger = logging.getLogger("uvicorn.error")
+
+# Sicherheitsnetz gegen einen haengenden Broker-Login beim Start-Sync (siehe
+# _startup_sync_mt5_accounts) - kein Bremsklotz im Normalfall, da der Sync
+# sowieso zurueckkehrt, sobald er fertig ist.
+STARTUP_SYNC_TIMEOUT = 25
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _startup_sync_mt5_accounts()
+    yield
+
+
+app = FastAPI(title="Trade Journal", lifespan=lifespan)
 db.init_db()
 
 
@@ -511,12 +528,11 @@ def api_delete_account(account_id: int):
     return {"ok": True}
 
 
-@app.post("/api/accounts/{account_id}/sync")
-def api_sync_account(account_id: int, full: bool = False):
-    account = db.get_account(account_id)
-    if not account:
-        raise HTTPException(404, "Konto nicht gefunden.")
-
+def _run_account_sync(account: dict, full: bool = False) -> dict:
+    """Fuehrt den Sync fuer ein einzelnes Konto aus und schreibt Trades, last_sync und
+    Kontostand in die DB. Gemeinsam genutzt vom manuellen Sync-Button (api_sync_account)
+    und vom automatischen Start-Sync (_startup_sync_mt5_accounts) - Fehlerbehandlung ist
+    bewusst Sache der jeweiligen Aufrufer (HTTPException dort, stilles Logging hier)."""
     # Bewusst naiv (tzinfo entfernt): MT5 erwartet naive Zeitstempel, und
     # last_sync wird als naives ISO-Datum gespeichert - ein aware datetime hier
     # wuerde beim naechsten Sync in fromisoformat(last_sync) - timedelta auf
@@ -529,19 +545,55 @@ def api_sync_account(account_id: int, full: bool = False):
     else:
         from_date = to_date - timedelta(days=365)
 
-    error_cls = BROKER_ERRORS.get(account["platform"], Exception)
-    try:
-        result = sync_account(account, from_date, to_date)
-    except error_cls as e:
-        raise HTTPException(400, str(e))
+    result = sync_account(account, from_date, to_date)
     trades = result["trades"]
 
-    inserted = db.insert_trades(trades, source=account["platform"], account_id=account_id)
-    db.set_last_sync(account_id, to_date.isoformat())
+    inserted = db.insert_trades(trades, source=account["platform"], account_id=account["id"])
+    db.set_last_sync(account["id"], to_date.isoformat())
     if result.get("balance") is not None:
-        db.set_synced_balance(account_id, result["balance"])
+        db.set_synced_balance(account["id"], result["balance"])
     days_touched = sorted(set(t["day"] for t in trades))
     return {"parsed": len(trades), "inserted": inserted, "skipped": len(trades) - inserted, "days": days_touched}
+
+
+def _startup_sync_mt5_accounts():
+    """Synct einmalig beim App-Start alle MT5-Konten, bevor run.py den Browser oeffnet -
+    danach nur noch manuell per Klick auf der Konten-Seite (siehe CLAUDE.md). Ein Fehler
+    (kein Internet, falsches Passwort, haengender Broker-Login) wird nur geloggt statt dem
+    Nutzer angezeigt: ein Fehlerstreifen direkt beim Oeffnen der App wirkt eher wie ein Bug
+    in der App als wie ein Sync-Problem, und der manuelle Sync-Button zeigt denselben Fehler
+    ohnehin sofort wieder an, falls er anhaelt."""
+    for account in db.list_accounts():
+        if account["platform"] != "mt5":
+            continue
+        full_account = db.get_account(account["id"])  # list_accounts() liefert bewusst kein Passwort
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            pool.submit(_run_account_sync, full_account).result(timeout=STARTUP_SYNC_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "Start-Sync '%s': nach %ss abgebrochen (haengender Broker-Login?).",
+                account["name"], STARTUP_SYNC_TIMEOUT,
+            )
+        except Exception as e:
+            logger.warning("Start-Sync '%s' fehlgeschlagen: %s", account["name"], e)
+        finally:
+            # wait=False: ein durch den Timeout abgebrochener Thread haengt evtl. noch in
+            # einem blockierenden MT5-Aufruf - darauf warten wuerde den Start-Sync genau
+            # der Situation aussetzen, vor der der Timeout eigentlich schuetzen soll.
+            pool.shutdown(wait=False)
+
+
+@app.post("/api/accounts/{account_id}/sync")
+def api_sync_account(account_id: int, full: bool = False):
+    account = db.get_account(account_id)
+    if not account:
+        raise HTTPException(404, "Konto nicht gefunden.")
+    error_cls = BROKER_ERRORS.get(account["platform"], Exception)
+    try:
+        return _run_account_sync(account, full=full)
+    except error_cls as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/days/{day}/images")
