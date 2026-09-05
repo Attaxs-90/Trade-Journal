@@ -2,6 +2,7 @@ import logging.handlers
 import socket
 import sys
 import threading
+import time
 import webbrowser
 
 import uvicorn
@@ -47,6 +48,17 @@ def _open_browser():
     webbrowser.open(URL)
 
 
+def _wait_and_open_browser():
+    # Der Server nimmt den Port erst an, sobald der automatische Start-Sync
+    # aller MT5-Konten durchgelaufen ist (siehe app.main._startup_sync_mt5_accounts,
+    # laeuft in der FastAPI-Lifespan vor dem eigentlichen Serving) - deshalb ein
+    # Poll auf denselben Verbindungstest statt eines festen Timers, sonst zeigt
+    # der Browser beim Oeffnen noch die Daten vom letzten Sync.
+    while not _already_running():
+        time.sleep(0.3)
+    _open_browser()
+
+
 if __name__ == "__main__":
     if _already_running():
         print(f"Trade Journal laeuft bereits unter {URL} - oeffne Browser.")
@@ -54,5 +66,5 @@ if __name__ == "__main__":
         sys.exit(0)
 
     _setup_logging()
-    threading.Timer(1.2, _open_browser).start()
+    threading.Thread(target=_wait_and_open_browser, daemon=True).start()
     uvicorn.run("app.main:app", host=HOST, port=PORT, reload=False, log_config=None)

@@ -1,7 +1,6 @@
 /* Konten-Seite, Broker-Sync und CSV-Import. */
 
-import { api, escapeHtml, state } from './core.js';
-import { mountView, setActiveNav } from './overview.js';
+import { api, escapeHtml } from './core.js';
 
 /* ---------- Konten & Sync ---------- */
 
@@ -10,13 +9,6 @@ let cachedPlatforms = null;
 export async function getPlatforms() {
   if (!cachedPlatforms) cachedPlatforms = await api("/api/platforms");
   return cachedPlatforms;
-}
-
-export async function openBacktesting() {
-  state.view = "backtesting";
-  state.currentDay = null;
-  setActiveNav("backtesting");
-  await mountView("tpl-backtesting");
 }
 
 /* ---------- Import ---------- */
