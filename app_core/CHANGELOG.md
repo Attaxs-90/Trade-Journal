@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.8.0
+- Neuer Menüpunkt "Strategie": Strategien anlegen, umbenennen, archivieren und
+  löschen; je Strategie eigene Regeln, wahlweise in Gruppen (z. B. "Entry",
+  "Lot") oder ohne. Alles per Drag & Drop sortierbar.
+- Jeder Trade kann einer Strategie zugeordnet werden und deren Regeln mit
+  Ja/Nein bewerten - auf der Trade-Seite und kompakt in der Tagesansicht, dort
+  über die Pfeile durch alle Trades eines Tages. Ein erneuter Klick nimmt die
+  Bewertung zurück; unbewertete Regeln zählen in keine Quote (deckt auch
+  "Regel hier nicht anwendbar" ab).
+- Strategie-Seite zeigt je Regel, wie oft sie befolgt wurde und wie die
+  befolgten Trades gelaufen sind. "0 %" (nie befolgt) und "noch nicht
+  bewertet" bleiben dabei unterscheidbar, ebenso wie viele Trades einer
+  Strategie überhaupt schon bewertet sind.
+- Regeln lassen sich bearbeiten (Wortlaut) oder ersetzen - beim Ersetzen wird
+  die alte Regel archiviert und behält ihre bisherige Auswertung.
+- Trades-Übersicht: Strategie zuweisen und eine Regel für mehrere ausgewählte
+  Trades auf einmal bewerten.
+- "Plan befolgt" wird beim Trade jetzt aus den Regeln abgeleitet statt separat
+  eingegeben. Im Tages-Journal bleibt es wie bisher.
+- Auswertungen: neue Dimension "Strategie".
+- Neuer globaler Strategie-Filter neben Konten und Tags - Übersicht,
+  Equity-Kurve, Trades, Monatsansicht und Auswertungen lassen sich damit auf
+  einzelne Strategien einschränken.
+- Fix: In Balkendiagrammen mit wenigen Kategorien fehlten Beschriftungen (bei
+  drei Strategien blieb die mittlere namenlos, ebenso bei "Nicht zugeordnet"
+  unter Konten).
+
 ## 1.7.1
 - Fix: Beim Löschen eines Trades blieben seine Bewertung im Journal und seine
   Bilder als nicht mehr erreichbare Reste zurück (Bilddateien belegten weiter

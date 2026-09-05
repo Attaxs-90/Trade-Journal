@@ -636,6 +636,38 @@ def _combine_filters(*clauses_and_params: tuple[str, list]) -> tuple[str, list]:
     return " AND ".join(parts), params
 
 
+def _strategy_filter(strategy_keys: list[str] | None) -> tuple[str, list]:
+    """WHERE-Teilklausel fuer eine Auswahl an Strategien, aufgebaut wie
+    _account_filter(): Schluessel sind eine Strategie-Id (str(int)) oder der
+    Magic String "none" fuer Trades ohne Strategie (strategy_id IS NULL).
+    None/leer = keine Einschraenkung."""
+    if not strategy_keys:
+        return "", []
+    ids = [int(k) for k in strategy_keys if k != "none" and k.lstrip("-").isdigit()]
+    include_none = "none" in strategy_keys
+    parts, params = [], []
+    if ids:
+        parts.append(f"strategy_id IN ({','.join('?' for _ in ids)})")
+        params.extend(ids)
+    if include_none:
+        parts.append("strategy_id IS NULL")
+    if not parts:
+        return "1=0", []
+    return "(" + " OR ".join(parts) + ")", params
+
+
+def _trade_filters(account_keys: list[str] | None, tag_keys: list[str] | None,
+                    tag_logic: str = "or", strategy_keys: list[str] | None = None) -> tuple[str, list]:
+    """Die drei globalen Filter (Konto, Tag, Strategie) in einer Klausel. Bis
+    auf diese eine Stelle stand die Kombination sechsmal wortgleich im Code -
+    ein vierter Filter waere sonst wieder sechs Aenderungen."""
+    return _combine_filters(
+        _account_filter(account_keys),
+        _tag_filter(tag_keys, tag_logic),
+        _strategy_filter(strategy_keys),
+    )
+
+
 def _attach_tags(trades: list[dict]) -> list[dict]:
     """Reichert eine Liste Trades mit ihren zugewiesenen Tags an - eine
     zusaetzliche Query statt einer pro Trade (kein N+1)."""
@@ -777,8 +809,9 @@ def reassign_unassigned_trades(account_id: int, source: str | None = None) -> in
         return cur.rowcount
 
 
-def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or",
+               strategy_keys: list[str] | None = None) -> list[dict]:
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     where = f"WHERE {clause}" if clause else ""
     # Groesse (Lots/Kontrakte) haengt an der Herkunft (source) - deshalb separat
     # je Tag UND source aufsummiert, nicht in der Haupt-Query mitgezogen (dort
@@ -855,9 +888,10 @@ def _attach_journal_flags(trades: list[dict]) -> list[dict]:
 
 
 def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or",
-                 offset: int = 0, limit: int = 50, sort: str = "day", direction: str = "desc") -> tuple[list[dict], int]:
+                 offset: int = 0, limit: int = 50, sort: str = "day", direction: str = "desc",
+                 strategy_keys: list[str] | None = None) -> tuple[list[dict], int]:
     """Paginierte Liste aller Trades ueber alle Tage hinweg, fuer die Trades-Uebersicht."""
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     where = f"WHERE {clause}" if clause else ""
     sort_col = TRADE_SORT_COLUMNS.get(sort, "day")
     sort_dir = "ASC" if direction == "asc" else "DESC"
@@ -890,12 +924,13 @@ def get_images_for_trade(trade_id: int) -> list[dict]:
 
 def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = None,
                        tag_keys: list[str] | None = None, tag_logic: str = "or",
-                       sort: str = "day", direction: str = "desc") -> int | None:
+                       sort: str = "day", direction: str = "desc",
+                       strategy_keys: list[str] | None = None) -> int | None:
     """Naechster/vorheriger Trade in genau der Reihenfolge, die list_trades() fuer
     dieselben Filter/Sortierung liefern wuerde - per Tupel-Vergleich (Sortierspalte,
     entry_time) statt Offset, damit der Sprung auch ueber Seitengrenzen der
     paginierten Trades-Uebersicht hinweg korrekt bleibt."""
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     where = f"AND {clause}" if clause else ""
     sort_col = TRADE_SORT_COLUMNS.get(sort, "day")
     sort_dir = "ASC" if direction == "asc" else "DESC"
@@ -923,8 +958,9 @@ def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = N
         return row["id"] if row else None
 
 
-def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                    tag_logic: str = "or", strategy_keys: list[str] | None = None) -> list[dict]:
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     where = f"AND {clause}" if clause else ""
     with get_conn() as conn:
         rows = conn.execute(
@@ -935,13 +971,14 @@ def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: li
 
 
 def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
-                               tag_logic: str = "or", start: str | None = None, end: str | None = None) -> list[dict]:
+                               tag_logic: str = "or", start: str | None = None, end: str | None = None,
+                               strategy_keys: list[str] | None = None) -> list[dict]:
     """Wie get_trades_in_range(), aber mit optionalen statt Pflicht-Datumsgrenzen -
     Basis fuer die Auswertungsseite, die wahlweise die komplette Historie oder
     einen frei gewaehlten Zeitraum je Widget auswertet. Tags werden direkt
     mitgeladen (eine Zusatzquery, kein N+1), weil die Tag-Dimension der
     Auswertung sie fuer jeden Trade braucht."""
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     parts = [clause] if clause else []
     if start:
         parts.append("day >= ?")
@@ -977,10 +1014,12 @@ def journal_day_details(start: str | None = None, end: str | None = None) -> dic
     return {r["ref_key"]: dict(rating=r["rating"], mood=r["mood"], followed_plan=r["followed_plan"]) for r in rows}
 
 
-def get_trades_in_range(start_day: str, end_day: str, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> list[dict]:
+def get_trades_in_range(start_day: str, end_day: str, account_keys: list[str] | None = None,
+                         tag_keys: list[str] | None = None, tag_logic: str = "or",
+                         strategy_keys: list[str] | None = None) -> list[dict]:
     """Ein einzelner Query fuer einen ganzen Zeitraum (Woche/Monat) statt eines
     Queries pro Tag - vermeidet bis zu 31 einzelne Connections pro Monatsansicht."""
-    clause, params = _combine_filters(_account_filter(account_keys), _tag_filter(tag_keys, tag_logic))
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     where = f"AND {clause}" if clause else ""
     with get_conn() as conn:
         rows = conn.execute(

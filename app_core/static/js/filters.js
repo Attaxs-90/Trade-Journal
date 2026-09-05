@@ -41,6 +41,24 @@ function saveTagFilterState() {
   }));
 }
 
+/* ---------- Strategie-Filter ---------- */
+
+export function loadStrategyFilterState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("strategyFilter") || "null");
+    if (saved && saved.mode) {
+      state.strategyFilterMode = saved.mode;
+      state.strategyFilterKeys = saved.keys || [];
+    }
+  } catch (e) { /* ignore */ }
+}
+function saveStrategyFilterState() {
+  localStorage.setItem("strategyFilter", JSON.stringify({
+    mode: state.strategyFilterMode, keys: state.strategyFilterKeys,
+  }));
+  renderSidebarAccountStatus();
+}
+
 export async function getAccountOptions() {
   return api("/api/account-options");
 }
@@ -120,17 +138,25 @@ function accountChipEl(label, active, onClick) {
   return chip;
 }
 
-export async function renderAccountChipRow(containerId) {
+/* Eine Chip-Reihe fuer Konto UND Strategie: beide verhalten sich gleich
+   (ein "Alle"-Chip, Mehrfachauswahl, leere Auswahl faellt auf "alle" zurueck),
+   nur Datenquelle und Zustandsfelder unterscheiden sich. Zweimal ausgeschrieben
+   waeren es zwei Stellen, die auseinanderlaufen koennen. */
+async function renderChipRow(containerId, cfg) {
   const wrap = document.getElementById(containerId);
   if (!wrap) return;
-  const options = await getAccountOptions();
+  const options = await cfg.loadOptions();
   wrap.innerHTML = "";
-  const rerender = () => renderAccountChipRow(containerId);
+  const rerender = () => renderChipRow(containerId, cfg);
 
-  wrap.appendChild(accountChipEl("Alle Konten", state.filterMode === "all", () => {
-    state.filterMode = "all";
-    state.filterKeys = [];
-    saveFilterState();
+  if (!options.length && cfg.hideWhenEmpty) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+
+  wrap.appendChild(accountChipEl(cfg.allLabel, cfg.getMode() === "all", () => {
+    cfg.apply("all", []);
     rerender();
     refreshCurrentView();
   }));
@@ -138,28 +164,64 @@ export async function renderAccountChipRow(containerId) {
   if (!options.length) {
     const hint = document.createElement("span");
     hint.className = "account-chip-row-empty";
-    hint.textContent = "Noch keine Konten/Importe.";
+    hint.textContent = cfg.emptyHint;
     wrap.appendChild(hint);
     return;
   }
 
   for (const opt of options) {
-    const active = state.filterMode === "selected" && state.filterKeys.includes(opt.key);
+    const active = cfg.getMode() === "selected" && cfg.getKeys().includes(opt.key);
     wrap.appendChild(accountChipEl(opt.name, active, () => {
-      const current = new Set(state.filterMode === "selected" ? state.filterKeys : []);
+      const current = new Set(cfg.getMode() === "selected" ? cfg.getKeys() : []);
       if (current.has(opt.key)) current.delete(opt.key); else current.add(opt.key);
-      if (!current.size) {
-        state.filterMode = "all";
-        state.filterKeys = [];
-      } else {
-        state.filterMode = "selected";
-        state.filterKeys = [...current];
-      }
-      saveFilterState();
+      // Leere Auswahl bedeutet "alle" - sonst stuende man vor einer Ansicht
+      // ohne jeden Trade und muesste raten, wie man da wieder rauskommt.
+      if (!current.size) cfg.apply("all", []);
+      else cfg.apply("selected", [...current]);
       rerender();
       refreshCurrentView();
     }));
   }
+}
+
+export async function renderAccountChipRow(containerId) {
+  return renderChipRow(containerId, {
+    allLabel: "Alle Konten",
+    emptyHint: "Noch keine Konten/Importe.",
+    loadOptions: getAccountOptions,
+    getMode: () => state.filterMode,
+    getKeys: () => state.filterKeys,
+    apply: (mode, keys) => {
+      state.filterMode = mode;
+      state.filterKeys = keys;
+      saveFilterState();
+    },
+  });
+}
+
+/* "Ohne Strategie" als eigener Schluessel, analog zu "Nicht zugeordnet" beim
+   Konto - Trades ohne Strategie sind eine Auswahl wert, keine Luecke.
+   Die ganze Reihe bleibt verborgen, solange es keine Strategie gibt: ein
+   Filter ueber genau eine Moeglichkeit waere nur Rauschen. */
+export async function renderStrategyChipRow(containerId) {
+  return renderChipRow(containerId, {
+    allLabel: "Alle Strategien",
+    emptyHint: "Noch keine Strategie angelegt.",
+    hideWhenEmpty: true,
+    loadOptions: async () => {
+      const { strategies } = await api("/api/strategies?include_archived=true");
+      if (!strategies.length) return [];
+      return [...strategies.map(s => ({ key: String(s.id), name: s.name })),
+              { key: "none", name: "Ohne Strategie" }];
+    },
+    getMode: () => state.strategyFilterMode,
+    getKeys: () => state.strategyFilterKeys,
+    apply: (mode, keys) => {
+      state.strategyFilterMode = mode;
+      state.strategyFilterKeys = keys;
+      saveStrategyFilterState();
+    },
+  });
 }
 
 /* Globaler Konten-Filter-Status in der Sidebar - auf jeder Seite sichtbar
@@ -172,14 +234,29 @@ export async function renderSidebarAccountStatus() {
   if (!chipsWrap) return;
   chipsWrap.innerHTML = "";
 
-  if (state.filterMode !== "selected" || !state.filterKeys.length) {
+  const accountActive = state.filterMode === "selected" && state.filterKeys.length;
+  const strategyActive = state.strategyFilterMode === "selected" && state.strategyFilterKeys.length;
+
+  if (!accountActive && !strategyActive) {
     chipsWrap.innerHTML = `<span class="sidebar-account-status-chip muted">Alle Konten</span>`;
     return;
   }
 
-  const options = await getAccountOptions();
-  const nameByKey = new Map(options.map(o => [o.key, o.name]));
-  const names = state.filterKeys.map(k => nameByKey.get(k) || (k === "csv" ? "Nicht zugeordnet" : `Konto ${k}`));
+  const names = [];
+  if (accountActive) {
+    const options = await getAccountOptions();
+    const nameByKey = new Map(options.map(o => [o.key, o.name]));
+    names.push(...state.filterKeys.map(k => nameByKey.get(k) || (k === "csv" ? "Nicht zugeordnet" : `Konto ${k}`)));
+  }
+  // Der Strategie-Filter gehoert hier genauso hin wie der Konto-Filter: er
+  // wirkt auf allen Auswertungsseiten weiter, auch auf denen ohne eigene
+  // Chip-Reihe - unsichtbar waere er eine Falle.
+  if (strategyActive) {
+    const { strategies } = await api("/api/strategies?include_archived=true");
+    const nameById = new Map(strategies.map(x => [String(x.id), x.name]));
+    names.push(...state.strategyFilterKeys.map(
+      k => k === "none" ? "Ohne Strategie" : (nameById.get(k) || `Strategie ${k}`)));
+  }
 
   const MAX_SHOWN = 3;
   for (const name of names.slice(0, MAX_SHOWN)) {

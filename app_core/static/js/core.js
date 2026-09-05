@@ -7,6 +7,7 @@ export const state = {
   view: "overview", currentDay: null,
   filterMode: "all", filterKeys: [],
   tagFilterMode: "all", tagFilterKeys: [], tagFilterLogic: "or",
+  strategyFilterMode: "all", strategyFilterKeys: [],
   // Journal hat einen eigenen Tag-Filter: er filtert Journal-Eintraege, nicht
   // Trades, und darf die Auswertungsseiten deshalb nicht mitbeeinflussen.
   journalMode: "all", journalQuery: "", journalSearchScope: "journal", journalTagKeys: [], journalRefKey: null,
@@ -24,8 +25,15 @@ export function tagsQS() {
   return `tags=${encodeURIComponent(state.tagFilterKeys.join(","))}&tag_logic=${state.tagFilterLogic}`;
 }
 
+/* Strategie-Filter analog zu Konto und Tag - Schluessel sind Strategie-Ids
+   oder "none" fuer Trades ohne Strategie (siehe db._strategy_filter). */
+export function strategiesQS() {
+  if (state.strategyFilterMode !== "selected" || !state.strategyFilterKeys.length) return "";
+  return `strategies=${encodeURIComponent(state.strategyFilterKeys.join(","))}`;
+}
+
 export function withFilter(url) {
-  const parts = [accountsQS(), tagsQS()].filter(Boolean);
+  const parts = [accountsQS(), tagsQS(), strategiesQS()].filter(Boolean);
   if (!parts.length) return url;
   return url + (url.includes("?") ? "&" : "?") + parts.join("&");
 }

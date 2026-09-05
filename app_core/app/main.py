@@ -47,10 +47,11 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB - deckt auch hochaufgeloeste Screens
 
 
 def _parse_keys(raw: str | None) -> list[str] | None:
-    """Zerlegt einen kommaseparierten Filter-Parameter (?accounts=2,5,csv bzw.
-    ?tags=1,4) in seine Schluessel. None/leer = keine Einschraenkung. Konten und
-    Tags teilen sich dieselbe Zerlegung - die Bedeutung der Schluessel
-    unterscheiden erst db._account_filter() und db._tag_filter()."""
+    """Zerlegt einen kommaseparierten Filter-Parameter (?accounts=2,5,csv,
+    ?tags=1,4, ?strategies=3,none) in seine Schluessel. None/leer = keine
+    Einschraenkung. Alle drei Filter teilen sich dieselbe Zerlegung - die
+    Bedeutung der Schluessel unterscheiden erst db._account_filter(),
+    db._tag_filter() und db._strategy_filter()."""
     if not raw:
         return None
     keys = [k for k in raw.split(",") if k]
@@ -253,25 +254,30 @@ async def import_csv(file: UploadFile = File(...), account_id: int | None = Form
 
 
 @app.get("/api/days")
-def api_list_days(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return db.list_days(_parse_keys(accounts), _parse_keys(tags), tag_logic)
+def api_list_days(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                   strategies: str | None = None):
+    return db.list_days(_parse_keys(accounts), _parse_keys(tags), tag_logic, _parse_keys(strategies))
 
 
 @app.get("/api/trades")
 def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
-                     page: int = 1, page_size: int = 50, sort: str = "day", dir: str = "desc"):
+                     page: int = 1, page_size: int = 50, sort: str = "day", dir: str = "desc",
+                     strategies: str | None = None):
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     trades, total = db.list_trades(
         _parse_keys(accounts), _parse_keys(tags), tag_logic,
         offset=(page - 1) * page_size, limit=page_size, sort=sort, direction=dir,
+        strategy_keys=_parse_keys(strategies),
     )
     return {"trades": trades, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/days/{day}")
-def api_day_detail(day: str, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    trades = db.get_day_trades(day, _parse_keys(accounts), _parse_keys(tags), tag_logic)
+def api_day_detail(day: str, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                    strategies: str | None = None):
+    trades = db.get_day_trades(day, _parse_keys(accounts), _parse_keys(tags), tag_logic,
+                               _parse_keys(strategies))
     images = db.get_images_for_day(day)
     # Auch ohne Trades erreichbar, wenn es an dem Tag ein Bild oder einen
     # Journal-Eintrag gibt (z.B. ueber den Quill-Editor eingebettetes Bild an
@@ -321,19 +327,22 @@ def api_trade_images(trade_id: int):
 @app.get("/api/trades/{trade_id}/neighbor")
 def api_trade_neighbor(trade_id: int, to: str = "next", accounts: str | None = None,
                         tags: str | None = None, tag_logic: str = "or",
-                        sort: str = "day", dir: str = "desc"):
+                        sort: str = "day", dir: str = "desc", strategies: str | None = None):
     if to not in ("next", "prev"):
         raise HTTPException(400, "to muss 'next' oder 'prev' sein.")
     neighbor_id = db.adjacent_trade_id(
-        trade_id, to, _parse_keys(accounts), _parse_keys(tags), tag_logic, sort, dir
+        trade_id, to, _parse_keys(accounts), _parse_keys(tags), tag_logic, sort, dir,
+        _parse_keys(strategies)
     )
     return {"id": neighbor_id}
 
 
 @app.get("/api/overview")
-def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
+def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                  strategies: str | None = None):
     keys = _parse_keys(accounts)
-    days = db.list_days(keys, _parse_keys(tags), tag_logic)
+    strategy_keys = _parse_keys(strategies)
+    days = db.list_days(keys, _parse_keys(tags), tag_logic, strategy_keys)
 
     # Startkapital: bei einer Konto-Auswahl nur deren Startkapital summieren
     # (der Magic-Key "csv" fuer nicht zugeordnete Trades hat keins), sonst
@@ -358,7 +367,8 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
             worst_day = d
     total_net = round(total_net, 2)
 
-    trades = db.list_trades_for_analytics(keys, _parse_keys(tags), tag_logic)
+    trades = db.list_trades_for_analytics(keys, _parse_keys(tags), tag_logic,
+                                          strategy_keys=strategy_keys)
     summary = an.trade_summary(trades)
     win_loss_ratio = round(summary["avg_win"] / summary["avg_loss"], 2) if summary["avg_loss"] else None
     return {
@@ -388,16 +398,19 @@ def api_analytics_dimensions():
 
 @app.get("/api/analytics/summary")
 def api_analytics_summary(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
-                           start: str | None = None, end: str | None = None):
-    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
+                           start: str | None = None, end: str | None = None,
+                           strategies: str | None = None):
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end,
+                                          _parse_keys(strategies))
     return an.trade_summary(trades)
 
 
 @app.get("/api/analytics/equity")
 def api_analytics_equity(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
-                          start: str | None = None, end: str | None = None):
+                          start: str | None = None, end: str | None = None,
+                          strategies: str | None = None):
     keys = _parse_keys(accounts)
-    days = db.list_days(keys, _parse_keys(tags), tag_logic)
+    days = db.list_days(keys, _parse_keys(tags), tag_logic, _parse_keys(strategies))
     if start:
         days = [d for d in days if d["day"] >= start]
     if end:
@@ -407,29 +420,37 @@ def api_analytics_equity(accounts: str | None = None, tags: str | None = None, t
 
 @app.get("/api/analytics/breakdown")
 def api_analytics_breakdown(dimension: str, accounts: str | None = None, tags: str | None = None,
-                             tag_logic: str = "or", start: str | None = None, end: str | None = None):
+                             tag_logic: str = "or", start: str | None = None, end: str | None = None,
+                             strategies: str | None = None):
     if dimension not in an.DIMENSIONS:
         raise HTTPException(400, f"Unbekannte Dimension '{dimension}'.")
-    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end,
+                                          _parse_keys(strategies))
     ctx = an.build_context(trades)
     return {"dimension": dimension, "label": an.DIMENSIONS[dimension]["label"], "rows": an.breakdown(trades, dimension, ctx)}
 
 
 @app.get("/api/analytics/distribution")
 def api_analytics_distribution(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
-                                start: str | None = None, end: str | None = None, bins: int = 10):
-    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end)
+                                start: str | None = None, end: str | None = None, bins: int = 10,
+                                strategies: str | None = None):
+    trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end,
+                                          _parse_keys(strategies))
     return an.pnl_distribution(trades, min(max(bins, 4), 24))
 
 
 @app.get("/api/week/{iso_year}/{iso_week}")
-def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return build_week_payload(iso_year, iso_week, _parse_keys(accounts), _parse_keys(tags), tag_logic)
+def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: str | None = None,
+              tag_logic: str = "or", strategies: str | None = None):
+    return build_week_payload(iso_year, iso_week, _parse_keys(accounts), _parse_keys(tags), tag_logic,
+                              _parse_keys(strategies))
 
 
 @app.get("/api/month/{year}/{month}")
-def api_month(year: int, month: int, accounts: str | None = None, tags: str | None = None, tag_logic: str = "or"):
-    return build_month_payload(year, month, _parse_keys(accounts), _parse_keys(tags), tag_logic)
+def api_month(year: int, month: int, accounts: str | None = None, tags: str | None = None,
+               tag_logic: str = "or", strategies: str | None = None):
+    return build_month_payload(year, month, _parse_keys(accounts), _parse_keys(tags), tag_logic,
+                               _parse_keys(strategies))
 
 
 @app.get("/api/accounts")

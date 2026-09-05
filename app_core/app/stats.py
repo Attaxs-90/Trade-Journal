@@ -112,12 +112,15 @@ def _fmt_num(n: float) -> str:
     return s
 
 
-def build_week_payload(iso_year: int, iso_week: int, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> dict:
+def build_week_payload(iso_year: int, iso_week: int, account_keys: list[str] | None = None,
+                        tag_keys: list[str] | None = None, tag_logic: str = "or",
+                        strategy_keys: list[str] | None = None) -> dict:
     monday = date.fromisocalendar(iso_year, iso_week, 1)
     sunday = date.fromisocalendar(iso_year, iso_week, 7)
     all_days = [monday + timedelta(days=i) for i in range(7)]
 
-    trades_by_day = _group_by_day(db.get_trades_in_range(str(monday), str(sunday), account_keys, tag_keys, tag_logic))
+    trades_by_day = _group_by_day(db.get_trades_in_range(str(monday), str(sunday), account_keys, tag_keys,
+                                                          tag_logic, strategy_keys))
 
     day_rows = []
     for d, wd in zip(all_days, WEEKDAY_NAMES):
@@ -177,11 +180,14 @@ def build_week_payload(iso_year: int, iso_week: int, account_keys: list[str] | N
     )
 
 
-def build_month_payload(year: int, month: int, account_keys: list[str] | None = None, tag_keys: list[str] | None = None, tag_logic: str = "or") -> dict:
+def build_month_payload(year: int, month: int, account_keys: list[str] | None = None,
+                         tag_keys: list[str] | None = None, tag_logic: str = "or",
+                         strategy_keys: list[str] | None = None) -> dict:
     days_in_month = calendar.monthrange(year, month)[1]
     start = date(year, month, 1)
     end = date(year, month, days_in_month)
-    trades_by_day = _group_by_day(db.get_trades_in_range(str(start), str(end), account_keys, tag_keys, tag_logic))
+    trades_by_day = _group_by_day(db.get_trades_in_range(str(start), str(end), account_keys, tag_keys,
+                                                          tag_logic, strategy_keys))
 
     # Journal-Marker und Bild-Tage fuer den ganzen Monat in je einer Query,
     # nicht je Tag.

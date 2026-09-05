@@ -5,7 +5,7 @@
    Ansichtszustand muss stehen, bevor die erste Ansicht gerendert wird. */
 
 import { showAppError } from './core.js';
-import { loadFilterState, loadTagFilterState, renderSidebarAccountStatus } from './filters.js';
+import { loadFilterState, loadStrategyFilterState, loadTagFilterState, renderSidebarAccountStatus } from './filters.js';
 import './chrome.js';
 import './settings.js';
 import './tags.js';
@@ -44,6 +44,7 @@ window.addEventListener("error", (e) => {
 
 loadFilterState();
 loadTagFilterState();
+loadStrategyFilterState();
 loadNotebookExpandedState();
 renderSidebarAccountStatus();
 openOverview();
