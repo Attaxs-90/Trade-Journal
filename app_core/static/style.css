@@ -2138,3 +2138,49 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 @media (max-width: 1100px) {
   .strategy-layout { grid-template-columns: 1fr; }
 }
+
+/* Strategie-Auswahl und Regel-Checkliste am Trade (Trade-Seite und, als
+   compact, in der Trade-Karte der Tagesansicht - eine Komponente fuer beide). */
+.trade-strategy-head {
+  align-items: center; display: flex; flex-wrap: wrap; gap: 12px;
+  justify-content: space-between; margin-bottom: 10px;
+}
+.trade-strategy-select-label { align-items: center; color: var(--text-dim); display: flex; font-size: 12px; gap: 8px; }
+.trade-strategy-select { min-width: 180px; }
+.plan-badge { border-radius: 4px; font-size: 11px; font-weight: 600; padding: 3px 8px; }
+.plan-badge.yes { background: var(--green-fill); color: var(--green); }
+.plan-badge.no { background: var(--red-fill); color: var(--red); }
+.plan-badge.muted { background: var(--bg-hover); color: var(--text-faint); }
+
+.trade-rule-block + .trade-rule-block { margin-top: 10px; }
+.trade-rule-block-title {
+  color: var(--text-faint); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.05em; margin-bottom: 4px; text-transform: uppercase;
+}
+.trade-rule-item {
+  align-items: center; border-top: 1px solid var(--border); display: flex;
+  flex-wrap: wrap; gap: 6px 12px; padding: 6px 0;
+}
+.trade-rule-block-title + .trade-rule-item { border-top: none; }
+.trade-rule-item-text { flex: 1 1 160px; font-size: 13px; min-width: 0; overflow-wrap: break-word; }
+.trade-rule-item-btns { display: flex; gap: 4px; margin-left: auto; }
+.trade-rule-empty { color: var(--text-faint); font-size: 12px; padding: 4px 0; }
+
+/* Dritter Zustand ohne dritte Schaltflaeche: erneuter Klick auf die aktive
+   Wahl nimmt die Bewertung zurueck, die Regel gilt dann wieder als
+   unbeantwortet und faellt aus jeder Quote (= "nicht anwendbar"). */
+.rule-choice {
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-dim); cursor: pointer; font-size: 11px; min-width: 42px; padding: 3px 9px;
+}
+.rule-choice:hover { color: var(--text); }
+.rule-choice.yes { background: var(--green-fill); border-color: var(--green); color: var(--green); }
+.rule-choice.no { background: var(--red-fill); border-color: var(--red); color: var(--red); }
+
+/* Kompakte Fassung in der Tagesansicht: schmalere Schrift, weniger Luft. */
+.trade-strategy.compact .trade-rule-item { padding: 4px 0; }
+.trade-strategy.compact .trade-rule-item-text { font-size: 12px; flex-basis: 120px; }
+.trade-strategy.compact .trade-strategy-select { min-width: 140px; }
+
+/* Auswahl im chooseDialog - wie .confirm-input volle Breite der Karte. */
+.confirm-select { width: 100%; }

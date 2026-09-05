@@ -7,6 +7,7 @@ import { renderDayImages } from './images.js';
 import { mountJournalEditor } from './journal.js';
 import { mountView, setActiveNav } from './overview.js';
 import { fmtDuration } from './settings.js';
+import { renderTradeStrategyPanel } from './strategies.js';
 import { renderTradeTagCell } from './tags.js';
 import { tradeRMultiple } from './trades.js';
 
@@ -502,6 +503,10 @@ export async function populateDay(container, day, opts = {}) {
       }).join("");
       const tagCell = fieldsEl.querySelector(".day-trade-tag-cell");
       if (tagCell) renderTradeTagCell(tagCell, t);
+      // Dieselbe Komponente wie auf der Trade-Seite, nur kompakt - so laesst
+      // sich ein ganzer Handelstag ueber die Pfeile durchgehen und bewerten,
+      // ohne je die Seite zu wechseln.
+      renderTradeStrategyPanel(container.querySelector(".day-trade-strategy-host"), t, { compact: true });
     }
     renderCard();
 

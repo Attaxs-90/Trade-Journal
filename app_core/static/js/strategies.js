@@ -6,8 +6,8 @@
    aus jeder Quote heraus - das deckt zugleich "Regel hier nicht anwendbar" ab
    (siehe trade_rule_status in db.py). */
 
-import { api, escapeHtml, fmtSigned, makeSortable, state } from './core.js';
-import { confirmContinue, confirmDelete, promptDialog } from './dialogs.js';
+import { api, escapeHtml, fmtSigned, makeSortable, showAppError, state } from './core.js';
+import { chooseDialog, confirmContinue, confirmDelete, promptDialog } from './dialogs.js';
 import { mountView, setActiveNav } from './overview.js';
 
 let strategiesCache = null;
@@ -389,4 +389,178 @@ async function deleteRule(rule) {
   if (!ok) return;
   await api(`/api/rules/${rule.id}`, { method: "DELETE" });
   await renderStrategyDetail();
+}
+
+/* ---------- Strategie und Regel-Checkliste am Trade ----------
+   Eine Komponente fuer beide Einhaengeorte: die Einzel-Trade-Seite und die
+   Trade-Karte der Tagesansicht (compact). Sonst laege dieselbe Logik zweimal
+   im Code und liefe auseinander.
+
+   Je Regel drei Klickzustaende: Ja, Nein und "nochmal auf dieselbe Schaltflaeche"
+   = Bewertung zuruecknehmen. Zurueckgenommen zaehlt die Regel in keine Quote -
+   das ist zugleich der Weg fuer "Regel hier nicht anwendbar". */
+
+export async function renderTradeStrategyPanel(host, trade, { compact = false } = {}) {
+  if (!host) return;
+  const [strategies, data] = await Promise.all([
+    getStrategies(),
+    api(`/api/trades/${trade.id}/rule-status`),
+  ]);
+  // Archivierte Strategien tauchen in der Auswahl nur auf, wenn der Trade
+  // bereits daran haengt - sonst waeren sie neu nicht mehr waehlbar, ein
+  // bestehender Trade wuerde aber stillschweigend umgehaengt.
+  const options = [...strategies];
+  if (data.strategy && !options.some(s => s.id === data.strategy.id)) options.push(data.strategy);
+
+  host.innerHTML = `
+    <div class="trade-strategy${compact ? " compact" : ""}">
+      <div class="trade-strategy-head">
+        <label class="trade-strategy-select-label">Strategie
+          <select class="trade-strategy-select">
+            <option value="">Ohne Strategie</option>
+            ${options.map(s => `<option value="${s.id}"${data.strategy && data.strategy.id === s.id ? " selected" : ""}>`
+              + `${escapeHtml(s.name)}${s.archived ? " (archiviert)" : ""}</option>`).join("")}
+          </select>
+        </label>
+        <div class="trade-strategy-plan">${planBadge(data.followed_plan)}</div>
+      </div>
+      <div class="trade-rule-checklist"></div>
+    </div>`;
+
+  host.querySelector(".trade-strategy-select").addEventListener("change", async (e) => {
+    const value = e.target.value ? Number(e.target.value) : null;
+    await api(`/api/trades/${trade.id}/strategy`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ strategy_id: value }),
+    });
+    trade.strategy_id = value;
+    await renderTradeStrategyPanel(host, trade, { compact });
+  });
+
+  renderChecklist(host, trade, data, compact);
+}
+
+/* "Plan befolgt" wird nicht mehr eingegeben, sondern abgeleitet: Ja, wenn jede
+   beantwortete Regel auf Ja steht. null = keine Aussage (keine Strategie oder
+   noch nichts beantwortet) - das ist bewusst nicht dasselbe wie "Nein". */
+function planBadge(followedPlan) {
+  if (followedPlan === null) return `<span class="plan-badge muted">Plan: keine Aussage</span>`;
+  return followedPlan
+    ? `<span class="plan-badge yes">Plan befolgt</span>`
+    : `<span class="plan-badge no">Plan gebrochen</span>`;
+}
+
+function renderChecklist(host, trade, data, compact) {
+  const list = host.querySelector(".trade-rule-checklist");
+  if (!data.strategy) {
+    list.innerHTML = `<div class="trade-rule-empty">Ohne Strategie gibt es keine Regeln zum Abhaken.</div>`;
+    return;
+  }
+  const blocks = [
+    ...data.strategy.groups.map(g => ({ name: g.name, rules: g.rules })),
+    ...(data.strategy.ungrouped_rules.length ? [{ name: null, rules: data.strategy.ungrouped_rules }] : []),
+  ];
+  if (!blocks.length) {
+    list.innerHTML = `<div class="trade-rule-empty">Diese Strategie hat noch keine Regeln.</div>`;
+    return;
+  }
+
+  list.innerHTML = blocks.map(b => `
+    <div class="trade-rule-block">
+      ${b.name ? `<div class="trade-rule-block-title">${escapeHtml(b.name)}</div>` : ""}
+      ${b.rules.map(r => {
+        const v = data.status[String(r.id)];
+        return `<div class="trade-rule-item" data-rule="${r.id}">
+          <span class="trade-rule-item-text">${escapeHtml(r.text)}</span>
+          <span class="trade-rule-item-btns">
+            <button type="button" class="rule-choice${v === 1 ? " yes" : ""}" data-val="1"
+                    aria-pressed="${v === 1}">Ja</button>
+            <button type="button" class="rule-choice${v === 0 ? " no" : ""}" data-val="0"
+                    aria-pressed="${v === 0}">Nein</button>
+          </span>
+        </div>`;
+      }).join("")}
+    </div>`).join("");
+
+  list.querySelectorAll(".trade-rule-item").forEach(item => {
+    const ruleId = Number(item.dataset.rule);
+    item.querySelectorAll(".rule-choice").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const want = Number(btn.dataset.val);
+        // Erneuter Klick auf die aktive Wahl nimmt die Bewertung zurueck.
+        const followed = data.status[String(ruleId)] === want ? null : want === 1;
+        const res = await api(`/api/trades/${trade.id}/rule-status`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rule_id: ruleId, followed }),
+        });
+        data.status = res.status;
+        host.querySelector(".trade-strategy-plan").innerHTML = planBadge(res.followed_plan);
+        renderChecklist(host, trade, data, compact);
+      });
+    });
+  });
+}
+
+/* ---------- Sammelaktionen aus der Trades-Uebersicht ----------
+   Nacherfassung fuer Bestands-Trades: ohne sie startet das Feature mit
+   hunderten unzugeordneten Trades und bleibt praktisch leer. */
+
+export async function bulkAssignStrategy(tradeIds, onDone) {
+  const strategies = await getStrategies(true);
+  if (!strategies.length) {
+    showAppError("Es gibt noch keine Strategie. Lege zuerst unter „Strategie“ eine an.");
+    return;
+  }
+  const choice = await chooseDialog(
+    `Strategie für ${tradeIds.length} ausgewählte Trade(s) setzen:`,
+    [{ value: "", label: "Ohne Strategie" },
+     ...strategies.map(s => ({ value: s.id, label: s.name }))],
+    "Zuweisen");
+  if (choice === null) return;
+  const res = await api("/api/trades/bulk-strategy", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trade_ids: tradeIds, strategy_id: choice ? Number(choice) : null }),
+  });
+  if (onDone) await onDone(res);
+}
+
+export async function bulkRateRule(tradeIds, onDone) {
+  const strategies = await getStrategies(true);
+  // Regeln aller Strategien, nach Strategie gruppiert. Der Server wendet eine
+  // Regel nur auf Trades an, die tatsaechlich zu ihrer Strategie gehoeren, und
+  // meldet zurueck wie viele es waren - deshalb ist die Liste hier nicht auf
+  // die Strategien der Auswahl eingeschraenkt.
+  const options = [];
+  for (const s of strategies) {
+    const tree = await api(`/api/strategies/${s.id}`);
+    const rules = [...tree.strategy.groups.flatMap(g => g.rules), ...tree.strategy.ungrouped_rules];
+    for (const r of rules) options.push({ value: r.id, label: r.text, group: s.name });
+  }
+  if (!options.length) {
+    showAppError("Es gibt noch keine Regeln, die sich bewerten lassen.");
+    return;
+  }
+  const ruleId = await chooseDialog(`Welche Regel für ${tradeIds.length} Trade(s) bewerten?`, options, "Weiter");
+  if (ruleId === null) return;
+  const value = await chooseDialog("Wie sollen diese Trades bewertet werden?", [
+    { value: "1", label: "Befolgt (Ja)" },
+    { value: "0", label: "Nicht befolgt (Nein)" },
+    { value: "", label: "Bewertung zurücknehmen (zählt in keine Quote)" },
+  ], "Übernehmen");
+  if (value === null) return;
+  const res = await api("/api/trades/bulk-rule-status", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trade_ids: tradeIds, rule_id: Number(ruleId),
+                           followed: value === "" ? null : value === "1" }),
+  });
+  // Erst neu laden, DANN melden: onDone() rendert die Ansicht neu, und
+  // mountView() raeumt den Fehlerstreifen beim Ansichtswechsel ab - eine
+  // vorher gesetzte Meldung waere sofort wieder verschwunden (beobachtet).
+  if (onDone) await onDone(res);
+  // Ehrlich melden statt still zu schlucken: die Regel greift nur bei Trades
+  // der passenden Strategie, es sind also oft weniger als ausgewaehlt.
+  if (res.updated < tradeIds.length) {
+    showAppError(`${res.updated} von ${tradeIds.length} Trade(s) bewertet – die übrigen gehören `
+      + `zu einer anderen Strategie als diese Regel.`);
+  }
 }

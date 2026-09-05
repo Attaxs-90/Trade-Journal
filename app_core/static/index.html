@@ -282,6 +282,8 @@
       <div class="journal-bulk-bar trades-bulk-bar" id="trades-bulk-bar" hidden>
         <span class="journal-bulk-count" id="trades-bulk-count"></span>
         <button type="button" class="btn btn-secondary" id="trades-bulk-clear">Auswahl aufheben</button>
+        <button type="button" class="btn btn-secondary" id="trades-bulk-strategy-btn">Strategie zuweisen</button>
+        <button type="button" class="btn btn-secondary" id="trades-bulk-rule-btn">Regel bewerten</button>
         <button type="button" class="btn btn-danger" id="trades-bulk-delete-journal">Journal-Einträge löschen</button>
       </div>
       <div class="table-scroll">
@@ -311,6 +313,11 @@
     </header>
 
     <div class="stat-grid trade-stats"></div>
+
+    <div class="card">
+      <div class="card-title">Strategie &amp; Regeln</div>
+      <div class="trade-strategy-host"></div>
+    </div>
 
     <div class="card">
       <div class="card-title">Tags</div>
@@ -381,6 +388,7 @@
           </div>
 
           <div class="day-trade-fields"></div>
+          <div class="day-trade-strategy-host"></div>
         </div>
       </div>
 

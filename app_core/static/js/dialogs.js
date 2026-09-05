@@ -133,3 +133,42 @@ export async function deleteAccountFlow(accountId, accountName) {
   await renderImportAccountSelect();
   return true;
 }
+
+/* Auswahl-Fenster: wie promptDialog(), aber mit einer Liste statt Freitext.
+   Gibt den gewaehlten Wert zurueck, null bei Abbruch. options sind
+   {value, label, group?} - gleiche Gruppen landen in einer <optgroup>, damit
+   sich z. B. Regeln nach Strategie ordnen lassen. */
+export function chooseDialog(message, options, okLabel = "OK") {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay visible";
+    const groups = [];
+    for (const opt of options) {
+      const key = opt.group || "";
+      let g = groups.find(x => x.key === key);
+      if (!g) { g = { key, items: [] }; groups.push(g); }
+      g.items.push(opt);
+    }
+    const optionsHtml = groups.map(g => {
+      const items = g.items.map(o =>
+        `<option value="${escapeHtml(String(o.value))}">${escapeHtml(o.label)}</option>`).join("");
+      return g.key ? `<optgroup label="${escapeHtml(g.key)}">${items}</optgroup>` : items;
+    }).join("");
+    overlay.innerHTML = `
+      <div class="modal-card confirm-card">
+        <div class="confirm-message">${escapeHtml(message)}</div>
+        <select class="confirm-select">${optionsHtml}</select>
+        <div class="confirm-actions">
+          <button class="btn btn-secondary confirm-no">Abbrechen</button>
+          <button class="btn btn-primary confirm-yes">${escapeHtml(okLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const select = overlay.querySelector(".confirm-select");
+    function cleanup(result) { overlay.remove(); resolve(result); }
+    attachOutsideClose(overlay, () => cleanup(null));
+    overlay.querySelector(".confirm-no").addEventListener("click", () => cleanup(null));
+    overlay.querySelector(".confirm-yes").addEventListener("click", () => cleanup(select.value));
+    select.focus();
+  });
+}
