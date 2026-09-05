@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS trades (
     account_id INTEGER,
     volume REAL,
     risk_usd REAL,
+    strategy_id INTEGER,
     UNIQUE(entry_order_id, exit_order_id)
 );
 
@@ -149,8 +150,72 @@ CREATE TABLE IF NOT EXISTS todo_items (
     created_at TEXT NOT NULL
 );
 
+-- Strategien: eine Handelsstrategie mit eigenen Regeln. Ein Trade hat hoechstens
+-- eine Strategie (trades.strategy_id). Geloescht wird bevorzugt per archived=1 -
+-- eine gehandelte Strategie samt ihrer Auswertung wirft man nicht weg, sie soll
+-- nur nicht mehr zur Auswahl stehen. is_default markiert hoechstens eine
+-- Strategie, die auf der Trade-Seite vorausgewaehlt wird (nur als Vorschlag,
+-- Import und Sync ordnen NICHTS automatisch zu - sonst bekaemen Bestandstrades
+-- still eine Strategie, die nicht stimmt).
+CREATE TABLE IF NOT EXISTS strategies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+-- Regelgruppen ("Entry", "Lot", ...) als eigene Tabelle statt als Textfeld an
+-- der Regel (anders als tags.tag_group): die Gruppen brauchen eine eigene
+-- Reihenfolge, und Umbenennen soll eine Zeile aendern statt n Regeln.
+CREATE TABLE IF NOT EXISTS strategy_rule_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+);
+
+-- Regeln einer Strategie. group_id NULL = Regel ohne Gruppe. archived=1 wenn
+-- die Regel inhaltlich ersetzt wurde: sie verschwindet aus der Checkliste
+-- neuer Trades, ihre bisherigen Bewertungen bleiben aber gueltig und
+-- auswertbar. Ein blosses Umbenennen (Tippfehler) aendert text direkt.
+CREATE TABLE IF NOT EXISTS strategy_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id INTEGER NOT NULL,
+    group_id INTEGER,
+    text TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+-- Regel-Einhaltung je Trade. followed: 1 = befolgt, 0 = nicht befolgt.
+-- KEINE Zeile = unbeantwortet; solche Trades fallen aus jeder Quote heraus,
+-- statt als "nicht befolgt" zu zaehlen. Das dient zugleich als "nicht
+-- anwendbar": greift eine Regel bei einem Trade nicht, bleibt sie einfach
+-- unbeantwortet. Eigene Tabelle statt JSON am Trade/Journal-Eintrag, damit
+-- die Auswertung in einer Query aggregieren kann - und weil
+-- upsert_journal_entry() leere Eintraege loescht und die Daten mitnaehme.
+CREATE TABLE IF NOT EXISTS trade_rule_status (
+    trade_id INTEGER NOT NULL,
+    rule_id INTEGER NOT NULL,
+    followed INTEGER NOT NULL,
+    PRIMARY KEY (trade_id, rule_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_trades_day ON trades(day);
 CREATE INDEX IF NOT EXISTS idx_trades_account ON trades(account_id);
+-- idx_trades_strategy steht bewusst NICHT hier, sondern nur als Migration:
+-- dieses SCHEMA laeuft vor den Migrationen, und bei einer bestehenden Datenbank
+-- gibt es trades.strategy_id an dieser Stelle noch gar nicht (die Spalte kommt
+-- erst mit Migration 28) - der Index wuerde den Start abbrechen. Bei einer
+-- neuen Datenbank legt ihn dieselbe Migration an, deren ALTER TABLE dort
+-- folgenlos durchlaeuft. Indizes auf frisch in SCHEMA angelegte Tabellen sind
+-- dagegen unproblematisch und duerfen hier stehen.
+CREATE INDEX IF NOT EXISTS idx_strategy_rules_strategy ON strategy_rules(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_strategy_rule_groups_strategy ON strategy_rule_groups(strategy_id);
+CREATE INDEX IF NOT EXISTS idx_trade_rule_status_rule ON trade_rule_status(rule_id);
 CREATE INDEX IF NOT EXISTS idx_images_day ON images(day);
 CREATE INDEX IF NOT EXISTS idx_images_trade ON images(trade_id);
 CREATE INDEX IF NOT EXISTS idx_trade_tags_tag ON trade_tags(tag_id);
@@ -268,6 +333,40 @@ MIGRATIONS: list[str] = [
     )""",                                                                     # -> Version 21
     "CREATE INDEX IF NOT EXISTS idx_todo_items_list ON todo_items(list_id)",  # -> Version 22
     "ALTER TABLE trades ADD COLUMN risk_usd REAL",                            # -> Version 23
+    """CREATE TABLE IF NOT EXISTS strategies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        archived INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",                                                                     # -> Version 24
+    """CREATE TABLE IF NOT EXISTS strategy_rule_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0
+    )""",                                                                     # -> Version 25
+    """CREATE TABLE IF NOT EXISTS strategy_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        strategy_id INTEGER NOT NULL,
+        group_id INTEGER,
+        text TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",                                                                     # -> Version 26
+    """CREATE TABLE IF NOT EXISTS trade_rule_status (
+        trade_id INTEGER NOT NULL,
+        rule_id INTEGER NOT NULL,
+        followed INTEGER NOT NULL,
+        PRIMARY KEY (trade_id, rule_id)
+    )""",                                                                     # -> Version 27
+    "ALTER TABLE trades ADD COLUMN strategy_id INTEGER",                      # -> Version 28
+    "CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy_id)",  # -> Version 29
+    "CREATE INDEX IF NOT EXISTS idx_strategy_rules_strategy ON strategy_rules(strategy_id)",              # -> Version 30
+    "CREATE INDEX IF NOT EXISTS idx_strategy_rule_groups_strategy ON strategy_rule_groups(strategy_id)",  # -> Version 31
+    "CREATE INDEX IF NOT EXISTS idx_trade_rule_status_rule ON trade_rule_status(rule_id)",                # -> Version 32
 ]
 
 
@@ -1459,3 +1558,408 @@ def update_todo_item(item_id: int, text: str | None = None, done: bool | None = 
 def delete_todo_item(item_id: int) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM todo_items WHERE id = ?", (item_id,))
+
+
+# ---------- Strategien, Regeln und Regel-Einhaltung ----------
+# Eine Strategie buendelt Regeln (optional in Gruppen). Ein Trade hat hoechstens
+# eine Strategie; welche seiner Regeln er befolgt hat, steht in
+# trade_rule_status - eine Zeile je beantworteter Regel, fehlende Zeile =
+# unbeantwortet (siehe SCHEMA oben).
+
+def list_strategies(include_archived: bool = False) -> list[dict]:
+    """Alle Strategien samt Trade-Anzahl, Netto und Trefferquote - eine Query
+    statt einer Zusatzabfrage je Strategie."""
+    where = "" if include_archived else "WHERE s.archived = 0"
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT s.*, COUNT(t.id) as trade_count,
+                       ROUND(COALESCE(SUM(t.net_usd), 0), 2) as net_usd,
+                       COALESCE(SUM(CASE WHEN t.net_usd > 0 THEN 1 ELSE 0 END), 0) as wins
+                FROM strategies s
+                LEFT JOIN trades t ON t.strategy_id = s.id
+                {where}
+                GROUP BY s.id
+                ORDER BY s.position, s.id"""
+        ).fetchall()
+    return [dict(r, winrate=_quote(r["wins"], r["trade_count"])) for r in rows]
+
+
+def get_strategy(strategy_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM strategies WHERE id = ?", (strategy_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_strategy(name: str) -> dict:
+    with get_conn() as conn:
+        position = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM strategies").fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO strategies (name, position, created_at) VALUES (?, ?, ?)",
+            (name, position, datetime.now().isoformat(timespec="seconds")),
+        )
+        return get_strategy(cur.lastrowid)
+
+
+def update_strategy(strategy_id: int, name: str | None = None, archived: bool | None = None,
+                     is_default: bool | None = None) -> dict | None:
+    """Setzt Name, Archiv-Status und/oder Standard-Kennzeichen. Standard gilt fuer
+    hoechstens eine Strategie - das Setzen loescht es deshalb bei allen anderen."""
+    with get_conn() as conn:
+        fields, params = [], []
+        if name is not None:
+            fields.append("name = ?"); params.append(name)
+        if archived is not None:
+            fields.append("archived = ?"); params.append(1 if archived else 0)
+        if is_default is not None:
+            if is_default:
+                conn.execute("UPDATE strategies SET is_default = 0")
+            fields.append("is_default = ?"); params.append(1 if is_default else 0)
+        if fields:
+            conn.execute(f"UPDATE strategies SET {', '.join(fields)} WHERE id = ?", params + [strategy_id])
+        return get_strategy(strategy_id)
+
+
+def set_strategy_order(order: list[int]) -> None:
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE strategies SET position = ? WHERE id = ?",
+            [(pos, sid) for pos, sid in enumerate(order)],
+        )
+
+
+def delete_strategy(strategy_id: int) -> None:
+    """Endgueltiges Loeschen: Trades werden entkoppelt (wie bei delete_account),
+    Regeln, Gruppen und alle Regel-Bewertungen dieser Strategie verschwinden mit.
+    Der schonende Weg ist archived=1 ueber update_strategy()."""
+    with get_conn() as conn:
+        rule_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM strategy_rules WHERE strategy_id = ?", (strategy_id,)
+        ).fetchall()]
+        if rule_ids:
+            placeholders = ",".join("?" for _ in rule_ids)
+            conn.execute(f"DELETE FROM trade_rule_status WHERE rule_id IN ({placeholders})", rule_ids)
+        conn.execute("UPDATE trades SET strategy_id = NULL WHERE strategy_id = ?", (strategy_id,))
+        conn.execute("DELETE FROM strategy_rules WHERE strategy_id = ?", (strategy_id,))
+        conn.execute("DELETE FROM strategy_rule_groups WHERE strategy_id = ?", (strategy_id,))
+        conn.execute("DELETE FROM strategies WHERE id = ?", (strategy_id,))
+
+
+def get_strategy_tree(strategy_id: int, include_archived: bool = False) -> dict | None:
+    """Strategie samt Gruppen und Regeln in EINER Struktur - zwei Queries statt
+    einer je Gruppe. Regeln ohne Gruppe kommen unter group=None ans Ende, damit
+    das Frontend sie als eigenen Block "Ohne Gruppe" zeigen kann."""
+    with get_conn() as conn:
+        strategy = conn.execute("SELECT * FROM strategies WHERE id = ?", (strategy_id,)).fetchone()
+        if not strategy:
+            return None
+        groups = [dict(r) for r in conn.execute(
+            "SELECT * FROM strategy_rule_groups WHERE strategy_id = ? ORDER BY position, id",
+            (strategy_id,),
+        ).fetchall()]
+        rule_where = "" if include_archived else "AND archived = 0"
+        rules = [dict(r) for r in conn.execute(
+            f"SELECT * FROM strategy_rules WHERE strategy_id = ? {rule_where} ORDER BY position, id",
+            (strategy_id,),
+        ).fetchall()]
+
+    by_group: dict[int | None, list[dict]] = {}
+    for rule in rules:
+        by_group.setdefault(rule["group_id"], []).append(rule)
+    for g in groups:
+        g["rules"] = by_group.get(g["id"], [])
+    return {
+        **dict(strategy),
+        "groups": groups,
+        "ungrouped_rules": by_group.get(None, []),
+    }
+
+
+def create_rule_group(strategy_id: int, name: str) -> dict:
+    with get_conn() as conn:
+        position = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM strategy_rule_groups WHERE strategy_id = ?",
+            (strategy_id,),
+        ).fetchone()[0]
+        cur = conn.execute(
+            "INSERT INTO strategy_rule_groups (strategy_id, name, position) VALUES (?, ?, ?)",
+            (strategy_id, name, position),
+        )
+        row = conn.execute("SELECT * FROM strategy_rule_groups WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def get_rule_group(group_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM strategy_rule_groups WHERE id = ?", (group_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def rename_rule_group(group_id: int, name: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE strategy_rule_groups SET name = ? WHERE id = ?", (name, group_id))
+
+
+def delete_rule_group(group_id: int) -> None:
+    """Loescht nur die Gruppe - ihre Regeln bleiben erhalten und rutschen auf
+    "ohne Gruppe". Sonst gingen mit einem Gruppen-Klick unbemerkt alle
+    Bewertungen der enthaltenen Regeln verloren."""
+    with get_conn() as conn:
+        conn.execute("UPDATE strategy_rules SET group_id = NULL WHERE group_id = ?", (group_id,))
+        conn.execute("DELETE FROM strategy_rule_groups WHERE id = ?", (group_id,))
+
+
+def set_rule_group_order(strategy_id: int, order: list[int]) -> None:
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE strategy_rule_groups SET position = ? WHERE id = ? AND strategy_id = ?",
+            [(pos, gid, strategy_id) for pos, gid in enumerate(order)],
+        )
+
+
+def get_rule(rule_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM strategy_rules WHERE id = ?", (rule_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_rule(strategy_id: int, text: str, group_id: int | None = None) -> dict:
+    with get_conn() as conn:
+        position = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM strategy_rules WHERE strategy_id = ?",
+            (strategy_id,),
+        ).fetchone()[0]
+        cur = conn.execute(
+            """INSERT INTO strategy_rules (strategy_id, group_id, text, position, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (strategy_id, group_id, text, position, datetime.now().isoformat(timespec="seconds")),
+        )
+        return get_rule(cur.lastrowid)
+
+
+def update_rule(rule_id: int, text: str | None = None, group_id: int | None = None,
+                 clear_group: bool = False, archived: bool | None = None) -> dict | None:
+    """Bearbeitet eine Regel an Ort und Stelle - fuer Tippfehler und Umgruppieren.
+    Eine INHALTLICHE Aenderung gehoert stattdessen ueber replace_rule(), sonst
+    behaupten die bisherigen Bewertungen rueckwirkend etwas Falsches.
+    clear_group=True setzt die Gruppe auf None (mit group_id=None allein liesse
+    sich "nicht aendern" nicht von "Gruppe entfernen" unterscheiden)."""
+    fields, params = [], []
+    if text is not None:
+        fields.append("text = ?"); params.append(text)
+    if clear_group:
+        fields.append("group_id = NULL")
+    elif group_id is not None:
+        fields.append("group_id = ?"); params.append(group_id)
+    if archived is not None:
+        fields.append("archived = ?"); params.append(1 if archived else 0)
+    with get_conn() as conn:
+        if fields:
+            conn.execute(f"UPDATE strategy_rules SET {', '.join(fields)} WHERE id = ?", params + [rule_id])
+        return get_rule(rule_id)
+
+
+def replace_rule(rule_id: int, text: str) -> dict | None:
+    """Inhaltlicher Ersatz: die alte Regel wird archiviert (ihre Bewertungen
+    bleiben gueltig und weiterhin auswertbar), eine neue Regel mit demselben
+    Platz und derselben Gruppe tritt an ihre Stelle."""
+    with get_conn() as conn:
+        old = conn.execute("SELECT * FROM strategy_rules WHERE id = ?", (rule_id,)).fetchone()
+        if not old:
+            return None
+        conn.execute("UPDATE strategy_rules SET archived = 1 WHERE id = ?", (rule_id,))
+        cur = conn.execute(
+            """INSERT INTO strategy_rules (strategy_id, group_id, text, position, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (old["strategy_id"], old["group_id"], text, old["position"],
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        return get_rule(cur.lastrowid)
+
+
+def delete_rule(rule_id: int) -> None:
+    """Endgueltig, samt aller Bewertungen. Der schonende Weg ist archived=1."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM trade_rule_status WHERE rule_id = ?", (rule_id,))
+        conn.execute("DELETE FROM strategy_rules WHERE id = ?", (rule_id,))
+
+
+def set_rule_order(strategy_id: int, order: list[int]) -> None:
+    with get_conn() as conn:
+        conn.executemany(
+            "UPDATE strategy_rules SET position = ? WHERE id = ? AND strategy_id = ?",
+            [(pos, rid, strategy_id) for pos, rid in enumerate(order)],
+        )
+
+
+def set_trade_strategy(trade_id: int, strategy_id: int | None) -> None:
+    """Ordnet einem Trade eine Strategie zu (None = keine). Wechselt die
+    Strategie, verlieren die bisherigen Regel-Bewertungen ihren Sinn - sie
+    gehoeren zu Regeln einer anderen Strategie. Sie werden deshalb entfernt,
+    statt als Karteileichen liegen zu bleiben und Quoten zu verfaelschen."""
+    with get_conn() as conn:
+        current = conn.execute("SELECT strategy_id FROM trades WHERE id = ?", (trade_id,)).fetchone()
+        if not current or current["strategy_id"] == strategy_id:
+            return
+        conn.execute(
+            """DELETE FROM trade_rule_status WHERE trade_id = ? AND rule_id IN (
+                   SELECT id FROM strategy_rules WHERE strategy_id IS NOT ?)""",
+            (trade_id, strategy_id),
+        )
+        conn.execute("UPDATE trades SET strategy_id = ? WHERE id = ?", (strategy_id, trade_id))
+
+
+def bulk_set_trade_strategy(trade_ids: list[int], strategy_id: int | None) -> int:
+    """Sammelzuweisung aus der Trades-Uebersicht - Gegenstueck zu
+    reassign_unassigned_trades() bei den Konten, aber fuer eine konkrete
+    Auswahl statt fuer alle nicht zugeordneten."""
+    if not trade_ids:
+        return 0
+    placeholders = ",".join("?" for _ in trade_ids)
+    with get_conn() as conn:
+        conn.execute(
+            f"""DELETE FROM trade_rule_status
+                WHERE trade_id IN ({placeholders}) AND rule_id IN (
+                    SELECT id FROM strategy_rules WHERE strategy_id IS NOT ?)""",
+            list(trade_ids) + [strategy_id],
+        )
+        cur = conn.execute(
+            f"UPDATE trades SET strategy_id = ? WHERE id IN ({placeholders})",
+            [strategy_id] + list(trade_ids),
+        )
+        return cur.rowcount
+
+
+def get_trade_rule_status(trade_id: int) -> dict[str, int]:
+    """rule_id (als String, damit es sauber durch JSON geht) -> 0/1.
+    Nicht enthaltene Regeln sind unbeantwortet."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT rule_id, followed FROM trade_rule_status WHERE trade_id = ?", (trade_id,)
+        ).fetchall()
+    return {str(r["rule_id"]): r["followed"] for r in rows}
+
+
+def set_trade_rule_status(trade_id: int, rule_id: int, followed: bool | None) -> None:
+    """followed None = Bewertung zuruecknehmen (Regel wieder unbeantwortet).
+    Genau dieser Zustand dient auch als "nicht anwendbar"."""
+    with get_conn() as conn:
+        if followed is None:
+            conn.execute(
+                "DELETE FROM trade_rule_status WHERE trade_id = ? AND rule_id = ?", (trade_id, rule_id)
+            )
+        else:
+            conn.execute(
+                """INSERT INTO trade_rule_status (trade_id, rule_id, followed) VALUES (?, ?, ?)
+                   ON CONFLICT(trade_id, rule_id) DO UPDATE SET followed = excluded.followed""",
+                (trade_id, rule_id, 1 if followed else 0),
+            )
+
+
+def bulk_set_trade_rule_status(trade_ids: list[int], rule_id: int, followed: bool | None) -> int:
+    """Setzt eine Regel fuer mehrere Trades auf einmal. Beruecksichtigt nur
+    Trades, die tatsaechlich zur Strategie dieser Regel gehoeren - sonst
+    entstuenden Bewertungen fuer Regeln, die der Trade gar nicht hat."""
+    if not trade_ids:
+        return 0
+    placeholders = ",".join("?" for _ in trade_ids)
+    with get_conn() as conn:
+        rule = conn.execute("SELECT strategy_id FROM strategy_rules WHERE id = ?", (rule_id,)).fetchone()
+        if not rule:
+            return 0
+        eligible = [r["id"] for r in conn.execute(
+            f"SELECT id FROM trades WHERE id IN ({placeholders}) AND strategy_id = ?",
+            list(trade_ids) + [rule["strategy_id"]],
+        ).fetchall()]
+        if not eligible:
+            return 0
+        if followed is None:
+            eligible_ph = ",".join("?" for _ in eligible)
+            conn.execute(
+                f"DELETE FROM trade_rule_status WHERE rule_id = ? AND trade_id IN ({eligible_ph})",
+                [rule_id] + eligible,
+            )
+        else:
+            conn.executemany(
+                """INSERT INTO trade_rule_status (trade_id, rule_id, followed) VALUES (?, ?, ?)
+                   ON CONFLICT(trade_id, rule_id) DO UPDATE SET followed = excluded.followed""",
+                [(tid, rule_id, 1 if followed else 0) for tid in eligible],
+            )
+        return len(eligible)
+
+
+def _quote(n: int | None, total: int | None) -> float | None:
+    """Prozentquote oder None, wenn es keine Grundgesamtheit gibt - None
+    bedeutet im Frontend "keine Aussage moeglich", 0.0 hiesse "0 %"."""
+    return round(100 * n / total, 1) if total else None
+
+
+def strategy_rule_stats(strategy_id: int, include_archived: bool = True) -> list[dict]:
+    """Je Regel: wie oft beantwortet, wie oft befolgt, und wie die befolgten
+    bzw. nicht befolgten Trades gelaufen sind - alles in einer Query statt
+    einer je Regel.
+
+    Unbeantwortete Regeln erzeugen keine Zeile in trade_rule_status und fallen
+    damit automatisch aus jeder Quote heraus, statt als "nicht befolgt" zu
+    zaehlen. Die Zahlen zur Gegengruppe (nicht befolgt) fallen hier ohnehin mit
+    ab; die Oberflaeche zeigt zunaechst die Einhaltungsquote, kann den
+    Vergleich "mit/ohne Regel" damit aber ohne Migration nachruesten."""
+    where_archived = "" if include_archived else "AND r.archived = 0"
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT r.id, r.text, r.group_id, r.archived, r.position,
+                       COUNT(s.trade_id) as answered,
+                       COALESCE(SUM(s.followed), 0) as followed,
+                       COALESCE(SUM(CASE WHEN s.followed = 1 AND trades.net_usd > 0 THEN 1 ELSE 0 END), 0) as wins_followed,
+                       COALESCE(SUM(CASE WHEN s.followed = 0 AND trades.net_usd > 0 THEN 1 ELSE 0 END), 0) as wins_broken,
+                       COALESCE(SUM(CASE WHEN s.followed = 1 THEN trades.net_usd ELSE 0 END), 0) as net_followed,
+                       COALESCE(SUM(CASE WHEN s.followed = 0 THEN trades.net_usd ELSE 0 END), 0) as net_broken
+                FROM strategy_rules r
+                LEFT JOIN trade_rule_status s ON s.rule_id = r.id
+                LEFT JOIN trades ON trades.id = s.trade_id
+                WHERE r.strategy_id = ? {where_archived}
+                GROUP BY r.id
+                ORDER BY r.position, r.id""",
+            (strategy_id,),
+        ).fetchall()
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        broken = d["answered"] - d["followed"]
+        result.append({
+            **d,
+            "broken": broken,
+            "compliance_pct": _quote(d["followed"], d["answered"]),
+            "winrate_followed": _quote(d["wins_followed"], d["followed"]),
+            "winrate_broken": _quote(d["wins_broken"], broken),
+            "net_followed": round(d["net_followed"], 2),
+            "net_broken": round(d["net_broken"], 2),
+        })
+    return result
+
+
+def strategy_summary(strategy_id: int) -> dict:
+    """Kopfzahlen einer Strategie: Trades, Trefferquote, Netto und wie viele
+    ihrer Trades ueberhaupt schon Regel-Bewertungen tragen (macht sichtbar,
+    wenn eine Quote auf duenner Datenbasis steht)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) as trade_count,
+                      COALESCE(SUM(CASE WHEN net_usd > 0 THEN 1 ELSE 0 END), 0) as wins,
+                      ROUND(COALESCE(SUM(net_usd), 0), 2) as net_usd
+               FROM trades WHERE strategy_id = ?""",
+            (strategy_id,),
+        ).fetchone()
+        rated = conn.execute(
+            """SELECT COUNT(DISTINCT s.trade_id) as n
+               FROM trade_rule_status s JOIN trades t ON t.id = s.trade_id
+               WHERE t.strategy_id = ?""",
+            (strategy_id,),
+        ).fetchone()["n"]
+    return {
+        "trade_count": row["trade_count"],
+        "wins": row["wins"],
+        "winrate": _quote(row["wins"], row["trade_count"]),
+        "net_usd": row["net_usd"],
+        "rated_trade_count": rated,
+    }
