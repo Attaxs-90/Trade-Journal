@@ -84,6 +84,51 @@ Trades tragen beides: `source` (Herkunft der Daten) und `account_id`
 Auswertungs-Endpoints — Konto-IDs plus den Magic String **`"csv"` für
 `account_id IS NULL`** (nicht zugeordnet).
 
+## Strategien und Regeln
+
+Eine Strategie bündelt Regeln (optional in Gruppen); ein Trade hat **höchstens
+eine** Strategie. Was ein Trade von ihren Regeln befolgt hat, steht in
+`trade_rule_status`.
+
+- **Keine Zeile = unbeantwortet**, und unbeantwortet fällt aus *jeder* Quote
+  heraus, statt als „nicht befolgt" zu zählen. Das ist zugleich der Weg für
+  „Regel hier nicht anwendbar". Deshalb ist `0 %` (fünfmal beantwortet, nie
+  befolgt) etwas völlig anderes als „noch nicht bewertet" — beides muss in der
+  Oberfläche unterscheidbar bleiben.
+- **Regel ändern gibt es zweimal:** `update_rule()` für Tippfehler und
+  Umgruppieren, `replace_rule()` für inhaltlichen Ersatz. Letzteres archiviert
+  die alte Regel, damit ihre bisherigen Bewertungen nicht rückwirkend etwas
+  Falsches behaupten. Diese Trennung nicht „vereinfachen".
+- **Löschen ist zweigleisig:** `archived = 1` ist der Normalfall (Trades und
+  Auswertung bleiben), `DELETE` entkoppelt die Trades wie `delete_account()`.
+  Eine Gruppe zu löschen löst sie nur auf — ihre Regeln samt Bewertungen
+  bleiben und rutschen auf „ohne Gruppe".
+- **„Plan befolgt" wird am Trade abgeleitet**, nicht eingegeben: Ja, wenn jede
+  beantwortete Regel auf Ja steht; `None` bei fehlender Strategie oder wenn
+  noch nichts beantwortet ist. „Keine Aussage" ist nicht „Plan gebrochen". Im
+  **Tages**-Journal bleibt das Feld eine normale Eingabe.
+- **`is_default` ordnet nichts automatisch zu.** Es ist nur eine Vorauswahl im
+  Auswahlfeld; Import und Sync setzen niemals eine Strategie, sonst bekämen
+  Bestandstrades still eine falsche.
+- **`idx_trades_strategy` steht nur in den Migrationen, nicht im `SCHEMA`.**
+  `SCHEMA` läuft vor den Migrationen, und bei einer bestehenden Datenbank gibt
+  es `trades.strategy_id` dort noch nicht — der Index brach den Start ab. Für
+  Indizes auf Spalten, die eine Migration erst anlegt, gilt das allgemein.
+
+## Globale Filter
+
+Konto, Tag und Strategie laufen als ein Satz durch die Anwendung:
+
+- Backend: `db._trade_filters()` kombiniert alle drei. Ein vierter Filter
+  gehört genau dort hinein — nicht in die sechs aufrufenden Funktionen.
+- Frontend: `withFilter()` in `core.js` ist die **einzige** Stelle, die den
+  Querystring baut. `withAnalyticsFilter()` baut darauf auf und hängt nur den
+  Zeitraum an. Vorher wiederholte es die Liste und übersah dadurch den neu
+  hinzugekommenen Strategie-Filter — die Auswertungsseite zeigte als einzige
+  weiterhin alles.
+- Magic Keys für „nicht zugeordnet": `"csv"` beim Konto, `"none"` bei der
+  Strategie.
+
 ## Bewusste Design-Entscheidungen
 
 Nicht „aufräumen“, ohne den Grund zu kennen — alle vier sind Ergebnis eines

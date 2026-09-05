@@ -3,7 +3,7 @@
 import { attachChartTooltip, lineChartSvg } from './chart.js';
 import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, makeSortable, readStoredArray, state, tile, withFilter, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
-import { getAccountOptions, renderAccountChipRow, renderTagFilter } from './filters.js';
+import { getAccountOptions, renderAccountChipRow, renderStrategyChipRow, renderTagFilter } from './filters.js';
 import { clearActiveJournal, flushJournal } from './journal.js';
 import { clearActiveNotebookNote, flushNotebookNote } from './notebooks.js';
 import { openShareModal } from './share.js';
@@ -172,6 +172,7 @@ export async function openOverview() {
 
   const content = await mountView("tpl-overview");
   await renderAccountChipRow("ov-account-chip-row");
+  await renderStrategyChipRow("ov-strategy-chip-row");
 
   const data = await api(withFilter("/api/overview"));
   renderOverviewStats(data);

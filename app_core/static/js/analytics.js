@@ -3,7 +3,7 @@
 import { getPlatforms, renderImportAccountSelect } from './accounts.js';
 import { closeModal } from './calendar.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, showAppError, state, tagsQS, tile } from './core.js';
+import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, showAppError, state, tagsQS, tile, withFilter } from './core.js';
 import { deleteAccountFlow } from './dialogs.js';
 import { refreshCurrentView, renderAccountFilter, renderTagFilter } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
@@ -76,13 +76,19 @@ function analyticsRangeQS() {
   if (end) parts.push(`end=${encodeURIComponent(end)}`);
   return parts.join("&");
 }
-/* Wie withFilter(), zusaetzlich mit dem Zeitraum der Auswertungsseite -
-   eigene Funktion statt withFilter() selbst zu erweitern, weil der Zeitraum
-   nur hier existiert (Uebersicht/Trades/Journal kennen keinen Datumsfilter). */
+/* Wie withFilter(), zusaetzlich mit dem Zeitraum der Auswertungsseite - der
+   existiert nur hier (Uebersicht/Trades/Journal kennen keinen Datumsfilter).
+
+   Baut bewusst AUF withFilter() auf, statt dessen Querystrings nachzubauen:
+   die frueher hier wiederholte Liste [accountsQS(), tagsQS()] hatte den neu
+   hinzugekommenen Strategie-Filter nicht mitbekommen, die Auswertungsseite
+   zeigte deshalb als einzige weiterhin alle Trades. Ein kuenftiger vierter
+   Filter greift jetzt automatisch auch hier. */
 function withAnalyticsFilter(url) {
-  const parts = [accountsQS(), tagsQS(), analyticsRangeQS()].filter(Boolean);
-  if (!parts.length) return url;
-  return url + (url.includes("?") ? "&" : "?") + parts.join("&");
+  const withGlobal = withFilter(url);
+  const range = analyticsRangeQS();
+  if (!range) return withGlobal;
+  return withGlobal + (withGlobal.includes("?") ? "&" : "?") + range;
 }
 
 let cachedAnalyticsDimensions = null;
