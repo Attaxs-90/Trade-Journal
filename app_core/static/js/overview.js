@@ -1,13 +1,13 @@
 /* Uebersichtsseite mit Kennzahlen-Kacheln und Equity-Kurve, plus mountView(). */
 
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, makeSortable, readStoredArray, state, tile, withFilter, writeStored } from './core.js';
+import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_IMAGE, ICON_JOURNAL, ICON_NOTE, ICON_SHARE, makeSortable, readStoredArray, state, strategiesQS, tile, withFilter, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { getAccountOptions, renderAccountChipRow, renderStrategyChipRow, renderTagFilter } from './filters.js';
 import { clearActiveJournal, flushJournal } from './journal.js';
 import { clearActiveNotebookNote, flushNotebookNote } from './notebooks.js';
 import { openShareModal } from './share.js';
-import { bulkAssignStrategy, bulkRateRule } from './strategies.js';
+import { bulkAssignStrategy } from './strategies.js';
 import { renderTradeTagCell } from './tags.js';
 import { openTrade } from './trades.js';
 
@@ -174,7 +174,13 @@ export async function openOverview() {
   await renderAccountChipRow("ov-account-chip-row");
   await renderStrategyChipRow("ov-strategy-chip-row");
 
-  const data = await api(withFilter("/api/overview"));
+  // Strategie-Filter bewusst nicht in withFilter() (siehe core.js) - er soll
+  // nur die Uebersicht selbst filtern, deshalb hier separat angehaengt statt
+  // ueber den globalen Filter-Querystring, der auch von Trades/Journal/
+  // Auswertungen genutzt wird.
+  const overviewUrl = withFilter("/api/overview");
+  const sq = strategiesQS();
+  const data = await api(sq ? overviewUrl + (overviewUrl.includes("?") ? "&" : "?") + sq : overviewUrl);
   renderOverviewStats(data);
 
   const toggle = document.getElementById("ov-stats-toggle");
@@ -197,7 +203,24 @@ export async function openOverview() {
 
 }
 
-const TRADES_PAGE_SIZE = 50;
+const TRADES_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const TRADES_PAGE_SIZE_DEFAULT = 50;
+
+function loadTradesPageSize() {
+  const saved = Number(localStorage.getItem("tradesPageSize"));
+  return TRADES_PAGE_SIZE_OPTIONS.includes(saved) ? saved : TRADES_PAGE_SIZE_DEFAULT;
+}
+function saveTradesPageSize(size) {
+  writeStored("tradesPageSize", size);
+}
+
+const ICON_SORT = `<svg class="sort-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>`;
+
+/* Nur Spalten, deren Schluessel exakt einer sortierbaren DB-Spalte entsprechen
+   (siehe TRADE_SORT_COLUMNS in db.py) - Konto/Strategie muessten fuer eine
+   sinnvolle Sortierung erst den Namen nachladen (Join), Tags sind kein
+   skalarer Wert. */
+const SORTABLE_TRADE_KEYS = new Set(["day", "entry_time", "direction", "volume", "entry_price", "exit_price", "points", "net_usd"]);
 
 /* Spalten der Trades-Tabelle - "render" liefert den Zellinhalt fuer alle
    Spalten ausser "tags" (das braucht echtes DOM fuer den Tag-Zuweisen-Button
@@ -215,6 +238,7 @@ const TRADE_CARD_FIELDS = [
   { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
   { key: "points", label: "Punkte", render: (t) => `<span class="${cls(t.points)}">${fmtSigned(t.points, 2)}</span>` },
   { key: "net_usd", label: "Netto $", render: (t) => `<span class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>` },
+  { key: "strategy", label: "Strategie", render: (t, ctx) => t.strategy_id ? escapeHtml(ctx.strategyNames.get(String(t.strategy_id)) || "?") : "–" },
   { key: "tags", label: "Tags", render: null },
 ];
 const TRADE_CARD_FIELD_KEYS = TRADE_CARD_FIELDS.map(f => f.key);
@@ -281,7 +305,7 @@ function renderTradeFieldOrderPanel() {
   });
 }
 
-let tradesTableData = { trades: [], accountNames: new Map() };
+let tradesTableData = { trades: [], accountNames: new Map(), strategyNames: new Map() };
 
 /* Auswahl fuer die Sammel-Aktion (Journal-Eintraege mehrerer Trades auf
    einmal loeschen) - bewusst nicht in state, sondern modulweit wie
@@ -289,55 +313,95 @@ let tradesTableData = { trades: [], accountNames: new Map() };
    jedem openTrades()-Aufruf (Seiten-/Filterwechsel) zurueckgesetzt. */
 let tradesSelectedIds = new Set();
 
+/* Bar bleibt immer sichtbar (auch bei 0 markierten Trades) statt ein- und
+   auszublenden - so springt das Layout beim ersten Markieren/Entmarkieren
+   nicht, und "0 Trades ausgewählt" macht die Auswahlfunktion ueberhaupt erst
+   sichtbar. Die Aktions-Buttons ergeben ohne Auswahl keinen Sinn und werden
+   stattdessen deaktiviert. */
 function updateTradesBulkBar() {
   const bar = document.getElementById("trades-bulk-bar");
   if (!bar) return;
   const n = tradesSelectedIds.size;
-  bar.hidden = n === 0;
   const countEl = document.getElementById("trades-bulk-count");
   if (countEl) countEl.textContent = n === 1 ? "1 Trade ausgewählt" : `${n} Trades ausgewählt`;
+  ["trades-bulk-clear", "trades-bulk-strategy-btn", "trades-bulk-delete-journal"]
+    .forEach(id => { const btn = document.getElementById(id); if (btn) btn.disabled = n === 0; });
 }
 
 function renderTradesTable() {
   const theadRow = document.getElementById("trades-thead-row");
   const tbody = document.getElementById("trades-tbody");
-  const { trades, accountNames } = tradesTableData;
+  const { trades, accountNames, strategyNames } = tradesTableData;
   const hidden = loadTradeFieldHidden();
   const order = loadTradeFieldOrder().filter(key => !hidden.has(key));
 
-  // Badges-Spalte ist fix (nicht Teil der einstellbaren Reihenfolge) - sie
-  // markiert nur, ob Notiz/Bild/Journal-Eintrag vorhanden sind, ist also kein
-  // eigenstaendiger Datenwert wie die uebrigen Spalten.
+  // Badges- und Oeffnen-Spalte sind fix (nicht Teil der einstellbaren
+  // Reihenfolge) - die Badges markieren nur, ob Notiz/Bild/Journal-Eintrag
+  // vorhanden sind, sind also kein eigenstaendiger Datenwert wie die uebrigen
+  // Spalten, und "Oeffnen" ist eine Aktion, keine Spalte mit Wert.
+  const sort = state.tradesSort || { key: "day", dir: "desc" };
   const selectAllCb = document.createElement("input");
   selectAllCb.type = "checkbox";
-  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges"></th><th class="col-share"></th>` + order.map(key => {
+  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges">Status</th><th class="col-share">Teilen</th><th class="col-open">Öffnen</th>` + order.map(key => {
     const field = TRADE_CARD_FIELDS.find(f => f.key === key);
-    return `<th>${escapeHtml(field.label)}</th>`;
+    if (!SORTABLE_TRADE_KEYS.has(key)) return `<th>${escapeHtml(field.label)}</th>`;
+    const active = sort.key === key;
+    return `<th class="sortable-th${active ? " active" : ""}" data-sort-key="${key}">`
+      + `${escapeHtml(field.label)}${active ? ICON_SORT.replace('class="sort-arrow"', `class="sort-arrow${sort.dir === "asc" ? " asc" : ""}"`) : ""}</th>`;
   }).join("");
   theadRow.querySelector(".col-check").appendChild(selectAllCb);
+  theadRow.querySelectorAll(".sortable-th").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sortKey;
+      const current = state.tradesSort || { key: "day", dir: "desc" };
+      // Erneuter Klick auf die aktive Spalte kehrt die Richtung um, eine neue
+      // Spalte startet absteigend (bei Datum/Betraegen meist die interessantere
+      // Richtung: neuestes/groesstes zuerst).
+      state.tradesSort = { key, dir: current.key === key && current.dir === "desc" ? "asc" : "desc" };
+      openTrades(1);
+    });
+  });
 
   tbody.innerHTML = "";
   if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="${order.length + 3}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${order.length + 4}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
     selectAllCb.disabled = true;
     updateTradesBulkBar();
     return;
   }
+  // Zeile antippen markiert/entmarkiert nur den Trade (Mehrfachauswahl fuer
+  // Sammelaktionen) - ein Trade oeffnen geht ausschliesslich ueber den
+  // expliziten Oeffnen-Button. Vorher oeffnete ein Klick irgendwo auf der
+  // Zeile den Trade, was beim Markieren mehrerer Trades staendig aus
+  // Versehen dazwischenfunkte (siehe Nutzer-Feedback) - jetzt umgekehrt.
   for (const t of trades) {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
-    const badges = (t.notes && t.notes.trim() ? `<span class="trade-card-badge" title="Notiz vorhanden">📝</span>` : "")
-      + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">📷</span>` : "")
-      + (t.has_journal ? `<span class="trade-card-badge" title="Journal-Eintrag (Bewertung/Review) vorhanden">🗒️</span>` : "");
+    const badges = (t.notes && t.notes.trim() ? `<span class="trade-card-badge" title="Notiz vorhanden">${ICON_NOTE}</span>` : "")
+      + (t.has_image ? `<span class="trade-card-badge" title="Bild vorhanden">${ICON_IMAGE}</span>` : "")
+      + (t.has_journal ? `<span class="trade-card-badge" title="Journal-Eintrag (Bewertung/Review) vorhanden">${ICON_JOURNAL}</span>` : "");
     tr.innerHTML = `<td class="col-check"><input type="checkbox" class="trades-row-select" data-id="${t.id}"${tradesSelectedIds.has(t.id) ? " checked" : ""}></td>`
       + `<td class="col-badges">${badges}</td>`
-      + `<td class="col-share"><button type="button" class="trade-share-row-btn" title="Als Bild teilen" aria-label="Als Bild teilen">📤</button></td>`
+      + `<td class="col-share"><button type="button" class="trade-share-row-btn" title="Als Bild teilen" aria-label="Als Bild teilen">${ICON_SHARE}</button></td>`
+      + `<td class="col-open"><button type="button" class="trade-open-row-btn" title="Trade öffnen" aria-label="Trade öffnen">Öffnen</button></td>`
       + order.map(key => {
       if (key === "tags") return `<td class="tag-cell"></td>`;
       const field = TRADE_CARD_FIELDS.find(f => f.key === key);
-      return `<td>${field.render(t, { accountNames })}</td>`;
+      return `<td>${field.render(t, { accountNames, strategyNames })}</td>`;
     }).join("");
-    tr.addEventListener("click", () => openTrade(t.id));
+    const rowCb = tr.querySelector(".trades-row-select");
+    function setRowSelected(checked) {
+      rowCb.checked = checked;
+      if (checked) tradesSelectedIds.add(t.id);
+      else tradesSelectedIds.delete(t.id);
+      tr.classList.toggle("selected", checked);
+      selectAllCb.checked = trades.every(tr => tradesSelectedIds.has(tr.id));
+      updateTradesBulkBar();
+    }
+    tr.classList.toggle("selected", rowCb.checked);
+    tr.addEventListener("click", () => setRowSelected(!rowCb.checked));
+    const openBtn = tr.querySelector(".trade-open-row-btn");
+    openBtn.addEventListener("click", (e) => { e.stopPropagation(); openTrade(t.id); });
     const shareBtn = tr.querySelector(".trade-share-row-btn");
     shareBtn.addEventListener("click", (e) => { e.stopPropagation(); openShareModal(t); });
     const tagCell = tr.querySelector(".tag-cell");
@@ -345,14 +409,11 @@ function renderTradesTable() {
       tagCell.addEventListener("click", (e) => e.stopPropagation());
       renderTradeTagCell(tagCell, t);
     }
-    const rowCb = tr.querySelector(".trades-row-select");
+    // Checkbox hat ihr eigenes natives Toggle - stopPropagation verhindert,
+    // dass der Zeilen-Click-Handler denselben Klick zusaetzlich verarbeitet
+    // und die Auswahl wieder umkehrt; "change" uebernimmt den neuen Zustand.
     rowCb.addEventListener("click", (e) => e.stopPropagation());
-    rowCb.addEventListener("change", () => {
-      if (rowCb.checked) tradesSelectedIds.add(t.id);
-      else tradesSelectedIds.delete(t.id);
-      selectAllCb.checked = trades.every(tr => tradesSelectedIds.has(tr.id));
-      updateTradesBulkBar();
-    });
+    rowCb.addEventListener("change", () => setRowSelected(rowCb.checked));
     tbody.appendChild(tr);
   }
 
@@ -363,7 +424,10 @@ function renderTradesTable() {
       if (selectAllCb.checked) tradesSelectedIds.add(t.id);
       else tradesSelectedIds.delete(t.id);
     }
-    tbody.querySelectorAll(".trades-row-select").forEach(cb => { cb.checked = selectAllCb.checked; });
+    tbody.querySelectorAll(".trades-row-select").forEach(cb => {
+      cb.checked = selectAllCb.checked;
+      cb.closest("tr").classList.toggle("selected", selectAllCb.checked);
+    });
     updateTradesBulkBar();
   });
   updateTradesBulkBar();
@@ -393,15 +457,37 @@ export async function openTrades(page = 1) {
 
   await renderTagFilter();
 
-  const [result, accountOptions] = await Promise.all([
-    api(withFilter(`/api/trades?page=${page}&page_size=${TRADES_PAGE_SIZE}`)),
+  const pageSize = loadTradesPageSize();
+  const sort = state.tradesSort || { key: "day", dir: "desc" };
+  const [result, accountOptions, strategiesRes] = await Promise.all([
+    api(withFilter(`/api/trades?page=${page}&page_size=${pageSize}&sort=${sort.key}&dir=${sort.dir}`)),
     getAccountOptions(),
+    // include_archived: ein archiviert markierter, aber noch zugewiesener Trade
+    // soll seinen Strategienamen behalten statt "?" anzuzeigen.
+    api("/api/strategies?include_archived=true"),
   ]);
   tradesTableData = {
     trades: result.trades,
     accountNames: new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name])),
+    strategyNames: new Map(strategiesRes.strategies.map(s => [String(s.id), s.name])),
   };
   renderTradesTable();
+
+  const pageSizeRow = document.getElementById("trades-page-size-row");
+  pageSizeRow.innerHTML = `
+    <label class="trades-page-size-label">Trades pro Seite
+      <select class="trades-page-size-select">
+        ${TRADES_PAGE_SIZE_OPTIONS.map(n => `<option value="${n}"${n === pageSize ? " selected" : ""}>${n}</option>`).join("")}
+      </select>
+    </label>
+  `;
+  pageSizeRow.querySelector(".trades-page-size-select").addEventListener("change", (e) => {
+    saveTradesPageSize(Number(e.target.value));
+    // Zurueck auf Seite 1 - die aktuelle Seitenzahl haette bei einer groesseren
+    // Seitengroesse eine andere Bedeutung und koennte ausserhalb des gueltigen
+    // Bereichs liegen.
+    openTrades(1);
+  });
 
   const toggle = document.getElementById("trades-field-order-toggle");
   const panel = document.getElementById("trades-field-order-panel");
@@ -420,10 +506,8 @@ export async function openTrades(page = 1) {
   // Journal-/Bild-Markierungen stehen in den Trade-Zeilen.
   document.getElementById("trades-bulk-strategy-btn").onclick = () =>
     bulkAssignStrategy([...tradesSelectedIds], () => openTrades(state.tradesPage || 1));
-  document.getElementById("trades-bulk-rule-btn").onclick = () =>
-    bulkRateRule([...tradesSelectedIds], () => openTrades(state.tradesPage || 1));
 
-  const totalPages = Math.max(1, Math.ceil(result.total / TRADES_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(result.total / pageSize));
   const pagination = document.getElementById("trades-pagination");
   pagination.innerHTML = `
     <button type="button" class="btn btn-secondary trades-page-prev" ${page <= 1 ? "disabled" : ""}>← Zurück</button>

@@ -246,12 +246,6 @@ class BulkStrategyAssign(BaseModel):
     strategy_id: int | None = None
 
 
-class BulkRuleStatus(BaseModel):
-    trade_ids: list[int]
-    rule_id: int
-    followed: bool | None = None
-
-
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
@@ -1098,13 +1092,6 @@ def api_bulk_set_trade_strategy(payload: BulkStrategyAssign):
     if payload.strategy_id is not None:
         _require_strategy(payload.strategy_id)
     return {"updated": db.bulk_set_trade_strategy(payload.trade_ids, payload.strategy_id)}
-
-
-@app.post("/api/trades/bulk-rule-status")
-def api_bulk_set_trade_rule_status(payload: BulkRuleStatus):
-    if not db.get_rule(payload.rule_id):
-        raise HTTPException(404, "Regel nicht gefunden.")
-    return {"updated": db.bulk_set_trade_rule_status(payload.trade_ids, payload.rule_id, payload.followed)}
 
 
 @app.get("/api/news/calendar")

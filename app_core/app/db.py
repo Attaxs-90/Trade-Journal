@@ -850,7 +850,10 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
         return result
 
 
-TRADE_SORT_COLUMNS = {"day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd"}
+TRADE_SORT_COLUMNS = {
+    "day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd",
+    "direction": "direction", "volume": "volume", "entry_price": "entry_price", "exit_price": "exit_price",
+}
 
 
 def _attach_image_flags(trades: list[dict]) -> list[dict]:
@@ -1892,38 +1895,6 @@ def set_trade_rule_status(trade_id: int, rule_id: int, followed: bool | None) ->
                    ON CONFLICT(trade_id, rule_id) DO UPDATE SET followed = excluded.followed""",
                 (trade_id, rule_id, 1 if followed else 0),
             )
-
-
-def bulk_set_trade_rule_status(trade_ids: list[int], rule_id: int, followed: bool | None) -> int:
-    """Setzt eine Regel fuer mehrere Trades auf einmal. Beruecksichtigt nur
-    Trades, die tatsaechlich zur Strategie dieser Regel gehoeren - sonst
-    entstuenden Bewertungen fuer Regeln, die der Trade gar nicht hat."""
-    if not trade_ids:
-        return 0
-    placeholders = ",".join("?" for _ in trade_ids)
-    with get_conn() as conn:
-        rule = conn.execute("SELECT strategy_id FROM strategy_rules WHERE id = ?", (rule_id,)).fetchone()
-        if not rule:
-            return 0
-        eligible = [r["id"] for r in conn.execute(
-            f"SELECT id FROM trades WHERE id IN ({placeholders}) AND strategy_id = ?",
-            list(trade_ids) + [rule["strategy_id"]],
-        ).fetchall()]
-        if not eligible:
-            return 0
-        if followed is None:
-            eligible_ph = ",".join("?" for _ in eligible)
-            conn.execute(
-                f"DELETE FROM trade_rule_status WHERE rule_id = ? AND trade_id IN ({eligible_ph})",
-                [rule_id] + eligible,
-            )
-        else:
-            conn.executemany(
-                """INSERT INTO trade_rule_status (trade_id, rule_id, followed) VALUES (?, ?, ?)
-                   ON CONFLICT(trade_id, rule_id) DO UPDATE SET followed = excluded.followed""",
-                [(tid, rule_id, 1 if followed else 0) for tid in eligible],
-            )
-        return len(eligible)
 
 
 def _quote(n: int | None, total: int | None) -> float | None:

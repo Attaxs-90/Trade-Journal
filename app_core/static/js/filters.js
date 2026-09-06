@@ -56,7 +56,6 @@ function saveStrategyFilterState() {
   localStorage.setItem("strategyFilter", JSON.stringify({
     mode: state.strategyFilterMode, keys: state.strategyFilterKeys,
   }));
-  renderSidebarAccountStatus();
 }
 
 export async function getAccountOptions() {
@@ -227,6 +226,9 @@ export async function renderStrategyChipRow(containerId) {
 /* Globaler Konten-Filter-Status in der Sidebar - auf jeder Seite sichtbar
    (die Sidebar bleibt beim View-Wechsel bestehen), damit ein aktiver Filter
    nicht "unsichtbar" auf einer anderen Seite als der Uebersicht weiterwirkt.
+   Zeigt bewusst NUR den Konto-Filter, nicht den Strategie-Filter der
+   Uebersicht - der wirkt (siehe strategiesQS() in core.js) nur dort, waere
+   hier also eine Anzeige mit falschem Anspruch auf globale Wirkung.
    Wird bei jeder Filteraenderung ueber saveFilterState() sowie einmal beim
    Start aufgerufen. */
 export async function renderSidebarAccountStatus() {
@@ -235,28 +237,14 @@ export async function renderSidebarAccountStatus() {
   chipsWrap.innerHTML = "";
 
   const accountActive = state.filterMode === "selected" && state.filterKeys.length;
-  const strategyActive = state.strategyFilterMode === "selected" && state.strategyFilterKeys.length;
-
-  if (!accountActive && !strategyActive) {
+  if (!accountActive) {
     chipsWrap.innerHTML = `<span class="sidebar-account-status-chip muted">Alle Konten</span>`;
     return;
   }
 
-  const names = [];
-  if (accountActive) {
-    const options = await getAccountOptions();
-    const nameByKey = new Map(options.map(o => [o.key, o.name]));
-    names.push(...state.filterKeys.map(k => nameByKey.get(k) || (k === "csv" ? "Nicht zugeordnet" : `Konto ${k}`)));
-  }
-  // Der Strategie-Filter gehoert hier genauso hin wie der Konto-Filter: er
-  // wirkt auf allen Auswertungsseiten weiter, auch auf denen ohne eigene
-  // Chip-Reihe - unsichtbar waere er eine Falle.
-  if (strategyActive) {
-    const { strategies } = await api("/api/strategies?include_archived=true");
-    const nameById = new Map(strategies.map(x => [String(x.id), x.name]));
-    names.push(...state.strategyFilterKeys.map(
-      k => k === "none" ? "Ohne Strategie" : (nameById.get(k) || `Strategie ${k}`)));
-  }
+  const options = await getAccountOptions();
+  const nameByKey = new Map(options.map(o => [o.key, o.name]));
+  const names = state.filterKeys.map(k => nameByKey.get(k) || (k === "csv" ? "Nicht zugeordnet" : `Konto ${k}`));
 
   const MAX_SHOWN = 3;
   for (const name of names.slice(0, MAX_SHOWN)) {

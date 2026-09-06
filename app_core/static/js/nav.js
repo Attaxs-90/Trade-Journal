@@ -3,7 +3,8 @@
 import { openStrategy } from './strategies.js';
 import { openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
-import { makeSortable, readStoredArray, state, writeStored } from './core.js';
+import { makeSortable, readStoredArray, writeStored } from './core.js';
+import { renderAccountFilter } from './filters.js';
 import { flushJournal, openJournal } from './journal.js';
 import { openOverview, openTrades } from './overview.js';
 import { openSettings } from './settings.js';
@@ -63,12 +64,29 @@ document.querySelectorAll(".nav-item").forEach(el => {
 
 makeSortable(document.querySelector(".nav"), ".nav-item", saveNavOrder, { keyAttr: "view" });
 
-/* Globaler Konten-Status-Klick fuehrt zur Uebersicht, wo der Filter sitzt -
-   Tastatur-Aktivierung analog zu .nav-item (ebenfalls ein div[role=button]). */
-const sidebarAccountStatusEl = document.getElementById("sidebar-account-status");
-sidebarAccountStatusEl.addEventListener("click", () => { if (state.view !== "overview") openOverview(); });
-sidebarAccountStatusEl.addEventListener("keydown", (e) => {
-  if (e.key !== "Enter" && e.key !== " ") return;
-  e.preventDefault();
-  sidebarAccountStatusEl.click();
+/* Globaler Konten-Filter-Status unten in der Sidebar: Klick oeffnet die
+   Konten-Auswahl direkt an Ort und Stelle (dasselbe Panel wie ueberall sonst,
+   siehe renderAccountFilter() in filters.js) - so laesst sich das Konto von
+   jeder Seite aus wechseln, ohne erst zur Uebersicht zu wechseln (frueher
+   fuehrte ein Klick nur dorthin). <button> statt <div role="button"> gibt
+   Tastatur-Aktivierung kostenlos mit. */
+const sidebarAccountStatusToggle = document.getElementById("sidebar-account-status-toggle");
+const sidebarAccountStatusPanel = document.getElementById("sidebar-account-status-panel");
+sidebarAccountStatusToggle.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  const wasHidden = sidebarAccountStatusPanel.hidden;
+  sidebarAccountStatusPanel.hidden = !wasHidden;
+  if (wasHidden) await renderAccountFilter("sidebar-account-status-panel");
 });
+// Schliesst das Panel bei jedem Klick ausserhalb - auch bei einem Klick auf
+// einen Nav-Punkt (die Sidebar bleibt beim View-Wechsel bestehen, das Panel
+// wuerde sonst ueber der neuen Seite haengen bleiben). Capture-Phase (dritter
+// Parameter true), weil zahlreiche Elemente in den Ansichten (Tabellenzeilen,
+// Checkboxen, Tag-Zellen) auf ihren eigenen Klick-Handlern stopPropagation()
+// aufrufen - das wuerde einen Bubble-Listener auf document nie erreichen,
+// die Capture-Phase laeuft aber vorher und ist davon nicht betroffen.
+document.addEventListener("click", (e) => {
+  if (!sidebarAccountStatusPanel.hidden && !e.target.closest("#sidebar-account-status")) {
+    sidebarAccountStatusPanel.hidden = true;
+  }
+}, true);

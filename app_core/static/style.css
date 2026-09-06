@@ -219,9 +219,13 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
 /* Globaler Konten-Filter-Status, unten in der Sidebar (margin-top:auto
    schiebt ihn ans Ende des Flex-Containers) - auf jeder Seite sichtbar, weil
    die Sidebar bei jedem View-Wechsel bestehen bleibt (nur #content wird
-   ersetzt). Klick fuehrt zur Uebersicht, wo der Filter geaendert werden kann. */
-.sidebar-account-status {
-  margin-top: auto;
+   ersetzt). Klick oeffnet direkt die Konten-Auswahl (.inline-filter-panel,
+   siehe dort), ohne die Seite zu wechseln. */
+.sidebar-account-status { margin-top: auto; position: relative; }
+.sidebar-account-status-toggle {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -231,7 +235,18 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-.sidebar-account-status:hover { background: var(--bg-hover); border-color: var(--text-faint); }
+.sidebar-account-status-toggle:hover { background: var(--bg-hover); border-color: var(--text-faint); }
+/* Oeffnet nach oben statt nach unten wie .inline-filter-panel im Standard -
+   das Widget sitzt ganz unten in der Sidebar, nach unten waere kein Platz.
+   Doppelte Klasse fuer hoehere Spezifitaet, unabhaengig von der Reihenfolge
+   im Stylesheet gegenueber der Basis-Regel. */
+.inline-filter-panel.sidebar-account-status-panel {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  width: auto;
+}
 .sidebar-account-status-label {
   font-size: 10px;
   text-transform: uppercase;
@@ -420,8 +435,13 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   font-size: 19px;
   font-weight: 600;
 }
-.value.pos { color: var(--green); }
-.value.neg { color: var(--red); }
+/* Basis-Regel fuer cls() (core.js) - liefert nur "pos"/"neg", ohne
+   umschliessende Elternklasse. Die Trades-Uebersicht und die Tageskarte
+   setzen diese Klassen direkt auf <span>s in Tabellenzellen (z.B. Netto $,
+   Punkte) ohne einen der spezifischeren Wrapper unten - ohne diese Basis-
+   Regel blieb die Zahl dort ungefaerbt (siehe Nutzer-Feedback). */
+.pos { color: var(--green); }
+.neg { color: var(--red); }
 
 /* Uebersicht: groessere, zentrierte Kacheln mit Gauge-/Ratio-Grafik fuer
    Prozent- bzw. Verhaeltnis-Kennzahlen (Trefferquote, Handelstage % Gewinn,
@@ -584,10 +604,18 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .btn-secondary:hover { background: #21262d; }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { filter: brightness(1.1); }
-.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.trade-share-btn { display: inline-flex; align-items: center; gap: 6px; }
 
-/* Zweistufiger Loesch-Dialog */
-.confirm-card {
+/* Zweistufiger Loesch-Dialog, sowie confirmContinue/promptDialog/chooseDialog
+   (alle teilen sich .modal-card.confirm-card) - schmaler als der generische
+   900px-Modal-Rahmen, da hier nur Text/ein Feld + zwei Buttons stehen.
+   Doppelte Klasse (.modal-card.confirm-card statt nur .confirm-card) noetig,
+   damit das max-width unabhaengig von der Regel-Reihenfolge im Stylesheet
+   die 900px-Basisregel von .modal-card schlaegt - vorher stand die
+   spezifischere Absicht faelschlich hinter der allgemeinen Regel zurueck und
+   die Dialoge liefen bis 900px breit (siehe Nutzer-Feedback). */
+.modal-card.confirm-card {
   max-width: 420px;
 }
 .confirm-card .confirm-message { font-size: 13.5px; line-height: 1.5; margin-bottom: 16px; }
@@ -1631,13 +1659,14 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-status.pending { color: var(--text-dim); }
 .journal-status.error { color: var(--red); }
 
-.journal-marker { cursor: pointer; white-space: nowrap; }
-.cell-icons { position: absolute; top: 6px; right: 8px; display: flex; align-items: center; gap: 4px; }
-.cell-journal-icon, .cell-image-icon { font-size: 11px; line-height: 1; }
+.journal-marker { cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; color: var(--text-dim); }
+.cell-icons { position: absolute; top: 6px; right: 8px; display: flex; align-items: center; gap: 4px; color: var(--text-dim); }
+.cell-journal-icon, .cell-image-icon { display: inline-flex; line-height: 1; }
 .cell-journal-icon { cursor: pointer; border-radius: 4px; padding: 1px; }
 .cell-journal-icon:hover { background: var(--bg-hover); }
-.cell-journal-icon-empty { opacity: 0.28; filter: grayscale(1); }
+.cell-journal-icon-empty { opacity: 0.32; }
 .cell-journal-icon-empty:hover { opacity: 0.6; }
+.cell-journal-icon .ui-icon, .cell-image-icon .ui-icon, .journal-marker .ui-icon { width: 12px; height: 12px; }
 
 /* ---------- Journal: Tagebuch/Notizbuecher-Umschalter ---------- */
 
@@ -1834,13 +1863,29 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .table .col-check { width: 30px; }
 .table td.col-check, .table th.col-check { text-align: center; }
 .table .col-badges { width: 60px; white-space: nowrap; }
-.table .col-share { width: 34px; text-align: center; }
+.table .col-share { width: 64px; text-align: center; white-space: nowrap; }
+.table .col-open { width: 78px; text-align: center; white-space: nowrap; }
+.trades-table tbody tr.selected { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent); }
 .trades-bulk-bar { margin-bottom: 12px; }
-.trade-card-badge { font-size: 13px; margin-right: 4px; }
+.trade-card-badge { display: inline-flex; margin-right: 4px; color: var(--text-dim); vertical-align: middle; }
+.ui-icon { width: 14px; height: 14px; display: block; }
+.trades-page-size-row { margin: -4px 0 12px; }
+.trades-page-size-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); }
+.trades-page-size-select { padding: 4px 6px; }
+.sortable-th { cursor: pointer; user-select: none; }
+.sortable-th:hover { color: var(--text); }
+.sortable-th.active { color: var(--text); }
+.sort-arrow { width: 11px; height: 11px; display: inline-block; vertical-align: -1px; margin-left: 2px; transition: transform 0.15s; }
+.sort-arrow.asc { transform: rotate(180deg); }
 .trade-share-row-btn {
-  all: unset; cursor: pointer; font-size: 14px; line-height: 1; padding: 4px; border-radius: 5px; opacity: 0.7;
+  all: unset; cursor: pointer; line-height: 1; padding: 4px; border-radius: 5px; opacity: 0.7; display: inline-flex;
 }
 .trade-share-row-btn:hover { opacity: 1; background: var(--bg-hover); }
+.trade-open-row-btn {
+  all: unset; cursor: pointer; font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap;
+  padding: 5px 10px; border-radius: 5px; color: var(--accent); border: 1px solid var(--border);
+}
+.trade-open-row-btn:hover { background: var(--bg-hover); }
 
 .trades-field-order-panel { width: 220px; }
 .trade-field-order-row {
@@ -1921,6 +1966,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .share-theme-swatch {
   all: unset; cursor: pointer; aspect-ratio: 4 / 5; border-radius: 8px; border: 2px solid transparent;
   outline: 1px solid var(--border); position: relative; overflow: hidden;
+  background-size: cover; background-position: center; background-color: #0a0e14;
 }
 .share-theme-swatch.active { border-color: var(--accent); outline-color: var(--accent); }
 .share-theme-swatch-label {
@@ -2182,5 +2228,18 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .trade-strategy.compact .trade-rule-item-text { font-size: 12px; flex-basis: 120px; }
 .trade-strategy.compact .trade-strategy-select { min-width: 140px; }
 
-/* Auswahl im chooseDialog - wie .confirm-input volle Breite der Karte. */
-.confirm-select { width: 100%; }
+/* Auswahl im chooseDialog - wie .confirm-input volle Breite der Karte.
+   margin-bottom fehlte hier bisher komplett, dadurch klebten Zuweisen/
+   Abbrechen direkt am Dropdown (siehe Nutzer-Feedback). */
+.confirm-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}

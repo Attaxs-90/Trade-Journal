@@ -36,6 +36,10 @@ build/
 dist/
 *.egg-info/
 
+# === Rohmaterial fuer Design-Assets (nicht die im Code genutzten Kopien) ===
+# Die tatsaechlich verwendeten Dateien liegen unter app_core/static/img/.
+/Vorlagen/
+
 # === Betriebssystem & Editor ===
 Thumbs.db
 desktop.ini

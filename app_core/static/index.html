@@ -78,9 +78,12 @@
       </div>
     </nav>
 
-    <div class="sidebar-account-status" id="sidebar-account-status" role="button" tabindex="0" title="Aktiver Konten-Filter - Klick fuehrt zur Uebersicht" aria-label="Aktiver Konten-Filter, zur Uebersicht wechseln">
-      <span class="sidebar-account-status-label">Konten</span>
-      <div class="sidebar-account-status-chips" id="sidebar-account-status-chips"></div>
+    <div class="inline-filter sidebar-account-status" id="sidebar-account-status">
+      <button type="button" class="sidebar-account-status-toggle" id="sidebar-account-status-toggle" title="Konten-Filter wechseln" aria-label="Konten-Filter wechseln">
+        <span class="sidebar-account-status-label">Konten</span>
+        <div class="sidebar-account-status-chips" id="sidebar-account-status-chips"></div>
+      </button>
+      <div class="inline-filter-panel sidebar-account-status-panel" id="sidebar-account-status-panel" hidden></div>
     </div>
   </aside>
 
@@ -276,11 +279,11 @@
         </div>
       </div>
       <div class="filter-list filter-list-inline" id="trades-tag-filter-list"></div>
-      <div class="journal-bulk-bar trades-bulk-bar" id="trades-bulk-bar" hidden>
+      <div class="trades-page-size-row" id="trades-page-size-row"></div>
+      <div class="journal-bulk-bar trades-bulk-bar" id="trades-bulk-bar">
         <span class="journal-bulk-count" id="trades-bulk-count"></span>
         <button type="button" class="btn btn-secondary" id="trades-bulk-clear">Auswahl aufheben</button>
         <button type="button" class="btn btn-secondary" id="trades-bulk-strategy-btn">Strategie zuweisen</button>
-        <button type="button" class="btn btn-secondary" id="trades-bulk-rule-btn">Regel bewerten</button>
         <button type="button" class="btn btn-danger" id="trades-bulk-delete-journal">Journal-Einträge löschen</button>
       </div>
       <div class="table-scroll">
@@ -303,7 +306,10 @@
         <button type="button" class="btn btn-secondary trade-nav-btn trade-next" title="Nächster Trade (Pfeiltaste rechts)">→</button>
       </div>
       <div class="trade-header-links">
-        <button type="button" class="btn btn-secondary trade-share-btn">📤 Teilen</button>
+        <button type="button" class="btn btn-secondary trade-share-btn">
+          <svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/></svg>
+          Teilen
+        </button>
         <button type="button" class="btn btn-secondary trade-back-to-list">← Zurück zu Trades</button>
         <button type="button" class="btn btn-secondary trade-back-to-day">Ganzer Tag →</button>
       </div>

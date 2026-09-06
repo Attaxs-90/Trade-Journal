@@ -3,6 +3,18 @@
    Modulen - dadurch bleibt es das Blatt des Importgraphen und seine Konstanten
    sind garantiert initialisiert, bevor ein anderes Modul sie liest. */
 
+/* SVG statt Emoji fuer wiederkehrende Status-/Aktions-Icons (Notiz, Bild,
+   Journal-Eintrag, Teilen) - Emoji rendert je nach Betriebssystem/Schriftart
+   unterschiedlich gross und farbig und ist kein skalierbares UI-Element.
+   Ueberall dort verwendet, wo diese vier Zustaende angezeigt werden (Trades-
+   Uebersicht, Kalender, Einzel-Trade-Seite), damit ein Icon im ganzen Produkt
+   dasselbe bedeutet. aria-hidden, weil jedes Icon von einem title/aria-label
+   am umschliessenden Element begleitet wird. */
+export const ICON_NOTE = `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 21h8"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L10 17l-4 1 1-4Z"/></svg>`;
+export const ICON_IMAGE = `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>`;
+export const ICON_JOURNAL = `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>`;
+export const ICON_SHARE = `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/></svg>`;
+
 export const state = {
   view: "overview", currentDay: null,
   filterMode: "all", filterKeys: [],
@@ -25,15 +37,21 @@ export function tagsQS() {
   return `tags=${encodeURIComponent(state.tagFilterKeys.join(","))}&tag_logic=${state.tagFilterLogic}`;
 }
 
-/* Strategie-Filter analog zu Konto und Tag - Schluessel sind Strategie-Ids
-   oder "none" fuer Trades ohne Strategie (siehe db._strategy_filter). */
+/* Strategie-Filter der Uebersicht (Equity-Kurve/Kacheln) - anders als Konto-
+   und Tag-Filter bewusst NICHT Teil von withFilter(): er soll nur die
+   Uebersicht selbst filtern, nicht auch Trades/Journal/Auswertungen, die alle
+   ueber withFilter() laufen (siehe Nutzer-Feedback - frueher wirkte eine
+   Strategie-Auswahl in der Uebersicht ungewollt bis in die Trades-Liste
+   hinein). openOverview() haengt diesen Query-Teil deshalb selbst an.
+   Schluessel sind Strategie-Ids oder "none" fuer Trades ohne Strategie
+   (siehe db._strategy_filter). */
 export function strategiesQS() {
   if (state.strategyFilterMode !== "selected" || !state.strategyFilterKeys.length) return "";
   return `strategies=${encodeURIComponent(state.strategyFilterKeys.join(","))}`;
 }
 
 export function withFilter(url) {
-  const parts = [accountsQS(), tagsQS(), strategiesQS()].filter(Boolean);
+  const parts = [accountsQS(), tagsQS()].filter(Boolean);
   if (!parts.length) return url;
   return url + (url.includes("?") ? "&" : "?") + parts.join("&");
 }

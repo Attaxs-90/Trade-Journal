@@ -1,6 +1,6 @@
 /* Monatsuebersicht, Tages-Modal und der gemeinsame Modal-Rahmen. */
 
-import { api, attachOutsideClose, cls, fmtDate, fmtSigned, state, tile, withFilter } from './core.js';
+import { api, attachOutsideClose, cls, fmtDate, fmtSigned, ICON_IMAGE, ICON_JOURNAL, state, tile, withFilter } from './core.js';
 import { closeLightbox } from './images.js';
 import { clearActiveJournal, flushJournal, mountJournalEditor, renderJournalList } from './journal.js';
 import { flushNotebookNote } from './notebooks.js';
@@ -74,8 +74,8 @@ export async function renderMonth() {
       + (openable && !hasTrades ? " clickable" : "");
     el.innerHTML = `<div class="cell-date">${dayNum}</div>`
       + `<div class="cell-icons">`
-      + `<span class="cell-journal-icon${d.has_journal ? "" : " cell-journal-icon-empty"}" title="${d.has_journal ? "Journal-Eintrag vorhanden - anzeigen" : "Noch kein Journal-Eintrag - anlegen"}">📝</span>`
-      + (d.has_image ? `<span class="cell-image-icon" title="Bild vorhanden">📷</span>` : "")
+      + `<span class="cell-journal-icon${d.has_journal ? "" : " cell-journal-icon-empty"}" title="${d.has_journal ? "Journal-Eintrag vorhanden - anzeigen" : "Noch kein Journal-Eintrag - anlegen"}">${ICON_JOURNAL}</span>`
+      + (d.has_image ? `<span class="cell-image-icon" title="Bild vorhanden">${ICON_IMAGE}</span>` : "")
       + `</div>`
       + (hasTrades ? `<div class="cell-net">${fmtSigned(d.net)} $</div><div class="cell-count">${d.trades} Trades</div>` : "");
     // Icon oeffnet immer den Journal-Eintrag des Tages (auch zum Neuanlegen an
@@ -109,9 +109,9 @@ export async function renderMonth() {
       <td class="${hasTrades ? cls(d.points) : ""}">${hasTrades ? fmtSigned(d.points, 2) : "–"}</td>
       <td class="${hasTrades ? cls(d.net) : ""}">${hasTrades ? fmtSigned(d.net) + " $" : "–"}</td>
       <td class="journal-cell">${d.has_journal
-        ? `<span class="journal-marker" title="Journal-Eintrag vorhanden${d.journal_rating ? " – Bewertung " + d.journal_rating + "/5" : ""}">📝${d.journal_rating ? ` ${d.journal_rating}/5` : ""}</span>`
+        ? `<span class="journal-marker" title="Journal-Eintrag vorhanden${d.journal_rating ? " – Bewertung " + d.journal_rating + "/5" : ""}">${ICON_JOURNAL}${d.journal_rating ? ` ${d.journal_rating}/5` : ""}</span>`
         : `<span class="muted">–</span>`}</td>
-      <td>${d.has_image ? `<span title="Bild vorhanden">📷</span>` : `<span class="muted">–</span>`}</td>
+      <td>${d.has_image ? `<span title="Bild vorhanden">${ICON_IMAGE}</span>` : `<span class="muted">–</span>`}</td>
     `;
     tr.querySelector(".journal-cell").addEventListener("click", (e) => {
       e.stopPropagation();
