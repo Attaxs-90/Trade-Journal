@@ -1,10 +1,13 @@
 import concurrent.futures
+import csv
+import io
+import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -282,6 +285,42 @@ def api_list_trades(accounts: str | None = None, tags: str | None = None, tag_lo
         strategy_keys=_parse_keys(strategies),
     )
     return {"trades": trades, "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/trades/export/count")
+def api_export_count(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                      strategies: str | None = None, start: str | None = None, end: str | None = None):
+    count = db.count_trades_for_export(
+        _parse_keys(accounts), _parse_keys(tags), tag_logic, _parse_keys(strategies), start, end,
+    )
+    return {"count": count}
+
+
+@app.get("/api/trades/export")
+def api_export_trades(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                       strategies: str | None = None, start: str | None = None, end: str | None = None,
+                       fields: str | None = None, format: str = "csv"):
+    requested = _parse_keys(fields) or db.EXPORT_FIELDS
+    cols = [f for f in requested if f in db.EXPORT_FIELDS]
+    if not cols:
+        raise HTTPException(400, "Keine gueltigen Felder ausgewaehlt.")
+    trades = db.get_trades_for_export(
+        _parse_keys(accounts), _parse_keys(tags), tag_logic, _parse_keys(strategies), start, end,
+    )
+    rows = [{k: t[k] for k in cols} for t in trades]
+    filename = f"trades_export_{date.today().isoformat()}"
+
+    if format == "json":
+        body = json.dumps(rows, ensure_ascii=False, indent=2)
+        return Response(content=body, media_type="application/json",
+                         headers={"Content-Disposition": f'attachment; filename="{filename}.json"'})
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=cols)
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                     headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'})
 
 
 @app.get("/api/days/{day}")

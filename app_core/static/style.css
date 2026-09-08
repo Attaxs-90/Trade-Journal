@@ -338,6 +338,12 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .inline-filter { position: relative; }
 .inline-filter-toggle {
   all: unset;
+  /* all:unset setzt display auf "inline" zurueck - bei einwoertigen Labels
+     ("Tags", "Strategie") faellt das nicht auf, ein mehrwoertiges Label
+     ("Konto / Quelle") bricht darin aber mitten im Text um statt in einer
+     Zeile zu bleiben (kein echter Inline-Textfluss bei einem <button>). */
+  display: inline-block;
+  white-space: nowrap;
   cursor: pointer;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2243,3 +2249,21 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
   margin-bottom: 16px;
   box-sizing: border-box;
 }
+
+/* Export */
+.export-filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Die Filter-Buttons sitzen hier ganz links in der Karte, direkt neben der
+   Sidebar - .inline-filter-panel oeffnet sonst per right:0 nach links und
+   ragt dabei unter die Sidebar, die es von links abschneidet (bei der
+   Auswertungsseite faellt das nicht auf, der Button sitzt dort weiter
+   rechts). Hier stattdessen nach rechts oeffnen. */
+#export-account-filter-panel, #export-strategy-filter-panel, #export-tag-filter-panel {
+  left: 0;
+  right: auto;
+}
+.export-count { margin-top: 12px; color: var(--text-dim); font-size: 12.5px; }
+.export-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+.export-field-group { display: flex; flex-direction: column; gap: 2px; }
+.export-format-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.export-format-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+.export-format-option input { accent-color: var(--accent); cursor: pointer; }

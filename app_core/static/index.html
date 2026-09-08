@@ -72,6 +72,10 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
         <span class="nav-label">Konten &amp; Sync</span>
       </div>
+      <div class="nav-item" data-view="export" title="Export" aria-label="Export" role="button" tabindex="0" draggable="true">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+        <span class="nav-label">Export</span>
+      </div>
       <div class="nav-item" data-view="settings" title="Einstellungen" aria-label="Einstellungen" role="button" tabindex="0" draggable="true">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>
         <span class="nav-label">Einstellungen</span>
@@ -650,6 +654,59 @@
         <div class="strategy-list" id="strategy-list"></div>
       </aside>
       <div class="strategy-detail" id="strategy-detail"></div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-export">
+  <section class="view">
+    <header class="view-header">
+      <h1>Export</h1>
+    </header>
+
+    <div class="card">
+      <div class="card-title">Trades auswählen</div>
+      <div class="export-filter-row">
+        <div class="inline-filter" id="export-account-filter">
+          <button type="button" class="inline-filter-toggle" id="export-account-filter-toggle">Konto / Quelle <span class="inline-filter-count" id="export-account-filter-count"></span></button>
+          <div class="inline-filter-panel" id="export-account-filter-panel" hidden></div>
+        </div>
+        <div class="inline-filter" id="export-strategy-filter">
+          <button type="button" class="inline-filter-toggle" id="export-strategy-filter-toggle">Strategie <span class="inline-filter-count" id="export-strategy-filter-count"></span></button>
+          <div class="inline-filter-panel" id="export-strategy-filter-panel" hidden></div>
+        </div>
+        <div class="inline-filter" id="export-tag-filter">
+          <button type="button" class="inline-filter-toggle" id="export-tag-filter-toggle">Tags</button>
+          <div class="inline-filter-panel analytics-tag-panel" id="export-tag-filter-panel" hidden>
+            <div class="tag-logic-toggle" id="export-tag-logic-toggle">
+              <button type="button" class="tag-logic-btn active" data-logic="or">ODER</button>
+              <button type="button" class="tag-logic-btn" data-logic="and">UND</button>
+            </div>
+            <div class="filter-list filter-list-inline" id="export-tag-filter-list"></div>
+          </div>
+        </div>
+        <div class="analytics-range">
+          <input type="date" id="export-range-start" title="Zeitraum von" aria-label="Zeitraum von">
+          <span class="analytics-range-sep">–</span>
+          <input type="date" id="export-range-end" title="Zeitraum bis" aria-label="Zeitraum bis">
+          <button type="button" class="btn btn-secondary" id="export-range-clear" title="Zeitraum zurücksetzen">Alle</button>
+        </div>
+      </div>
+      <div class="export-count" id="export-count-label"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Felder auswählen</div>
+      <div class="export-fields" id="export-fields"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Format &amp; Download</div>
+      <div class="export-format-row">
+        <label class="export-format-option"><input type="radio" name="export-format" value="csv"> CSV</label>
+        <label class="export-format-option"><input type="radio" name="export-format" value="json"> JSON (für KI)</label>
+        <button type="button" class="btn btn-primary" id="export-download-btn">Herunterladen</button>
+      </div>
     </div>
   </section>
 </template>

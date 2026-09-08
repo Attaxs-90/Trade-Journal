@@ -973,14 +973,11 @@ def get_day_trades(day: str, account_keys: list[str] | None = None, tag_keys: li
         return _attach_tags([dict(r) for r in rows])
 
 
-def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
-                               tag_logic: str = "or", start: str | None = None, end: str | None = None,
-                               strategy_keys: list[str] | None = None) -> list[dict]:
-    """Wie get_trades_in_range(), aber mit optionalen statt Pflicht-Datumsgrenzen -
-    Basis fuer die Auswertungsseite, die wahlweise die komplette Historie oder
-    einen frei gewaehlten Zeitraum je Widget auswertet. Tags werden direkt
-    mitgeladen (eine Zusatzquery, kein N+1), weil die Tag-Dimension der
-    Auswertung sie fuer jeden Trade braucht."""
+def _trade_filters_ranged(account_keys: list[str] | None, tag_keys: list[str] | None,
+                           tag_logic: str = "or", strategy_keys: list[str] | None = None,
+                           start: str | None = None, end: str | None = None) -> tuple[str, list]:
+    """Wie _trade_filters(), erweitert um einen optionalen Datumsbereich (day) -
+    Basis fuer Auswertung und Export, die beide zusaetzlich einen Zeitraum brauchen."""
     clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
     parts = [clause] if clause else []
     if start:
@@ -990,11 +987,60 @@ def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: l
         parts.append("day <= ?")
         params.append(end)
     where = f"WHERE {' AND '.join(parts)}" if parts else ""
+    return where, params
+
+
+def list_trades_for_analytics(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                               tag_logic: str = "or", start: str | None = None, end: str | None = None,
+                               strategy_keys: list[str] | None = None) -> list[dict]:
+    """Wie get_trades_in_range(), aber mit optionalen statt Pflicht-Datumsgrenzen -
+    Basis fuer die Auswertungsseite, die wahlweise die komplette Historie oder
+    einen frei gewaehlten Zeitraum je Widget auswertet. Tags werden direkt
+    mitgeladen (eine Zusatzquery, kein N+1), weil die Tag-Dimension der
+    Auswertung sie fuer jeden Trade braucht."""
+    where, params = _trade_filters_ranged(account_keys, tag_keys, tag_logic, strategy_keys, start, end)
     with get_conn() as conn:
         rows = conn.execute(
             f"SELECT * FROM trades {where} ORDER BY day ASC, entry_time ASC", params
         ).fetchall()
         return _attach_tags([dict(r) for r in rows])
+
+
+# Export-Felder: nur echte, vom Broker uebertragene Datenpunkte plus die drei
+# daraus berechneten Werte (points/gross_usd/net_usd) - bewusst OHNE selbst
+# hinzugefuegte Daten (notes, strategy_id, tags, account-Zuordnung, source).
+# Zentrale Liste statt Schema-Introspektion, damit interne/technische Spalten
+# (ids, Fremdschluessel) nicht versehentlich mit zur Auswahl stehen. Neue
+# Broker-Felder kommen hier UND in der gleichnamigen Konstante in export.js dazu.
+EXPORT_FIELDS = [
+    "instrument", "direction", "entry_time", "exit_time", "entry_price", "exit_price",
+    "entry_order_id", "exit_order_id", "volume", "commission_usd", "exit_type", "risk_usd",
+    "points", "gross_usd", "net_usd",
+]
+
+
+def count_trades_for_export(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                             tag_logic: str = "or", strategy_keys: list[str] | None = None,
+                             start: str | None = None, end: str | None = None) -> int:
+    """Reine Trefferzahl fuer die Live-Vorschau im Export-Dialog, ohne die
+    Trades selbst zu laden."""
+    where, params = _trade_filters_ranged(account_keys, tag_keys, tag_logic, strategy_keys, start, end)
+    with get_conn() as conn:
+        return conn.execute(f"SELECT COUNT(*) as n FROM trades {where}", params).fetchone()["n"]
+
+
+def get_trades_for_export(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                           tag_logic: str = "or", strategy_keys: list[str] | None = None,
+                           start: str | None = None, end: str | None = None) -> list[dict]:
+    """Trades fuer den Export - nur die Spalten aus EXPORT_FIELDS, keine Tags/
+    Bild-Flags (die gehoeren nicht zu den echten Broker-Datenpunkten)."""
+    where, params = _trade_filters_ranged(account_keys, tag_keys, tag_logic, strategy_keys, start, end)
+    cols = ", ".join(EXPORT_FIELDS)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT {cols} FROM trades {where} ORDER BY day ASC, entry_time ASC", params
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def journal_day_details(start: str | None = None, end: str | None = None) -> dict[str, dict]:

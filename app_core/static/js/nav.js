@@ -4,6 +4,7 @@ import { openStrategy } from './strategies.js';
 import { openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
 import { makeSortable, readStoredArray, writeStored } from './core.js';
+import { openExport } from './export.js';
 import { renderAccountFilter } from './filters.js';
 import { flushJournal, openJournal } from './journal.js';
 import { openOverview, openTrades } from './overview.js';
@@ -58,6 +59,7 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "month") openMonth();
     if (el.dataset.view === "strategy") openStrategy();
     if (el.dataset.view === "accounts") openAccounts();
+    if (el.dataset.view === "export") openExport();
     if (el.dataset.view === "settings") openSettings();
   });
 });
