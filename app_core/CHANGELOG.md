@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.9.0
+- Neuer Menüpunkt "Export": Trades als CSV oder JSON exportieren, mit frei
+  wählbaren Feldern (nur echte Broker-Datenpunkte plus die drei daraus
+  berechneten Werte Punkte/Brutto/Netto), eigenen Filtern (Konto/Quelle,
+  Strategie, Tag, Zeitraum) unabhängig vom globalen Filter und einer
+  Live-Trefferzahl vor dem Download.
+- MT5-Konten werden beim App-Start jetzt automatisch einmal gesynct, statt
+  dass man nach jedem Start manuell auf Sync klicken muss. Der
+  Backtesting-Platzhalter ohne Funktion wurde aus der Navigation entfernt.
+- Trades-Übersicht überarbeitet: sortierbare Spaltenköpfe, wählbare
+  Seitengröße, dedizierter Öffnen-Button je Zeile, Strategie-Spalte,
+  dauerhaft sichtbare Bulk-Bar. Share-Karte nutzt jetzt Bild-Hintergründe
+  statt generierter Canvas-Motive, mit größeren Kacheln/Schrift.
+- Fix: Der Strategie-Filter der Übersicht wirkte ungewollt bis in
+  Trades/Journal/Auswertungen hinein - er filtert jetzt nur noch die
+  Übersicht selbst.
+
 ## 1.8.0
 - Neuer Menüpunkt "Strategie": Strategien anlegen, umbenennen, archivieren und
   löschen; je Strategie eigene Regeln, wahlweise in Gruppen (z. B. "Entry",
