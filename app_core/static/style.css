@@ -414,6 +414,19 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   justify-content: space-between;
 }
 .view-header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+/* Fasst alles ausser der Ueberschrift zusammen (siehe mountHelpButton() in
+   help.js) - haelt bereits vorhandene Kopfzeilen-Steuerelemente UND den
+   Hilfe-Button gemeinsam rechtsbuendig, egal ob es vorher schon welche gab. */
+.view-header-right { display: flex; align-items: center; gap: 12px; }
+.view-help-btn {
+  all: unset; cursor: pointer; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; font-family: var(--font-sans);
+  color: #fff; background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-fill);
+}
+.view-help-btn:hover { filter: brightness(1.12); }
 
 /* Stat tiles */
 .stat-grid {
@@ -762,6 +775,13 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .month-cell.clickable { cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .month-cell.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.25); }
 .month-cell .cell-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
+/* Subtiler Punkt bei einem markierten News-Termin (Stern in der Newsbar,
+   siehe news.js) - bewusst klein und dezent, keine grosse Flaeche/Badge. */
+.cell-news-dot {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  margin-left: 4px; vertical-align: middle;
+}
+.month-settings-hint { font-size: 11px; color: var(--text-faint); max-width: 220px; margin-top: 6px; line-height: 1.4; }
 .month-cell .cell-net { font-family: var(--font-mono); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 .month-cell .cell-count { font-size: 11.5px; color: var(--text-faint); }
 
@@ -787,6 +807,23 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   background: var(--accent-fill);
   border-color: transparent;
 }
+
+/* "Alle Tage des Monats": Aufklapp-Pfeil vor dem Datum + die Trade-Tabelle,
+   die sich beim Anklicken eines Handelstags darunter oeffnet. */
+.ui-icon.month-day-chevron {
+  /* .ui-icon setzt display:block (siehe core.js) - Selektor hier bewusst mit
+     beiden Klassen (hoehere Spezifitaet), sonst gewinnt .ui-icon je nach
+     Reihenfolge im Stylesheet trotzdem und der Pfeil rutscht wieder ueber
+     statt neben den Datumswert. */
+  display: inline-block; vertical-align: -2px; margin-right: 6px; color: var(--text-faint);
+  transition: transform 0.15s ease; transform: rotate(-90deg);
+}
+#month-days-table tr.expanded .month-day-chevron { transform: rotate(0deg); color: var(--text); }
+.month-day-expand-row td { padding: 0; border-bottom: 1px solid var(--border); background: var(--bg-hover); }
+.month-day-trades-loading { padding: 14px; color: var(--text-faint); font-size: 12.5px; }
+.month-day-trades-table { font-size: 12.5px; }
+.month-day-trades-table th, .month-day-trades-table td { padding: 6px 8px; white-space: nowrap; }
+.month-day-trades-table tbody tr:last-child td { border-bottom: none; }
 
 /* Modal */
 .modal-overlay {
@@ -827,6 +864,15 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
    Trade-Karte auf 900px gequetscht. */
 .modal-card:has(.view-day) { max-width: 1380px; }
 .modal-body .view-header h1 { font-size: 17px; }
+
+/* Hilfe-Modal (siehe help.js) - schmaler als der generische .modal-card
+   (900px), da nur kurzer Fliesstext, kein Formular/keine Tabelle. */
+.help-card { max-width: 480px; }
+.help-title { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.help-body { font-size: 13.5px; line-height: 1.55; color: var(--text-dim); }
+.help-body p { margin: 0 0 12px; }
+.help-body p:last-child { margin-bottom: 0; }
+.help-body b { color: var(--text); font-weight: 600; }
 
 /* Settings - ein-/ausklappbare Karten: im eingeklappten Zustand bleibt nur
    die Kopfzeile (Titel + Pfeil) sichtbar, der restliche Karteninhalt wird
@@ -925,19 +971,49 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 }
 
 .account-list { display: flex; flex-direction: column; gap: 10px; }
+.account-list-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  margin: 2px 0 -4px;
+}
 .account-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px 16px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg);
 }
+.account-row.dragging { opacity: 0.5; }
+.account-row-header { display: flex; align-items: center; gap: 4px; }
+.account-collapse-btn, .acc-favorite-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  padding: 2px;
+  border-radius: 4px;
+}
+.account-collapse-btn svg, .acc-favorite-btn svg { width: 15px; height: 15px; }
+.account-collapse-btn:hover, .acc-favorite-btn:hover { color: var(--text); background: var(--bg-hover); }
+.acc-favorite-btn.active { color: #eab308; }
+.account-collapse-btn svg { transition: transform 0.15s ease; }
+.account-row.collapsed .account-collapse-btn svg { transform: rotate(-90deg); }
+.account-details {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 16px;
+  align-items: center;
+}
+.account-details[hidden] { display: none; }
 .account-name { font-weight: 600; font-size: 13.5px; }
 .account-name-row { display: flex; align-items: center; gap: 6px; }
-.account-name-edit-btn {
+.account-name-edit-btn, .account-sync-edit-btn {
   all: unset;
   cursor: pointer;
   display: flex;
@@ -945,10 +1021,10 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   padding: 2px;
   border-radius: 4px;
 }
-.account-name-edit-btn svg { width: 13px; height: 13px; }
-.account-name-edit-btn:hover { color: var(--text); background: var(--bg-hover); }
-.account-name-edit-form { display: flex; align-items: center; gap: 6px; }
-.account-name-edit-form input {
+.account-name-edit-btn svg, .account-sync-edit-btn svg { width: 13px; height: 13px; }
+.account-name-edit-btn:hover, .account-sync-edit-btn:hover { color: var(--text); background: var(--bg-hover); }
+.account-name-edit-form, .account-sync-edit-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.account-name-edit-form input, .account-sync-edit-form input {
   background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
@@ -958,8 +1034,10 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
   font-family: var(--font-sans);
   width: 180px;
 }
-.account-name-edit-form button { padding: 4px 8px; font-size: 11px; }
+.account-sync-edit-form .acc-sync-path-input { width: 280px; }
+.account-name-edit-form button, .account-sync-edit-form button { padding: 4px 8px; font-size: 11px; }
 .account-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.account-sync-meta-row { display: flex; align-items: center; gap: 4px; }
 .account-balance-edit { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .account-balance-edit .acc-starting-balance {
   width: 100px;
@@ -1461,14 +1539,22 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .newsbar-list .empty-state { padding: 4px 0; font-size: 11.5px; }
 
 .news-row {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   padding: 4px 5px;
   border-radius: 6px;
-  text-decoration: none;
-  color: inherit;
   line-height: 1.3;
 }
 .news-row:hover { background: var(--bg-hover); }
+.news-row-link { flex: 1; min-width: 0; text-decoration: none; color: inherit; }
+.news-row-mark {
+  all: unset; cursor: pointer; flex-shrink: 0; display: flex; padding: 3px;
+  border-radius: 5px; color: var(--text-faint);
+}
+.news-row-mark svg { width: 12px; height: 12px; }
+.news-row-mark:hover { color: var(--text); background: var(--bg-hover); }
+.news-row-mark.active { color: #eab308; }
 .news-row-ftmo-highlight { background: color-mix(in srgb, var(--red) 14%, transparent); }
 .news-row-ftmo-highlight:hover { background: color-mix(in srgb, var(--red) 22%, transparent); }
 .news-row-line1 {
@@ -1869,8 +1955,15 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .table .col-check { width: 30px; }
 .table td.col-check, .table th.col-check { text-align: center; }
 .table .col-badges { width: 60px; white-space: nowrap; }
-.table .col-share { width: 64px; text-align: center; white-space: nowrap; }
-.table .col-open { width: 78px; text-align: center; white-space: nowrap; }
+.table .col-actions { width: 96px; text-align: center; white-space: nowrap; }
+/* Enger als die restlichen Tabellen der App (siehe .table th/td oben) - die
+   Trades-Tabelle hat die meisten Spalten gleichzeitig sichtbar und soll ohne
+   horizontale Scrollbar in .view (max-width 1100px) passen. */
+.trades-table th, .trades-table td { padding: 6px 8px; }
+.cell-ellipsis {
+  display: inline-block; max-width: 110px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+}
 .trades-table tbody tr.selected { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent); }
 .trades-bulk-bar { margin-bottom: 12px; }
 .trade-card-badge { display: inline-flex; margin-right: 4px; color: var(--text-dim); vertical-align: middle; }
@@ -1883,15 +1976,16 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .sortable-th.active { color: var(--text); }
 .sort-arrow { width: 11px; height: 11px; display: inline-block; vertical-align: -1px; margin-left: 2px; transition: transform 0.15s; }
 .sort-arrow.asc { transform: rotate(180deg); }
-.trade-share-row-btn {
-  all: unset; cursor: pointer; line-height: 1; padding: 4px; border-radius: 5px; opacity: 0.7; display: inline-flex;
+/* Alle drei Aktions-Buttons teilen sich jetzt eine Spalte (col-actions) statt
+   je eine eigene - reine Icon-Buttons statt Text spart die Breite, die vorher
+   drei Spaltenraender + der "Oeffnen"-Text gekostet haben (siehe Scrollbar-Fix). */
+.trade-share-row-btn, .trade-open-row-btn, .trade-delete-row-btn {
+  all: unset; cursor: pointer; line-height: 1; padding: 4px; border-radius: 5px; opacity: 0.7; display: inline-flex; vertical-align: middle;
 }
-.trade-share-row-btn:hover { opacity: 1; background: var(--bg-hover); }
-.trade-open-row-btn {
-  all: unset; cursor: pointer; font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap;
-  padding: 5px 10px; border-radius: 5px; color: var(--accent); border: 1px solid var(--border);
-}
-.trade-open-row-btn:hover { background: var(--bg-hover); }
+.trade-share-row-btn:hover, .trade-open-row-btn:hover, .trade-delete-row-btn:hover { opacity: 1; background: var(--bg-hover); }
+.trade-open-row-btn { color: var(--accent); }
+.trade-delete-row-btn { color: var(--red); }
+.trade-delete-row-btn:hover { opacity: 1; background: var(--bg-hover); }
 
 .trades-field-order-panel { width: 220px; }
 .trade-field-order-row {

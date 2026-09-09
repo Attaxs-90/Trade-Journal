@@ -34,9 +34,11 @@ def parse_csv(content: str) -> list[dict]:
         order_id = (row.get("Order ID") or "").strip()
         name = (row.get("Name") or "").strip()
         commission = _to_float(row.get("Commission") or "0")
+        account = (row.get("Account display name") or "").strip()
         fills.append(dict(
             instrument=root, action=action, qty=qty, price=price,
             time=time, ex=ex, order_id=order_id, name=name, commission=commission,
+            account=account,
         ))
     return fills
 

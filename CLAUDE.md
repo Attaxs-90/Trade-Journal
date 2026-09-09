@@ -19,6 +19,7 @@ trade-journal/
 ├── github_token.txt   <- optional, nur falls das Release-Repo mal privat wird
 └── app_core/          <- kompletter Code, wird bei Updates ersetzt
     ├── app/, static/, run.py, requirements.txt, VERSION, CHANGELOG.md
+    ├── ninjascript/       <- NinjaScript-AddOn fuer NinjaTrader-Auto-Sync, siehe unten
     ├── update_check.ps1   <- Versionscheck beim Start, siehe "Release"
     └── README.md, README_DEV.md, build_release.ps1, dev_reset.*, update.bat
 ```
@@ -61,6 +62,10 @@ Zwei Achsen, die leicht verwechselt werden:
 - **Konto** — Zeile in `broker_accounts`; mehrere Konten können dieselbe Plattform nutzen (z. B. zwei getrennte NinjaTrader-Konten)
 
 Trades tragen beides: `source` (Herkunft der Daten) und `account_id` (Zuordnung). Der Filter reicht `?accounts=2,5,csv` durch alle Auswertungs-Endpoints — Konto-IDs plus den Magic String **`"csv"` für `account_id IS NULL`** (nicht zugeordnet).
+
+**NinjaTrader-Auto-Sync** ist optional und laeuft anders als MT5, weil NinjaTrader kein Broker-Login per API kennt: die NinjaScript-AddOn `ninjascript/TradeJournalSync.cs` haengt bei jedem Fill eine Zeile im Executions-Export-Format an eine feste Datei an; `brokers/ninjatrader_adapter.py` liest sie mit dem bestehenden `parser.py` ein, gefiltert auf den in `broker_accounts.login` hinterlegten NinjaTrader-Kontonamen. Ohne hinterlegten `sync_path` bleibt ein NinjaTrader-Konto wie bisher rein manuell (CSV-Import). `MANUAL_PLATFORMS` in `brokers/__init__.py` steuert nur die Formularfelder (kein Login/Passwort/Server-Feld), nicht mehr ob automatisch gesynct wird — das entscheidet `sync_account()` pro Konto anhand `sync_path`.
+
+**Geloeschte Trades bleiben geloescht:** `db.delete_trade()` merkt sich den (entry_order_id, exit_order_id)-Fingerprint in `deleted_trade_keys`, weil die geloeschte Zeile die UNIQUE-Bremse gegen erneutes Einfuegen mitgeloescht hat. „Jetzt synchronisieren" (`insert_trades(..., skip_deleted=True)`) ueberspringt diese Fingerprints, „Vollstaendig neu synchronisieren" (`full=True`) bewusst nicht — nur dort soll ein versehentlich geloeschter Trade wiederkommen koennen.
 
 ## Strategien und Regeln
 

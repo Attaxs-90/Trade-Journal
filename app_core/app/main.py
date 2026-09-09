@@ -33,7 +33,7 @@ STARTUP_SYNC_TIMEOUT = 25
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _startup_sync_mt5_accounts()
+    _startup_sync_accounts()
     yield
 
 
@@ -113,6 +113,7 @@ class AccountCreate(BaseModel):
     password: str = ""
     server: str = ""
     starting_balance: float = 0
+    sync_path: str = ""  # nur "ninjatrader": Pfad zur Datei von TradeJournalSync.cs
 
 
 class StartingBalanceUpdate(BaseModel):
@@ -121,6 +122,11 @@ class StartingBalanceUpdate(BaseModel):
 
 class AccountRename(BaseModel):
     name: str
+
+
+class AccountConnectionUpdate(BaseModel):
+    login: str = ""
+    sync_path: str = ""
 
 
 class ReassignTrades(BaseModel):
@@ -145,6 +151,20 @@ class TradeTagsUpdate(BaseModel):
 class BulkTagAssign(BaseModel):
     trade_ids: list[int]
     tag_id: int
+
+
+class BulkTradeDelete(BaseModel):
+    trade_ids: list[int]
+
+
+class MarkedNewsCreate(BaseModel):
+    day: str
+    title: str
+    currency: str = ""
+    impact: str = "Low"
+    event_type: str = "Misc"
+    time: str
+    ff_url: str = ""
 
 
 class JournalEntryUpdate(BaseModel):
@@ -301,7 +321,8 @@ def api_export_trades(accounts: str | None = None, tags: str | None = None, tag_
                        strategies: str | None = None, start: str | None = None, end: str | None = None,
                        fields: str | None = None, format: str = "csv"):
     requested = _parse_keys(fields) or db.EXPORT_FIELDS
-    cols = [f for f in requested if f in db.EXPORT_FIELDS]
+    allowed_fields = db.EXPORT_FIELDS + db.EXPORT_COMPUTED_FIELDS
+    cols = [f for f in requested if f in allowed_fields]
     if not cols:
         raise HTTPException(400, "Keine gueltigen Felder ausgewaehlt.")
     trades = db.get_trades_for_export(
@@ -358,6 +379,14 @@ def api_delete_trade(trade_id: int):
         raise HTTPException(404, "Trade nicht gefunden.")
     for image in db.delete_trade(trade_id):
         delete_image_files(image["filename"], image["thumb_filename"])
+    return {"ok": True}
+
+
+@app.post("/api/trades/bulk-delete")
+def api_bulk_delete_trades(payload: BulkTradeDelete):
+    for trade_id in payload.trade_ids:
+        for image in db.delete_trade(trade_id):
+            delete_image_files(image["filename"], image["thumb_filename"])
     return {"ok": True}
 
 
@@ -523,7 +552,8 @@ def api_add_account(payload: AccountCreate):
     if payload.platform not in ALL_PLATFORMS:
         raise HTTPException(400, f"Unbekannte Plattform '{payload.platform}'.")
     account_id = db.add_account(
-        payload.name, payload.platform, payload.login, payload.password, payload.server, payload.starting_balance
+        payload.name, payload.platform, payload.login, payload.password, payload.server, payload.starting_balance,
+        payload.sync_path,
     )
     return {"id": account_id}
 
@@ -533,6 +563,14 @@ def api_update_starting_balance(account_id: int, payload: StartingBalanceUpdate)
     if not db.get_account(account_id):
         raise HTTPException(404, "Konto nicht gefunden.")
     db.set_starting_balance(account_id, payload.starting_balance)
+    return {"ok": True}
+
+
+@app.put("/api/accounts/{account_id}/connection")
+def api_update_account_connection(account_id: int, payload: AccountConnectionUpdate):
+    if not db.get_account(account_id):
+        raise HTTPException(404, "Konto nicht gefunden.")
+    db.update_account_connection(account_id, payload.login, payload.sync_path)
     return {"ok": True}
 
 
@@ -581,7 +619,7 @@ def _run_account_sync(account: dict, full: bool = False) -> dict:
     result = sync_account(account, from_date, to_date)
     trades = result["trades"]
 
-    inserted = db.insert_trades(trades, source=account["platform"], account_id=account["id"])
+    inserted = db.insert_trades(trades, source=account["platform"], account_id=account["id"], skip_deleted=not full)
     db.set_last_sync(account["id"], to_date.isoformat())
     if result.get("balance") is not None:
         db.set_synced_balance(account["id"], result["balance"])
@@ -589,15 +627,20 @@ def _run_account_sync(account: dict, full: bool = False) -> dict:
     return {"parsed": len(trades), "inserted": inserted, "skipped": len(trades) - inserted, "days": days_touched}
 
 
-def _startup_sync_mt5_accounts():
-    """Synct einmalig beim App-Start alle MT5-Konten, bevor run.py den Browser oeffnet -
-    danach nur noch manuell per Klick auf der Konten-Seite (siehe CLAUDE.md). Ein Fehler
-    (kein Internet, falsches Passwort, haengender Broker-Login) wird nur geloggt statt dem
-    Nutzer angezeigt: ein Fehlerstreifen direkt beim Oeffnen der App wirkt eher wie ein Bug
-    in der App als wie ein Sync-Problem, und der manuelle Sync-Button zeigt denselben Fehler
-    ohnehin sofort wieder an, falls er anhaelt."""
+def _startup_sync_accounts():
+    """Synct einmalig beim App-Start alle auto-sync-faehigen Konten, bevor run.py den
+    Browser oeffnet - danach nur noch manuell per Klick auf der Konten-Seite (siehe
+    CLAUDE.md). MT5-Konten sind das immer; ein NinjaTrader-Konto nur, wenn ein
+    sync_path hinterlegt ist (siehe ninjatrader_adapter.py) - ohne bleibt es wie
+    bisher rein manuell per CSV-Import. Ein Fehler (kein Internet, falsches Passwort,
+    haengender Broker-Login, fehlende Sync-Datei) wird nur geloggt statt dem Nutzer
+    angezeigt: ein Fehlerstreifen direkt beim Oeffnen der App wirkt eher wie ein Bug
+    in der App als wie ein Sync-Problem, und der manuelle Sync-Button zeigt denselben
+    Fehler ohnehin sofort wieder an, falls er anhaelt."""
     for account in db.list_accounts():
-        if account["platform"] != "mt5":
+        if account["platform"] not in ("mt5", "ninjatrader"):
+            continue
+        if account["platform"] == "ninjatrader" and not account["sync_path"]:
             continue
         full_account = db.get_account(account["id"])  # list_accounts() liefert bewusst kein Passwort
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -1138,6 +1181,25 @@ def api_news_calendar():
     result = news.fetch_calendar()
     fetched_at = result["fetched_at"].isoformat() if result["fetched_at"] else None
     return {"events": result["events"], "fetched_at": fetched_at}
+
+
+@app.get("/api/news/marked")
+def api_list_marked_news(start: str | None = None, end: str | None = None):
+    return {"events": db.list_marked_news(start, end)}
+
+
+@app.post("/api/news/marked")
+def api_add_marked_news(payload: MarkedNewsCreate):
+    return db.add_marked_news(
+        payload.day, payload.title, payload.currency, payload.impact,
+        payload.event_type, payload.time, payload.ff_url,
+    )
+
+
+@app.delete("/api/news/marked/{marked_id}")
+def api_remove_marked_news(marked_id: int):
+    db.remove_marked_news(marked_id)
+    return {"ok": True}
 
 
 app.mount("/media", StaticFiles(directory=str(IMAGES_DIR)), name="media")

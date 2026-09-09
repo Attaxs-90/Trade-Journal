@@ -3,7 +3,7 @@
 import { getPlatforms, renderImportAccountSelect } from './accounts.js';
 import { closeModal } from './calendar.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, showAppError, state, tagsQS, tile, withFilter } from './core.js';
+import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, readStoredArray, showAppError, state, tagsQS, tile, withFilter, writeStored } from './core.js';
 import { deleteAccountFlow } from './dialogs.js';
 import { refreshCurrentView, renderAccountFilter, renderTagFilter } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
@@ -514,19 +514,27 @@ export async function openAccounts() {
   const platformSelect = document.getElementById("account-platform-select");
   platformSelect.innerHTML = platforms.map(p => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.name)}</option>`).join("");
 
-  const credentialFields = [
-    document.getElementById("account-login"),
+  const loginField = document.getElementById("account-login");
+  const brokerCredentialFields = [
     document.getElementById("account-password"),
     document.getElementById("account-server"),
   ];
+  const syncPathField = document.getElementById("account-sync-path");
   const hint = document.getElementById("account-hint");
   const updateFormForPlatform = () => {
     const platform = platforms.find(p => p.key === platformSelect.value);
     const manual = platform && platform.manual;
-    credentialFields.forEach(f => { f.hidden = manual; f.required = !manual; });
-    hint.textContent = manual
-      ? "Dieses Konto hat keine automatische Sync-Anbindung. Trades ordnest du ihm weiter unten beim CSV-Import zu (Dropdown über \"Datei wählen\")."
-      : "Nutze ausschließlich das Investor-/Read-Only-Passwort. Zugangsdaten werden nur lokal in deiner SQLite-Datenbank gespeichert und nie an Dritte übertragen.";
+    const isNinjaTrader = platformSelect.value === "ninjatrader";
+    brokerCredentialFields.forEach(f => { f.hidden = manual; f.required = !manual; });
+    loginField.hidden = false;
+    loginField.required = !manual;
+    loginField.placeholder = isNinjaTrader ? "NinjaTrader-Kontoname (z. B. DEMO9105646, optional)" : "Login (Kontonummer)";
+    syncPathField.hidden = !isNinjaTrader;
+    hint.textContent = isNinjaTrader
+      ? "Trades ordnest du diesem Konto per CSV-Import zu (Dropdown über \"Datei wählen\") - oder trägst hier den Pfad zur Datei ein, die TradeJournalSync.cs automatisch schreibt, für automatischen Sync ohne manuellen Export."
+      : manual
+        ? "Dieses Konto hat keine automatische Sync-Anbindung. Trades ordnest du ihm weiter unten beim CSV-Import zu (Dropdown über \"Datei wählen\")."
+        : "Nutze ausschließlich das Investor-/Read-Only-Passwort. Zugangsdaten werden nur lokal in deiner SQLite-Datenbank gespeichert und nie an Dritte übertragen.";
   };
   platformSelect.addEventListener("change", updateFormForPlatform);
   updateFormForPlatform();
@@ -583,37 +591,83 @@ export async function openAccounts() {
   });
 }
 
-export async function renderAccounts() {
-  const [accounts, platforms] = await Promise.all([api("/api/accounts"), getPlatforms()]);
-  const list = document.getElementById("account-list");
-  if (!accounts.length) {
-    list.innerHTML = `<div class="empty-state">Noch keine Konten verbunden.</div>`;
-    return;
-  }
-  list.innerHTML = "";
-  for (const acc of accounts) {
-    const platformInfo = platforms.find(p => p.key === acc.platform);
-    const isManual = platformInfo ? platformInfo.manual : true;
-    const platformName = platformInfo ? platformInfo.name : acc.platform;
+/* Favoriten/Einklappen/Reihenfolge der Konten-Liste - rein clientseitige Vorliebe
+   (localStorage), analog zur Sidebar-Reihenfolge in nav.js. accountsFavorites haelt
+   nur die Mitgliedschaft; die Reihenfolge INNERHALB jeder der beiden Gruppen
+   (Favoriten oben, Rest darunter) liegt in je einem eigenen Order-Array, damit ein
+   Favorit beim Entfernen an seiner alten Stelle in der Rest-Liste wieder auftaucht,
+   statt ans Ende zu rutschen. */
+function loadAccountsFavorites() {
+  return new Set((readStoredArray("accountsFavorites") || []).map(String));
+}
+function saveAccountsFavorites(set) {
+  writeStored("accountsFavorites", [...set]);
+}
+function loadAccountsCollapsed() {
+  return new Set((readStoredArray("accountsCollapsed") || []).map(String));
+}
+function saveAccountsCollapsed(set) {
+  writeStored("accountsCollapsed", [...set]);
+}
+/* Bekannte Ids aus der gespeicherten Reihenfolge uebernehmen, neue/entfernte
+   Ids ergaenzen/rausfiltern - gleiches Muster wie applyNavOrder() in nav.js. */
+function orderIds(ids, storageKey) {
+  const saved = readStoredArray(storageKey) || [];
+  const order = saved.filter(id => ids.includes(id));
+  for (const id of ids) if (!order.includes(id)) order.push(id);
+  return order;
+}
 
-    const row = document.createElement("div");
-    row.className = "account-row";
-    const lastSync = acc.last_sync ? fmtDateTime(acc.last_sync) : "noch nie";
-    row.innerHTML = `
+function buildAccountRow(acc, platforms, isFavorite, isCollapsed) {
+  const platformInfo = platforms.find(p => p.key === acc.platform);
+  const isManual = platformInfo ? platformInfo.manual : true;
+  const platformName = platformInfo ? platformInfo.name : acc.platform;
+  // NinjaTrader-Konten bleiben rein manuell, bis ein sync_path hinterlegt ist
+  // (siehe brokers/__init__.py sync_account) - dann koennen sie zusaetzlich
+  // zur weiterhin moeglichen CSV-Zuordnung auch automatisch synchronisieren.
+  const canSync = !isManual || !!acc.sync_path;
+
+  const row = document.createElement("div");
+  row.className = "account-row";
+  row.draggable = true;
+  row.dataset.accountId = String(acc.id);
+  const lastSync = acc.last_sync ? fmtDateTime(acc.last_sync) : "noch nie";
+  row.innerHTML = `
+    <div class="account-row-header">
+      <button type="button" class="account-collapse-btn" title="Ein-/ausklappen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button type="button" class="acc-favorite-btn${isFavorite ? " active" : ""}" title="${isFavorite ? "Favorit entfernen" : "Als Favorit markieren"}">
+        <svg viewBox="0 0 24 24" fill="${isFavorite ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
+      <div class="account-name-row">
+        <div class="account-name">${escapeHtml(acc.name)}</div>
+        <button type="button" class="account-name-edit-btn" title="Konto umbenennen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="account-details" ${isCollapsed ? "hidden" : ""}>
       <div class="account-info">
-        <div class="account-name-row">
-          <div class="account-name">${escapeHtml(acc.name)}</div>
-          <button type="button" class="account-name-edit-btn" title="Konto umbenennen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          </button>
-        </div>
         <form class="account-name-edit-form" hidden>
           <input type="text" class="acc-name-input" value="${escapeHtml(acc.name)}" required>
           <button type="submit" class="btn btn-primary">Speichern</button>
           <button type="button" class="btn btn-secondary acc-name-cancel">Abbrechen</button>
         </form>
-        <div class="account-meta">${platformName}${isManual ? "" : ` · Login ${acc.login} · Server ${acc.server}`}</div>
-        <div class="account-meta">${isManual ? "Zuordnung per CSV-Import" : `Letzter Sync: ${lastSync}`}</div>
+        <div class="account-meta account-sync-meta-row">
+          <span>${platformName}${isManual ? (acc.sync_path ? ` · Sync-Datei: ${escapeHtml(acc.sync_path)}` : "") : ` · Login ${acc.login} · Server ${acc.server}`}</span>
+          ${acc.platform === "ninjatrader" ? `<button type="button" class="account-sync-edit-btn" title="Sync-Einstellungen bearbeiten">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          </button>` : ""}
+        </div>
+        ${acc.platform === "ninjatrader" ? `
+        <form class="account-sync-edit-form" hidden>
+          <input type="text" class="acc-login-input" placeholder="NinjaTrader-Kontoname (optional)" value="${escapeHtml(acc.login || "")}">
+          <input type="text" class="acc-sync-path-input" placeholder="Pfad zur Sync-Datei" value="${escapeHtml(acc.sync_path || "")}">
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <button type="button" class="btn btn-secondary acc-sync-cancel">Abbrechen</button>
+        </form>` : ""}
+        <div class="account-meta">${isManual ? "Zuordnung per CSV-Import" : ""}${canSync ? `${isManual ? " · " : ""}Letzter Sync: ${lastSync}` : ""}</div>
         ${acc.synced_balance !== null
           ? `<div class="account-meta">Kontostand (aus Sync): ${fmtNum(acc.synced_balance)} $</div>`
           : `<div class="account-meta account-balance-edit">
@@ -622,15 +676,36 @@ export async function renderAccounts() {
              </div>`}
       </div>
       <div class="account-actions">
-        ${isManual
-          ? `<button class="btn btn-secondary acc-reassign">Bisherige nicht zugeordnete Trades zuweisen</button>`
-          : `<button class="btn btn-secondary acc-sync">Jetzt synchronisieren</button>
-             <button class="btn btn-secondary acc-sync-full">Vollständig neu synchronisieren</button>`}
+        ${isManual ? `<button class="btn btn-secondary acc-reassign">Bisherige nicht zugeordnete Trades zuweisen</button>` : ""}
+        ${canSync
+          ? `<button class="btn btn-secondary acc-sync">Jetzt synchronisieren</button>
+             <button class="btn btn-secondary acc-sync-full">Vollständig neu synchronisieren</button>`
+          : ""}
         <button class="btn btn-secondary acc-delete">Entfernen</button>
       </div>
       <div class="account-status"></div>
-    `;
-    const statusEl = row.querySelector(".account-status");
+    </div>
+  `;
+  const statusEl = row.querySelector(".account-status");
+
+  row.classList.toggle("collapsed", isCollapsed);
+  const details = row.querySelector(".account-details");
+  row.querySelector(".account-collapse-btn").addEventListener("click", () => {
+    const collapsedSet = loadAccountsCollapsed();
+    const nowCollapsed = !details.hidden;
+    details.hidden = nowCollapsed;
+    row.classList.toggle("collapsed", nowCollapsed);
+    if (nowCollapsed) collapsedSet.add(String(acc.id)); else collapsedSet.delete(String(acc.id));
+    saveAccountsCollapsed(collapsedSet);
+  });
+
+  row.querySelector(".acc-favorite-btn").addEventListener("click", async () => {
+    const favSet = loadAccountsFavorites();
+    const id = String(acc.id);
+    if (favSet.has(id)) favSet.delete(id); else favSet.add(id);
+    saveAccountsFavorites(favSet);
+    await renderAccounts();
+  });
 
     const nameRow = row.querySelector(".account-name-row");
     const nameForm = row.querySelector(".account-name-edit-form");
@@ -674,6 +749,37 @@ export async function renderAccounts() {
       }
     });
 
+    const syncEditBtn = row.querySelector(".account-sync-edit-btn");
+    const syncEditForm = row.querySelector(".account-sync-edit-form");
+    if (syncEditBtn && syncEditForm) {
+      syncEditBtn.addEventListener("click", () => { syncEditForm.hidden = false; });
+      syncEditForm.querySelector(".acc-sync-cancel").addEventListener("click", () => {
+        syncEditForm.querySelector(".acc-login-input").value = acc.login || "";
+        syncEditForm.querySelector(".acc-sync-path-input").value = acc.sync_path || "";
+        syncEditForm.hidden = true;
+      });
+      syncEditForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const login = syncEditForm.querySelector(".acc-login-input").value.trim();
+        const syncPath = syncEditForm.querySelector(".acc-sync-path-input").value.trim();
+        try {
+          await api(`/api/accounts/${acc.id}/connection`, {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ login, sync_path: syncPath }),
+          });
+          acc.login = login;
+          acc.sync_path = syncPath;
+          syncEditForm.hidden = true;
+          statusEl.className = "account-status ok";
+          statusEl.textContent = "Sync-Einstellungen gespeichert.";
+          await renderAccounts();
+        } catch (err) {
+          statusEl.className = "account-status err";
+          statusEl.textContent = err.message;
+        }
+      });
+    }
+
     const balanceSaveBtn = row.querySelector(".acc-balance-save");
     if (balanceSaveBtn) balanceSaveBtn.addEventListener("click", async () => {
       const input = row.querySelector(".acc-starting-balance");
@@ -712,7 +818,7 @@ export async function renderAccounts() {
     const syncFullBtn = row.querySelector(".acc-sync-full");
     if (syncFullBtn) {
       syncFullBtn.addEventListener("click", () => {
-        if (!confirm("Die letzten 365 Tage komplett neu von MetaTrader abfragen? Geloeschte Trades aus diesem Zeitraum werden dabei wieder importiert.")) return;
+        if (!confirm(`Die letzten 365 Tage komplett neu von ${platformName} abfragen? Geloeschte Trades aus diesem Zeitraum werden dabei wieder importiert.`)) return;
         runSync(true);
       });
     }
@@ -740,8 +846,39 @@ export async function renderAccounts() {
 
     row.querySelector(".acc-delete").addEventListener("click", () => deleteAccountFlow(acc.id, acc.name));
 
-    list.appendChild(row);
+  return row;
+}
+
+export async function renderAccounts() {
+  const [accounts, platforms] = await Promise.all([api("/api/accounts"), getPlatforms()]);
+  const favContainer = document.getElementById("account-list-favorites");
+  const favLabel = document.getElementById("account-list-favorites-label");
+  const list = document.getElementById("account-list");
+  favContainer.innerHTML = "";
+  list.innerHTML = "";
+  if (!accounts.length) {
+    favLabel.hidden = true;
+    list.innerHTML = `<div class="empty-state">Noch keine Konten verbunden.</div>`;
+    return;
   }
+
+  const favSet = loadAccountsFavorites();
+  const collapsedSet = loadAccountsCollapsed();
+  const allIds = accounts.map(a => String(a.id));
+  const favIds = orderIds(allIds.filter(id => favSet.has(id)), "accountsFavoriteOrder");
+  const restIds = orderIds(allIds.filter(id => !favSet.has(id)), "accountsOrder");
+  const byId = new Map(accounts.map(a => [String(a.id), a]));
+
+  favLabel.hidden = favIds.length === 0;
+  for (const id of favIds) {
+    favContainer.appendChild(buildAccountRow(byId.get(id), platforms, true, collapsedSet.has(id)));
+  }
+  for (const id of restIds) {
+    list.appendChild(buildAccountRow(byId.get(id), platforms, false, collapsedSet.has(id)));
+  }
+
+  makeSortable(favContainer, ".account-row", (order) => writeStored("accountsFavoriteOrder", order), { keyAttr: "accountId" });
+  makeSortable(list, ".account-row", (order) => writeStored("accountsOrder", order), { keyAttr: "accountId" });
 }
 
 function fmtDateTime(iso) {

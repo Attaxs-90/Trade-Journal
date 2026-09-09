@@ -63,7 +63,7 @@ try {
     # ueberlebte z. B. die alte static\app.js die Aufteilung in static\js\).
     # Beide Ordner enthalten ausschliesslich Programmcode und stecken
     # vollstaendig im Paket; Nutzerdaten liegen ausserhalb von app_core\.
-    foreach ($dir in @("app", "static")) {
+    foreach ($dir in @("app", "static", "ninjascript")) {
         robocopy (Join-Path $stagingPath $dir) (Join-Path $PSScriptRoot $dir) /MIR /NFL /NDL /NJH /NJS | Out-Null
         if ($LASTEXITCODE -ge 8) {
             Write-Host "Fehler beim Kopieren - Update wurde NICHT vollstaendig eingespielt."
@@ -74,7 +74,7 @@ try {
     # gespiegelt: dort liegen auch Dateien, die nicht Teil des Pakets sind
     # (update.bat, dev_reset.*, build_release.ps1). Ohne /E und /S greift
     # robocopy ohnehin nur die oberste Ebene ab.
-    robocopy $stagingPath $PSScriptRoot /XD "app" "static" /NFL /NDL /NJH /NJS | Out-Null
+    robocopy $stagingPath $PSScriptRoot /XD "app" "static" "ninjascript" /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         Write-Host "Fehler beim Kopieren - Update wurde NICHT vollstaendig eingespielt."
         exit 0

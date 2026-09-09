@@ -1,11 +1,70 @@
 /* Monatsuebersicht, Tages-Modal und der gemeinsame Modal-Rahmen. */
 
-import { api, attachOutsideClose, cls, fmtDate, fmtSigned, ICON_IMAGE, ICON_JOURNAL, state, tile, withFilter } from './core.js';
+import { api, attachOutsideClose, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_IMAGE, ICON_JOURNAL, state, tile, withFilter } from './core.js';
+import { getAccountOptions } from './filters.js';
 import { closeLightbox } from './images.js';
 import { clearActiveJournal, flushJournal, mountJournalEditor, renderJournalList } from './journal.js';
+import { impactColorVar } from './news.js';
 import { flushNotebookNote } from './notebooks.js';
 import { mountView, setActiveNav } from './overview.js';
 import { populateDay } from './share.js';
+
+/* Ob die Monatsuebersicht markierte News-Termine (siehe news.js) als Punkt
+   auf den Kalenderkacheln zeigt - rohe Boolean-Praeferenz wie sidebarCollapsed
+   (siehe CLAUDE.md), kein JSON noetig fuer einen einzelnen Schalter. */
+function loadMonthNewsMarkersEnabled() {
+  return localStorage.getItem("monthNewsMarkersEnabled") !== "false";
+}
+function saveMonthNewsMarkersEnabled(enabled) {
+  try { localStorage.setItem("monthNewsMarkersEnabled", String(enabled)); } catch (e) { /* ignore */ }
+}
+
+const MONTH_CHEVRON = `<svg class="ui-icon month-day-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>`;
+
+/* Spalten der Trade-Tabelle, die sich beim Aufklappen eines Tages in "Alle
+   Tage des Monats" oeffnet - eigene, feste Spaltenliste statt der
+   umsortierbaren TRADE_CARD_FIELDS/DAY_TRADE_FIELDS (Trades-Uebersicht bzw.
+   Tagesansicht), weil hier explizit diese Spalten in dieser Reihenfolge
+   gewuenscht sind und keine Anpassung noetig ist. Kumuliert/Vorschau werden
+   getrennt gefuehrt (nicht wie in DAY_TRADE_FIELDS kombiniert), weil der
+   Nutzer eine eigene Vorschau-Spalte fuer Tageshoch/Tagestief wollte. */
+function monthDayTradesTable(trades, accountNames, strategyNames) {
+  let cum = 0;
+  const cumVals = trades.map(t => (cum += t.net_usd));
+  const highIdx = cumVals.indexOf(Math.max(...cumVals));
+  const lowIdx = cumVals.indexOf(Math.min(...cumVals));
+
+  const rows = trades.map((t, i) => {
+    const accountName = t.account_id ? escapeHtml(accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto";
+    const strategyName = t.strategy_id ? escapeHtml(strategyNames.get(String(t.strategy_id)) || "?") : "–";
+    const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
+    const preview = i === highIdx ? '<span class="badge-tag">Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">Tagestief</span>' : "–");
+    return `<tr>
+      <td>${accountName}</td>
+      <td>${fmtTime(t.entry_time)}</td>
+      <td>${fmtTime(t.exit_time)}</td>
+      <td><span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction === "Long" ? "▲" : "▼"} ${t.direction}</span></td>
+      <td>${fmtVolume(t)}</td>
+      <td>${fmtNum(t.entry_price)}</td>
+      <td>${fmtNum(t.exit_price)}</td>
+      <td>${t.exit_type || "–"}</td>
+      <td class="${cls(t.points)}">${fmtSigned(t.points, 2)}</td>
+      <td class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</td>
+      <td class="${cumClass}">${fmtSigned(cumVals[i])} $</td>
+      <td>${preview}</td>
+      <td>${strategyName}</td>
+    </tr>`;
+  }).join("");
+
+  return `<table class="table month-day-trades-table">
+    <thead><tr>
+      <th>Konto</th><th>Entry-Zeit</th><th>Exit-Zeit</th><th>Richtung</th><th>Größe</th>
+      <th>Entry</th><th>Exit</th><th>Exit-Typ</th><th>Punkte</th><th>Netto $</th>
+      <th>Kumuliert</th><th>Vorschau</th><th>Strategie</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
 
 /* ---------- Monatsübersicht ---------- */
 
@@ -23,6 +82,16 @@ export async function openMonth() {
   content.querySelector(".month-prev").addEventListener("click", () => shiftMonth(-1));
   content.querySelector(".month-next").addEventListener("click", () => shiftMonth(1));
 
+  const settingsToggle = content.querySelector("#month-settings-toggle");
+  const settingsPanel = content.querySelector("#month-settings-panel");
+  settingsToggle.addEventListener("click", () => { settingsPanel.hidden = !settingsPanel.hidden; });
+  const newsCheckbox = content.querySelector("#month-news-toggle");
+  newsCheckbox.checked = loadMonthNewsMarkersEnabled();
+  newsCheckbox.addEventListener("change", () => {
+    saveMonthNewsMarkersEnabled(newsCheckbox.checked);
+    renderMonth();
+  });
+
   await renderMonth();
 }
 
@@ -36,7 +105,35 @@ function shiftMonth(delta) {
 }
 
 export async function renderMonth() {
-  const data = await api(withFilter(`/api/month/${state.monthYear}/${state.monthNum}`));
+  // Neu geladen bei jedem renderMonth() (Monatswechsel, aber auch nach dem
+  // Schliessen des Tages-Modals) - ein zwischenzeitlich geloeschter/
+  // geaenderter Trade darf nicht aus einem alten Aufklapp-Cache kommen.
+  monthDayTradesCache = new Map();
+  const newsMarkersEnabled = loadMonthNewsMarkersEnabled();
+  const monthStart = `${state.monthYear}-${String(state.monthNum).padStart(2, "0")}-01`;
+  const lastDay = new Date(state.monthYear, state.monthNum, 0).getDate();
+  const monthEnd = `${state.monthYear}-${String(state.monthNum).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  const [data, accountOptions, strategiesRes, markedNewsRes] = await Promise.all([
+    api(withFilter(`/api/month/${state.monthYear}/${state.monthNum}`)),
+    getAccountOptions(),
+    api("/api/strategies?include_archived=true"),
+    newsMarkersEnabled ? api(`/api/news/marked?start=${monthStart}&end=${monthEnd}`) : Promise.resolve({ events: [] }),
+  ]);
+  const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
+  const strategyNames = new Map(strategiesRes.strategies.map(s => [String(s.id), s.name]));
+
+  // Pro Tag: Titel-Liste fuer den Tooltip + hoechster Impact fuer die
+  // Punktfarbe (High > Medium > Low > Feiertag/ohne Impact) - ein Tag kann
+  // mehrere markierte Termine haben, gezeigt wird trotzdem nur ein Punkt.
+  const impactRank = { High: 3, Medium: 2, Low: 1 };
+  const newsByDay = new Map();
+  for (const ev of markedNewsRes.events) {
+    const entry = newsByDay.get(ev.day) || { impact: ev.impact, titles: [] };
+    if ((impactRank[ev.impact] || 0) > (impactRank[entry.impact] || 0)) entry.impact = ev.impact;
+    entry.titles.push(ev.title);
+    newsByDay.set(ev.day, entry);
+  }
+
   const content = document.getElementById("content");
   content.querySelector(".month-label").textContent = monthLabel(state.monthYear, state.monthNum);
 
@@ -72,7 +169,10 @@ export async function renderMonth() {
     el.className = "month-cell" + (isWeekend ? " weekend" : "")
       + (hasTrades ? " has-trades " + (d.net >= 0 ? "cell-pos" : "cell-neg") : "")
       + (openable && !hasTrades ? " clickable" : "");
-    el.innerHTML = `<div class="cell-date">${dayNum}</div>`
+    const newsEntry = newsByDay.get(d.date);
+    el.innerHTML = `<div class="cell-date">${dayNum}`
+      + (newsEntry ? `<span class="cell-news-dot" style="background:${impactColorVar(newsEntry.impact)}" title="${escapeHtml(newsEntry.titles.join(", "))}"></span>` : "")
+      + `</div>`
       + `<div class="cell-icons">`
       + `<span class="cell-journal-icon${d.has_journal ? "" : " cell-journal-icon-empty"}" title="${d.has_journal ? "Journal-Eintrag vorhanden - anzeigen" : "Noch kein Journal-Eintrag - anlegen"}">${ICON_JOURNAL}</span>`
       + (d.has_image ? `<span class="cell-image-icon" title="Bild vorhanden">${ICON_IMAGE}</span>` : "")
@@ -100,11 +200,16 @@ export async function renderMonth() {
   }
   for (const d of relevantDays) {
     const hasTrades = d.trades > 0;
+    // Tage mit Trades klappen beim Anklicken ihre Trade-Tabelle direkt in der
+    // Liste auf (siehe monthDayTradesTable) statt das Tagesdetail-Modal zu
+    // oeffnen - das bleibt dem Kalender-Grid oben vorbehalten (siehe dessen
+    // Klick-Handler). Tage ganz ohne Trade (nur Journal/Bild) haben nichts
+    // Aufklappbares und oeffnen weiterhin direkt das Modal.
     const openable = hasTrades || d.has_image || d.has_journal;
     const tr = document.createElement("tr");
     if (openable) tr.style.cursor = "pointer";
     tr.innerHTML = `
-      <td>${d.date}</td>
+      <td>${hasTrades ? MONTH_CHEVRON : ""}${d.date}</td>
       <td>${hasTrades ? d.trades : "–"}</td>
       <td class="${hasTrades ? cls(d.points) : ""}">${hasTrades ? fmtSigned(d.points, 2) : "–"}</td>
       <td class="${hasTrades ? cls(d.net) : ""}">${hasTrades ? fmtSigned(d.net) + " $" : "–"}</td>
@@ -117,9 +222,52 @@ export async function renderMonth() {
       e.stopPropagation();
       openJournalModal(d.date);
     });
-    if (openable) tr.addEventListener("click", () => openDayModal(d.date));
+    if (hasTrades) {
+      tr.addEventListener("click", () => toggleMonthDayExpand(tr, d.date, accountNames, strategyNames));
+    } else if (openable) {
+      tr.addEventListener("click", () => openDayModal(d.date));
+    }
     tbody.appendChild(tr);
   }
+}
+
+// Tag -> bereits geladene Trades des Tages, damit ein erneutes Auf-/Zuklappen
+// desselben Tages (innerhalb dieses Monatsaufrufs) nicht jedes Mal neu laedt.
+let monthDayTradesCache = new Map();
+
+async function toggleMonthDayExpand(tr, day, accountNames, strategyNames) {
+  const existing = tr.nextElementSibling;
+  if (existing && existing.classList.contains("month-day-expand-row")) {
+    existing.remove();
+    tr.classList.remove("expanded");
+    return;
+  }
+  // Nur ein aufgeklappter Tag gleichzeitig - sonst waechst die Liste bei
+  // mehreren offenen Tagen schnell unuebersichtlich lang.
+  closeAllExpandedMonthDays(tr.parentElement);
+
+  tr.classList.add("expanded");
+  const expandRow = document.createElement("tr");
+  expandRow.className = "month-day-expand-row";
+  const cellCount = tr.children.length;
+  expandRow.innerHTML = `<td colspan="${cellCount}"><div class="month-day-trades-loading">Lade Trades…</div></td>`;
+  tr.after(expandRow);
+
+  let trades = monthDayTradesCache.get(day);
+  if (!trades) {
+    const dayData = await api(withFilter(`/api/days/${day}`));
+    trades = dayData.trades;
+    monthDayTradesCache.set(day, trades);
+  }
+  // Row koennte inzwischen (z.B. durch einen erneuten Klick waehrend des
+  // Ladens) schon wieder entfernt worden sein.
+  if (!expandRow.isConnected) return;
+  expandRow.querySelector("td").innerHTML = `<div class="table-scroll">${monthDayTradesTable(trades, accountNames, strategyNames)}</div>`;
+}
+
+function closeAllExpandedMonthDays(tbody) {
+  tbody.querySelectorAll(".month-day-expand-row").forEach(row => row.remove());
+  tbody.querySelectorAll("tr.expanded").forEach(row => row.classList.remove("expanded"));
 }
 
 export function monthLabel(year, month) {

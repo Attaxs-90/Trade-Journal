@@ -51,12 +51,14 @@ robocopy "_update_tmp\app" "app" /MIR /NFL /NDL /NJH /NJS >nul
 if %errorlevel% GEQ 8 goto :copyerror
 robocopy "_update_tmp\static" "static" /MIR /NFL /NDL /NJH /NJS >nul
 if %errorlevel% GEQ 8 goto :copyerror
+robocopy "_update_tmp\ninjascript" "ninjascript" /MIR /NFL /NDL /NJH /NJS >nul
+if %errorlevel% GEQ 8 goto :copyerror
 
 rem Die losen Dateien im Wurzelverzeichnis werden nur kopiert, NICHT
 rem gespiegelt: dort liegen auch Dateien, die nicht Teil des Pakets sind
 rem (update.bat selbst, dev_reset.*, build_release.ps1). Ohne /E und /S
 rem greift robocopy ohnehin nur die oberste Ebene ab.
-robocopy "_update_tmp" "." /XF "config.json" "update.zip" /XD "app" "static" "_update_tmp" /NFL /NDL /NJH /NJS >nul
+robocopy "_update_tmp" "." /XF "config.json" "update.zip" /XD "app" "static" "ninjascript" "_update_tmp" /NFL /NDL /NJH /NJS >nul
 if %errorlevel% GEQ 8 goto :copyerror
 goto :copyok
 

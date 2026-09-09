@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS trades (
     UNIQUE(entry_order_id, exit_order_id)
 );
 
+-- Fingerprints geloeschter Trades (siehe delete_trade) - verhindert, dass ein
+-- normaler Sync (nicht der vollstaendige Resync) einen bewusst geloeschten
+-- Trade aus der Broker-Historie erneut einliest.
+CREATE TABLE IF NOT EXISTS deleted_trade_keys (
+    entry_order_id TEXT NOT NULL,
+    exit_order_id TEXT NOT NULL,
+    PRIMARY KEY (entry_order_id, exit_order_id)
+);
+
 -- Alt: Vorgaenger des Journals (Klartext-Notiz je Tag). Inhalte wurden per
 -- Migration nach journal_entries uebernommen; die Tabelle bleibt nur bestehen,
 -- weil Migrationen append-only sind und auf sie verweisen. Nicht mehr benutzen.
@@ -53,8 +62,28 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     server TEXT NOT NULL,
     last_sync TEXT,
     starting_balance REAL DEFAULT 0,
-    synced_balance REAL
+    synced_balance REAL,
+    sync_path TEXT DEFAULT ''
 );
+
+-- Vom Nutzer in der Newsbar markierte Wirtschaftskalender-Termine (siehe
+-- news.py) - eigenstaendig gespeichert, weil der ForexFactory-Feed selbst
+-- nur die aktuelle und naechste Woche liefert. Ohne diese Tabelle wuerde ein
+-- als wichtig markierter Termin (z.B. ein Feiertag) aus der Monatsuebersicht
+-- verschwinden, sobald er aus dem Feed-Fenster herausfaellt.
+CREATE TABLE IF NOT EXISTS marked_news (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL,
+    title TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT '',
+    impact TEXT NOT NULL DEFAULT 'Low',
+    event_type TEXT NOT NULL DEFAULT 'Misc',
+    time TEXT NOT NULL,
+    ff_url TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(title, currency, time)
+);
+CREATE INDEX IF NOT EXISTS idx_marked_news_day ON marked_news(day);
 
 CREATE TABLE IF NOT EXISTS images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -367,6 +396,25 @@ MIGRATIONS: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_strategy_rules_strategy ON strategy_rules(strategy_id)",              # -> Version 30
     "CREATE INDEX IF NOT EXISTS idx_strategy_rule_groups_strategy ON strategy_rule_groups(strategy_id)",  # -> Version 31
     "CREATE INDEX IF NOT EXISTS idx_trade_rule_status_rule ON trade_rule_status(rule_id)",                # -> Version 32
+    "ALTER TABLE broker_accounts ADD COLUMN sync_path TEXT DEFAULT ''",  # -> Version 33
+    """CREATE TABLE IF NOT EXISTS deleted_trade_keys (
+        entry_order_id TEXT NOT NULL,
+        exit_order_id TEXT NOT NULL,
+        PRIMARY KEY (entry_order_id, exit_order_id)
+    )""",                                                                # -> Version 34
+    """CREATE TABLE IF NOT EXISTS marked_news (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day TEXT NOT NULL,
+        title TEXT NOT NULL,
+        currency TEXT NOT NULL DEFAULT '',
+        impact TEXT NOT NULL DEFAULT 'Low',
+        event_type TEXT NOT NULL DEFAULT 'Misc',
+        time TEXT NOT NULL,
+        ff_url TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        UNIQUE(title, currency, time)
+    )""",                                                                # -> Version 35
+    "CREATE INDEX IF NOT EXISTS idx_marked_news_day ON marked_news(day)",  # -> Version 36
 ]
 
 
@@ -464,14 +512,31 @@ def init_db():
             conn.execute(f"PRAGMA user_version = {target_version}")
 
 
-def insert_trades(trades: list[dict], source: str = "import", account_id: int | None = None) -> int:
+def insert_trades(trades: list[dict], source: str = "import", account_id: int | None = None,
+                   skip_deleted: bool = False) -> int:
     """INSERT OR IGNORE ueber (entry_order_id, exit_order_id) - bereits vorhandene
     Trades werden beim erneuten Sync/Import nicht neu angelegt. Wurde ein Trade
     dabei ignoriert, aber die eingehenden Daten liefern eine volume/risk_usd, die
     in der DB noch fehlt (z. B. Trades von vor Einfuehrung des jeweiligen Felds),
     wird sie per UPDATE nachgetragen - so heilt ein erneuter Sync/Import
     fehlende Lots/Kontrakte oder Risiko, ohne bestehende Zeilen zu duplizieren
-    oder sonst zu veraendern."""
+    oder sonst zu veraendern.
+
+    skip_deleted=True (normaler "Jetzt synchronisieren"-Sync) filtert vorher
+    ueber deleted_trade_keys gemeldete Fingerprints heraus, sonst wuerde ein
+    bewusst geloeschter Trade sofort wieder auftauchen, weil die geloeschte
+    Zeile die UNIQUE-Bremse gegen erneutes Einfuegen mitgeloescht hat. Ein
+    vollstaendiger Resync (full=True in _run_account_sync) uebergibt bewusst
+    False, damit er einen versehentlich geloeschten Trade wiederherstellen kann."""
+    if skip_deleted and trades:
+        with get_conn() as conn:
+            deleted_keys = {
+                (r["entry_order_id"], r["exit_order_id"])
+                for r in conn.execute("SELECT entry_order_id, exit_order_id FROM deleted_trade_keys").fetchall()
+            }
+        if deleted_keys:
+            trades = [t for t in trades if (t["entry_order_id"], t["exit_order_id"]) not in deleted_keys]
+
     inserted = 0
     with get_conn() as conn:
         for t in trades:
@@ -513,7 +578,7 @@ def insert_trades(trades: list[dict], source: str = "import", account_id: int | 
 def list_accounts() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance "
+            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance, sync_path "
             "FROM broker_accounts ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
@@ -525,11 +590,13 @@ def get_account(account_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def add_account(name: str, platform: str, login: str, password: str, server: str, starting_balance: float = 0) -> int:
+def add_account(name: str, platform: str, login: str, password: str, server: str, starting_balance: float = 0,
+                sync_path: str = "") -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO broker_accounts (name, platform, login, password, server, starting_balance) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, platform, login, password, server, starting_balance),
+            "INSERT INTO broker_accounts (name, platform, login, password, server, starting_balance, sync_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, platform, login, password, server, starting_balance, sync_path),
         )
         return cur.lastrowid
 
@@ -542,6 +609,17 @@ def set_starting_balance(account_id: int, starting_balance: float):
 def rename_account(account_id: int, name: str):
     with get_conn() as conn:
         conn.execute("UPDATE broker_accounts SET name = ? WHERE id = ?", (name, account_id))
+
+
+def update_account_connection(account_id: int, login: str, sync_path: str):
+    """Login und sync_path nachtraeglich aendern - z.B. wenn ein NinjaTrader-Demokonto
+    nach Ablauf durch ein neues mit anderem Kontonamen ersetzt wird (siehe
+    ninjatrader_adapter.py: login filtert die geteilte Sync-Datei pro Konto)."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE broker_accounts SET login = ?, sync_path = ? WHERE id = ?",
+            (login, sync_path, account_id),
+        )
 
 
 def set_synced_balance(account_id: int, balance: float):
@@ -566,11 +644,25 @@ def delete_trade(trade_id: int) -> list[dict]:
     erreichbar sind, aber weiter im Tagesview auftauchen bzw. Plattenplatz
     belegen. Gibt die geloeschten Bild-Zeilen zurueck, damit der Aufrufer die
     JPEG-Dateien loeschen kann - die Dateiverwaltung liegt bewusst in
-    images.py, nicht hier (gleiche Aufteilung wie bei api_delete_image)."""
+    images.py, nicht hier (gleiche Aufteilung wie bei api_delete_image).
+
+    Merkt sich zusaetzlich den (entry_order_id, exit_order_id)-Fingerprint des
+    Trades in deleted_trade_keys: insert_trades() ueberspringt diese beim
+    naechsten normalen Sync, sonst wuerde ein geloeschter, aber vom Broker
+    weiterhin gemeldeter Trade beim naechsten "Jetzt synchronisieren" sofort
+    wieder auftauchen - siehe skip_deleted-Parameter dort."""
     with get_conn() as conn:
         images = [dict(r) for r in conn.execute(
             "SELECT * FROM images WHERE trade_id = ?", (trade_id,)
         ).fetchall()]
+        row = conn.execute(
+            "SELECT entry_order_id, exit_order_id FROM trades WHERE id = ?", (trade_id,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "INSERT OR IGNORE INTO deleted_trade_keys (entry_order_id, exit_order_id) VALUES (?, ?)",
+                (row["entry_order_id"], row["exit_order_id"]),
+            )
         conn.execute("DELETE FROM images WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trade_tags WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
@@ -1018,6 +1110,11 @@ EXPORT_FIELDS = [
     "points", "gross_usd", "net_usd",
 ]
 
+# Keine echten Spalten, sondern von get_trades_for_export() pro Tag berechnet
+# (siehe dort) - eigene Liste statt Teil von EXPORT_FIELDS, weil EXPORT_FIELDS
+# dort auch direkt als SQL-Spaltenliste dient.
+EXPORT_COMPUTED_FIELDS = ["cumulative_net", "day_extreme"]
+
 
 def count_trades_for_export(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
                              tag_logic: str = "or", strategy_keys: list[str] | None = None,
@@ -1032,15 +1129,40 @@ def count_trades_for_export(account_keys: list[str] | None = None, tag_keys: lis
 def get_trades_for_export(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
                            tag_logic: str = "or", strategy_keys: list[str] | None = None,
                            start: str | None = None, end: str | None = None) -> list[dict]:
-    """Trades fuer den Export - nur die Spalten aus EXPORT_FIELDS, keine Tags/
-    Bild-Flags (die gehoeren nicht zu den echten Broker-Datenpunkten)."""
+    """Trades fuer den Export - die Spalten aus EXPORT_FIELDS plus die
+    berechneten EXPORT_COMPUTED_FIELDS (kumuliertes Tagesergebnis und
+    Tageshoch/-tief-Markierung), keine Tags/Bild-Flags (die gehoeren nicht zu
+    den echten Broker-Datenpunkten).
+
+    Die Reihenfolge (day ASC, entry_time ASC) ist fuer eine sinnvolle
+    Kumulierung zwingend - nur so laesst sich im Export nachvollziehen, an
+    welchem Trade des Tages das Tageshoch/-tief lag (z. B. um zu pruefen, ob
+    ein Abbruch nach dem Tagestief sinnvoll gewesen waere)."""
     where, params = _trade_filters_ranged(account_keys, tag_keys, tag_logic, strategy_keys, start, end)
     cols = ", ".join(EXPORT_FIELDS)
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT {cols} FROM trades {where} ORDER BY day ASC, entry_time ASC", params
+            f"SELECT day, {cols} FROM trades {where} ORDER BY day ASC, entry_time ASC", params
         ).fetchall()
-        return [dict(r) for r in rows]
+    trades = [dict(r) for r in rows]
+
+    # Kumuliert wird pro Tag neu (ein Tag ist in sich abgeschlossen) - ein
+    # Durchlauf pro Tagesgruppe statt eines erneuten Blicks zurueck je Trade.
+    day_groups: dict[str, list[dict]] = {}
+    for t in trades:
+        day_groups.setdefault(t["day"], []).append(t)
+    for day_trades in day_groups.values():
+        cum_vals = []
+        cum = 0.0
+        for t in day_trades:
+            cum += t["net_usd"]
+            cum_vals.append(cum)
+        high_idx = cum_vals.index(max(cum_vals))
+        low_idx = cum_vals.index(min(cum_vals))
+        for i, t in enumerate(day_trades):
+            t["cumulative_net"] = round(cum_vals[i], 2)
+            t["day_extreme"] = "Tageshoch" if i == high_idx else ("Tagestief" if i == low_idx else "")
+    return trades
 
 
 def journal_day_details(start: str | None = None, end: str | None = None) -> dict[str, dict]:
@@ -2019,3 +2141,43 @@ def strategy_summary(strategy_id: int) -> dict:
         "net_usd": row["net_usd"],
         "rated_trade_count": rated,
     }
+
+
+# ---------- Markierte News (siehe news.py und marked_news in SCHEMA) ----------
+# Der ForexFactory-Feed liefert nur die aktuelle+naechste Woche - was der
+# Nutzer in der Newsbar markiert, muss deshalb dauerhaft in einer eigenen
+# Tabelle stehen, sonst verschwaende die Markierung aus der Monatsuebersicht,
+# sobald der Termin aus dem Feed-Fenster herausfaellt.
+
+def list_marked_news(start: str | None = None, end: str | None = None) -> list[dict]:
+    where, params = "", []
+    if start and end:
+        where, params = "WHERE day BETWEEN ? AND ?", [start, end]
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM marked_news {where} ORDER BY time ASC", params
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_marked_news(day: str, title: str, currency: str, impact: str, event_type: str,
+                     time: str, ff_url: str) -> dict:
+    """INSERT OR IGNORE ueber (title, currency, time) - derselbe Termin laesst
+    sich nicht doppelt markieren. Gibt die (neue oder schon vorhandene) Zeile
+    zurueck, damit das Frontend sofort die id fuer ein spaeteres Entmarkieren hat."""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO marked_news (day, title, currency, impact, event_type, time, ff_url, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (day, title, currency, impact, event_type, time, ff_url, datetime.now().isoformat()),
+        )
+        row = conn.execute(
+            "SELECT * FROM marked_news WHERE title = ? AND currency = ? AND time = ?",
+            (title, currency, time),
+        ).fetchone()
+        return dict(row)
+
+
+def remove_marked_news(marked_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM marked_news WHERE id = ?", (marked_id,))

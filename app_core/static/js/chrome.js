@@ -56,7 +56,9 @@ function initGlobalSync() {
       const [accounts, platforms] = await Promise.all([api("/api/accounts"), getPlatforms()]);
       const autoAccounts = accounts.filter(acc => {
         const p = platforms.find(pl => pl.key === acc.platform);
-        return p && !p.manual;
+        // Wie renderAccounts() in analytics.js: manuelle Plattformen (NinjaTrader)
+        // syncen trotzdem automatisch, wenn ein sync_path hinterlegt ist.
+        return p && (!p.manual || !!acc.sync_path);
       });
       if (!autoAccounts.length) {
         btn.title = "Keine automatisch synchronisierbaren Konten verbunden.";

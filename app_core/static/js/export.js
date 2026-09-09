@@ -7,8 +7,8 @@ import { api, escapeHtml, readStoredArray, writeStored } from './core.js';
 import { buildTagChipGroups, getAccountOptions, getTags } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
 
-/* Muss mit db.EXPORT_FIELDS (db.py) uebereinstimmen - zwei Sprachen, eine
-   Liste je Seite. Neues Broker-Feld: hier UND dort ergaenzen. */
+/* Muss mit db.EXPORT_FIELDS/db.EXPORT_COMPUTED_FIELDS (db.py) uebereinstimmen -
+   zwei Sprachen, eine Liste je Seite. Neues Broker-Feld: hier UND dort ergaenzen. */
 const EXPORT_FIELD_GROUPS = [
   {
     title: "Rohdaten (vom Broker)",
@@ -33,6 +33,17 @@ const EXPORT_FIELD_GROUPS = [
       { key: "points", label: "Punkte" },
       { key: "gross_usd", label: "Brutto $" },
       { key: "net_usd", label: "Netto $" },
+    ],
+  },
+  {
+    // Setzt voraus, dass die Trades in der richtigen Reihenfolge exportiert
+    // werden (siehe get_trades_for_export() in db.py: day ASC, entry_time
+    // ASC) - sonst liesse sich "Tageshoch"/"Tagestief" nicht sinnvoll einem
+    // Trade zuordnen.
+    title: "Kumuliert (pro Tag, in Reihenfolge)",
+    fields: [
+      { key: "cumulative_net", label: "Kumuliert $" },
+      { key: "day_extreme", label: "Tageshoch/-tief" },
     ],
   },
 ];

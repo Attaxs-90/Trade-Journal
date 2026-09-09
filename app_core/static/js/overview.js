@@ -1,11 +1,12 @@
 /* Uebersichtsseite mit Kennzahlen-Kacheln und Equity-Kurve, plus mountView(). */
 
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_IMAGE, ICON_JOURNAL, ICON_NOTE, ICON_SHARE, makeSortable, readStoredArray, state, strategiesQS, tile, withFilter, writeStored } from './core.js';
+import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_DELETE, ICON_IMAGE, ICON_JOURNAL, ICON_NOTE, ICON_OPEN, ICON_SHARE, makeSortable, readStoredArray, state, strategiesQS, tile, withFilter, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { getAccountOptions, renderAccountChipRow, renderStrategyChipRow, renderTagFilter } from './filters.js';
 import { clearActiveJournal, flushJournal } from './journal.js';
 import { clearActiveNotebookNote, flushNotebookNote } from './notebooks.js';
+import { mountHelpButton } from './help.js';
 import { openShareModal } from './share.js';
 import { bulkAssignStrategy } from './strategies.js';
 import { renderTradeTagCell } from './tags.js';
@@ -29,6 +30,7 @@ export async function mountView(templateId) {
   const content = document.getElementById("content");
   content.innerHTML = "";
   content.appendChild(document.getElementById(templateId).content.cloneNode(true));
+  mountHelpButton(content, templateId);
   return content;
 }
 
@@ -230,7 +232,10 @@ const SORTABLE_TRADE_KEYS = new Set(["day", "entry_time", "direction", "volume",
    nicht angefasst werden. */
 const TRADE_CARD_FIELDS = [
   { key: "day", label: "Datum", render: (t) => t.day },
-  { key: "account", label: "Konto", render: (t, ctx) => t.account_id ? escapeHtml(ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto" },
+  { key: "account", label: "Konto", render: (t, ctx) => {
+    const name = t.account_id ? (ctx.accountNames.get(String(t.account_id)) || `Konto ${t.account_id}`) : "CSV / ohne Konto";
+    return `<span class="cell-ellipsis" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
+  } },
   { key: "entry_time", label: "Entry-Zeit", render: (t) => fmtTime(t.entry_time) },
   { key: "direction", label: "Richtung", render: (t) => `<span class="${t.direction === "Long" ? "dir-long" : "dir-short"}">${t.direction === "Long" ? "▲" : "▼"} ${t.direction}</span>` },
   { key: "volume", label: "Größe", render: (t) => fmtVolume(t) },
@@ -238,7 +243,11 @@ const TRADE_CARD_FIELDS = [
   { key: "exit_price", label: "Exit", render: (t) => fmtNum(t.exit_price) },
   { key: "points", label: "Punkte", render: (t) => `<span class="${cls(t.points)}">${fmtSigned(t.points, 2)}</span>` },
   { key: "net_usd", label: "Netto $", render: (t) => `<span class="${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>` },
-  { key: "strategy", label: "Strategie", render: (t, ctx) => t.strategy_id ? escapeHtml(ctx.strategyNames.get(String(t.strategy_id)) || "?") : "–" },
+  { key: "strategy", label: "Strategie", render: (t, ctx) => {
+    if (!t.strategy_id) return "–";
+    const name = ctx.strategyNames.get(String(t.strategy_id)) || "?";
+    return `<span class="cell-ellipsis" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
+  } },
   { key: "tags", label: "Tags", render: null },
 ];
 const TRADE_CARD_FIELD_KEYS = TRADE_CARD_FIELDS.map(f => f.key);
@@ -324,7 +333,7 @@ function updateTradesBulkBar() {
   const n = tradesSelectedIds.size;
   const countEl = document.getElementById("trades-bulk-count");
   if (countEl) countEl.textContent = n === 1 ? "1 Trade ausgewählt" : `${n} Trades ausgewählt`;
-  ["trades-bulk-clear", "trades-bulk-strategy-btn", "trades-bulk-delete-journal"]
+  ["trades-bulk-clear", "trades-bulk-strategy-btn", "trades-bulk-delete-journal", "trades-bulk-delete-trades"]
     .forEach(id => { const btn = document.getElementById(id); if (btn) btn.disabled = n === 0; });
 }
 
@@ -342,7 +351,7 @@ function renderTradesTable() {
   const sort = state.tradesSort || { key: "day", dir: "desc" };
   const selectAllCb = document.createElement("input");
   selectAllCb.type = "checkbox";
-  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges">Status</th><th class="col-share">Teilen</th><th class="col-open">Öffnen</th>` + order.map(key => {
+  theadRow.innerHTML = `<th class="col-check"></th><th class="col-badges">Status</th><th class="col-actions">Aktionen</th>` + order.map(key => {
     const field = TRADE_CARD_FIELDS.find(f => f.key === key);
     if (!SORTABLE_TRADE_KEYS.has(key)) return `<th>${escapeHtml(field.label)}</th>`;
     const active = sort.key === key;
@@ -364,7 +373,7 @@ function renderTradesTable() {
 
   tbody.innerHTML = "";
   if (!trades.length) {
-    tbody.innerHTML = `<tr><td colspan="${order.length + 4}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${order.length + 3}"><div class="empty-state">Keine Trades für die aktuelle Filterauswahl.</div></td></tr>`;
     selectAllCb.disabled = true;
     updateTradesBulkBar();
     return;
@@ -382,8 +391,11 @@ function renderTradesTable() {
       + (t.has_journal ? `<span class="trade-card-badge" title="Journal-Eintrag (Bewertung/Review) vorhanden">${ICON_JOURNAL}</span>` : "");
     tr.innerHTML = `<td class="col-check"><input type="checkbox" class="trades-row-select" data-id="${t.id}"${tradesSelectedIds.has(t.id) ? " checked" : ""}></td>`
       + `<td class="col-badges">${badges}</td>`
-      + `<td class="col-share"><button type="button" class="trade-share-row-btn" title="Als Bild teilen" aria-label="Als Bild teilen">${ICON_SHARE}</button></td>`
-      + `<td class="col-open"><button type="button" class="trade-open-row-btn" title="Trade öffnen" aria-label="Trade öffnen">Öffnen</button></td>`
+      + `<td class="col-actions">`
+      + `<button type="button" class="trade-open-row-btn" title="Trade öffnen" aria-label="Trade öffnen">${ICON_OPEN}</button>`
+      + `<button type="button" class="trade-share-row-btn" title="Als Bild teilen" aria-label="Als Bild teilen">${ICON_SHARE}</button>`
+      + `<button type="button" class="trade-delete-row-btn" title="Trade löschen" aria-label="Trade löschen">${ICON_DELETE}</button>`
+      + `</td>`
       + order.map(key => {
       if (key === "tags") return `<td class="tag-cell"></td>`;
       const field = TRADE_CARD_FIELDS.find(f => f.key === key);
@@ -404,6 +416,14 @@ function renderTradesTable() {
     openBtn.addEventListener("click", (e) => { e.stopPropagation(); openTrade(t.id); });
     const shareBtn = tr.querySelector(".trade-share-row-btn");
     shareBtn.addEventListener("click", (e) => { e.stopPropagation(); openShareModal(t); });
+    const deleteBtn = tr.querySelector(".trade-delete-row-btn");
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!await confirmDelete("Soll dieser Trade endgültig gelöscht werden? Notizen, Bilder und der Journal-Eintrag zu diesem Trade werden mitgelöscht.")) return;
+      await api(`/api/trades/${t.id}`, { method: "DELETE" });
+      tradesSelectedIds.delete(t.id);
+      await openTrades(state.tradesPage || 1);
+    });
     const tagCell = tr.querySelector(".tag-cell");
     if (tagCell) {
       tagCell.addEventListener("click", (e) => e.stopPropagation());
@@ -431,6 +451,21 @@ function renderTradesTable() {
     updateTradesBulkBar();
   });
   updateTradesBulkBar();
+}
+
+async function bulkDeleteTrades() {
+  const ids = [...tradesSelectedIds];
+  if (!ids.length) return;
+  const message = ids.length === 1
+    ? "Soll der ausgewählte Trade endgültig gelöscht werden? Notizen, Bilder und der Journal-Eintrag dazu werden mitgelöscht."
+    : `Sollen die ${ids.length} ausgewählten Trades endgültig gelöscht werden? Notizen, Bilder und Journal-Einträge dazu werden mitgelöscht.`;
+  if (!await confirmDelete(message)) return;
+  await api("/api/trades/bulk-delete", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trade_ids: ids }),
+  });
+  tradesSelectedIds.clear();
+  await openTrades(state.tradesPage || 1);
 }
 
 async function bulkDeleteTradeJournalEntries() {
@@ -502,6 +537,7 @@ export async function openTrades(page = 1) {
     renderTradesTable();
   };
   document.getElementById("trades-bulk-delete-journal").onclick = () => bulkDeleteTradeJournalEntries();
+  document.getElementById("trades-bulk-delete-trades").onclick = () => bulkDeleteTrades();
   // Nach einer Sammelaktion die Tabelle neu laden - Strategie und
   // Journal-/Bild-Markierungen stehen in den Trade-Zeilen.
   document.getElementById("trades-bulk-strategy-btn").onclick = () =>

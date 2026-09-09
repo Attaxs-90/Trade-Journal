@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$files = @("app", "static", "run.py", "requirements.txt", "VERSION", "CHANGELOG.md", "README.md", "update_check.ps1")
+$files = @("app", "static", "ninjascript", "run.py", "requirements.txt", "VERSION", "CHANGELOG.md", "README.md", "update_check.ps1")
 
 foreach ($f in $files) {
     if (-not (Test-Path $f)) {

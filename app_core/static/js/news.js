@@ -42,10 +42,47 @@ function saveNewsFilterState() {
   }));
 }
 
-function impactColorVar(impact) {
+export function impactColorVar(impact) {
   const cs = getComputedStyle(document.documentElement);
   const map = { High: "--impact-high", Medium: "--impact-medium", Low: "--impact-low" };
   return cs.getPropertyValue(map[impact] || "--impact-none").trim();
+}
+
+/* Vom Nutzer markierte Termine (Stern-Button je Zeile) - persistiert in der
+   DB (siehe marked_news in db.py), weil der ForexFactory-Feed selbst nur die
+   aktuelle+naechste Woche liefert und eine Markierung sonst nicht dauerhaft
+   in der Monatsuebersicht stehen bleiben koennte. key -> id, damit sich eine
+   Markierung ueber DELETE /api/news/marked/{id} wieder entfernen laesst. */
+let markedNewsMap = new Map();
+
+function markedKey(e) { return `${e.title}|${e.currency}|${e.time}`; }
+
+async function loadMarkedNews() {
+  try {
+    const { events } = await api("/api/news/marked");
+    markedNewsMap = new Map(events.map(ev => [`${ev.title}|${ev.currency}|${ev.time}`, ev.id]));
+  } catch (err) { /* Markierungen bleiben dann einfach unsichtbar, kein harter Fehler */ }
+}
+
+async function toggleMarkedNews(e) {
+  const key = markedKey(e);
+  const existingId = markedNewsMap.get(key);
+  if (existingId) {
+    await api(`/api/news/marked/${existingId}`, { method: "DELETE" });
+  } else {
+    await api("/api/news/marked", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        day: e.time.slice(0, 10), title: e.title, currency: e.currency,
+        impact: e.impact, event_type: e.event_type, time: e.time, ff_url: e.ff_url,
+      }),
+    });
+  }
+  // Kein optimistisches Update - dieselbe Vorgehensweise wie bei den
+  // To-Do-Listen (siehe todos.js): nach jeder Aenderung neu laden statt
+  // den lokalen Zustand zu raten.
+  await loadMarkedNews();
+  renderNewsSections();
 }
 
 export function renderNewsFilters() {
@@ -108,21 +145,31 @@ function newsRowHtml(e, showFtmo) {
   const weekday = dt.toLocaleDateString("de-DE", { weekday: "short" });
   const time = dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   const highlight = showFtmo && e.ftmo_status && newsFilterState.ftmoHighlight.has("on");
+  const marked = markedNewsMap.has(markedKey(e));
   return `
-    <a class="news-row${highlight ? " news-row-ftmo-highlight" : ""}" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
-      <div class="news-row-line1">
-        <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
-        <span class="news-row-time">${weekday} ${time}</span>
-        <span class="news-row-currency">${escapeHtml(e.currency)}</span>
-        <span class="news-row-title">${escapeHtml(e.title)}</span>
-        ${showFtmo ? ftmoMarkerHtml(e) : ""}
-      </div>
-    </a>`;
+    <div class="news-row${highlight ? " news-row-ftmo-highlight" : ""}">
+      <a class="news-row-link" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
+        <div class="news-row-line1">
+          <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
+          <span class="news-row-time">${weekday} ${time}</span>
+          <span class="news-row-currency">${escapeHtml(e.currency)}</span>
+          <span class="news-row-title">${escapeHtml(e.title)}</span>
+          ${showFtmo ? ftmoMarkerHtml(e) : ""}
+        </div>
+      </a>
+      <button type="button" class="news-row-mark${marked ? " active" : ""}"
+        title="${marked ? "Markierung entfernen" : "Für die Monatsübersicht markieren - bleibt dauerhaft erhalten, auch in vergangenen Monaten"}">
+        <svg viewBox="0 0 24 24" fill="${marked ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
+    </div>`;
 }
 
 function fillNewsList(elId, events, emptyMsg, showFtmo = false) {
   const el = document.getElementById(elId);
   el.innerHTML = events.length ? events.map(e => newsRowHtml(e, showFtmo)).join("") : `<div class="empty-state">${emptyMsg}</div>`;
+  el.querySelectorAll(".news-row-mark").forEach((btn, i) => {
+    btn.addEventListener("click", () => toggleMarkedNews(events[i]));
+  });
 }
 
 export function renderNewsSections() {
@@ -182,6 +229,7 @@ async function loadNews() {
   } catch (e) {
     newsLoadFailed = true;
   }
+  await loadMarkedNews();
   renderNewsSections();
 }
 

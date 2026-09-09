@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.10.0
+- Neuer Menüpunkt-übergreifender Hilfe-Button (Fragezeichen oben rechts) auf
+  jeder Seite mit einer kurzen Anleitung, was die Seite zeigt und wie man
+  sich durch sie bewegt.
+- NinjaTrader-Auto-Sync: eine NinjaScript-AddOn (`ninjascript/TradeJournalSync.cs`)
+  schreibt Fills fortlaufend in eine Datei, die die App wie einen
+  Executions-Export einliest - kein Broker-Login nötig, Zuordnung über den
+  NinjaTrader-Kontonamen. Login/Sync-Pfad eines Kontos lassen sich nachträglich
+  ändern (z. B. bei einem neuen Demokonto).
+- Konten & Sync: Konten lassen sich einklappen, als Favorit markieren (dann
+  oben in einem eigenen Bereich) und per Drag & Drop umsortieren - für den
+  Überblick bei vielen Konten.
+- Trades-Übersicht: einzelne oder mehrere ausgewählte Trades lassen sich
+  endgültig löschen. "Jetzt synchronisieren" überspringt dabei bewusst
+  gelöschte alte Trades, "Vollständig neu synchronisieren" holt sie
+  absichtlich wieder.
+- Monatsübersicht: ein Klick auf einen Handelstag in "Alle Tage des Monats"
+  klappt jetzt dessen einzelne Trades direkt in der Liste auf (Konto, Zeiten,
+  Ein-/Ausstieg, kumuliertes Ergebnis, Tageshoch/-tief, Strategie). Neu auch
+  eine "Einstellungen"-Option, die markierte Wirtschafts-News (Stern-Button in
+  der Newsbar, z. B. Feiertage oder High-Impact-Termine) als dezenten Punkt
+  auf den Kalenderkacheln zeigt - bleibt dauerhaft erhalten, auch für
+  vergangene Monate, unabhängig vom kurzen Zeitfenster des News-Feeds.
+- Export: zwei neue Felder "Kumuliert $" und "Tageshoch/-tief" (Trades werden
+  dafür je Tag in echter Reihenfolge exportiert).
+- Fix: horizontale Scrollbar in der Trades-Übersicht (zu viele Spalten für die
+  verfügbare Breite) durch kompaktere Aktions-Spalte und gekürzte
+  Konto-/Strategienamen behoben.
+
 ## 1.9.0
 - Neuer Menüpunkt "Export": Trades als CSV oder JSON exportieren, mit frei
   wählbaren Feldern (nur echte Broker-Datenpunkte plus die drei daraus
