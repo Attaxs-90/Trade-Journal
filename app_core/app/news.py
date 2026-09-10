@@ -163,3 +163,103 @@ def fetch_calendar(force: bool = False) -> dict:
     _cache["fetched_at"] = now
     _cache["events"] = events
     return _cache
+
+
+# ---------- Verlaufs-Scraper (nur High-Impact + Feiertage, siehe api_scrape_news_history) ----------
+# Der Feed oben deckt nur die aktuelle+naechste Woche ab. Fuer die Vergangenheit
+# gibt es kein offizielles API - ForexFactorys Kalenderseite selbst liefert die
+# Termine eines Monats aber serverseitig gerendert als eingebettetes JSON
+# (window.calendarComponentStates[1] = {days: [...]}), nicht per JavaScript
+# nachgeladen. Bewusst kein HTML-Parsing der <td>-Zellen, sondern dieses fertig
+# strukturierte JSON direkt ausgelesen - robuster, so lange ForexFactory diese
+# Struktur nicht aendert. Nur auf expliziten Anstoss (Button), nicht automatisch
+# beim Start: ca. eine Anfrage pro Monat, kein offizielles API, also bewusst
+# sparsam (Pause zwischen Anfragen) und nur so viel wie noetig.
+_CALENDAR_PAGE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+}
+_CALENDAR_PAGE_TIMEOUT = 20
+
+
+class ScrapeError(Exception):
+    pass
+
+
+def _extract_calendar_days(html: str) -> list[dict]:
+    """Liest die eingebettete window.calendarComponentStates[1]-Struktur aus
+    dem Seiten-HTML. Klammer-Zaehlung statt eines gierigen Regex, weil das
+    JSON selbst eckige Klammern enthaelt (Sub-Arrays); bricht mit einer
+    klaren Fehlermeldung ab statt stillschweigend falsche/leere Daten zu
+    liefern, wenn ForexFactory dieses Format mal aendert."""
+    m = re.search(r"window\.calendarComponentStates\[1\]\s*=\s*\{\s*days:\s*(\[)", html)
+    if not m:
+        raise ScrapeError("ForexFactory-Seitenstruktur nicht erkannt (calendarComponentStates fehlt) - Scraper muss angepasst werden.")
+    start = m.start(1)
+    depth, i, in_str, esc = 0, start, False, False
+    while i < len(html):
+        c = html[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "[":
+                depth += 1
+            elif c == "]":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+        i += 1
+    try:
+        return json.loads(html[start:i])
+    except json.JSONDecodeError as e:
+        raise ScrapeError(f"ForexFactory-Kalenderdaten nicht lesbar: {e}") from e
+
+
+_IMPACT_NAME_TO_LABEL = {"high": "High", "holiday": "Holiday"}
+
+
+def scrape_month(year: int, month: int) -> list[dict]:
+    """Ein Monat des ForexFactory-Kalenders, nur High-Impact- und
+    Feiertagstermine (siehe Nutzer-Entscheidung: kein voller Verlaufsimport
+    aller Impact-Stufen wegen Datenmenge/Rauschen). Liefert dieselbe Feldform
+    wie marked_news erwartet (siehe db.bulk_add_news_history)."""
+    month_str = datetime(year, month, 1).strftime("%b").lower()
+    url = f"https://www.forexfactory.com/calendar?month={month_str}.{year}"
+    req = urllib.request.Request(url, headers=_CALENDAR_PAGE_HEADERS)
+    with urllib.request.urlopen(req, timeout=_CALENDAR_PAGE_TIMEOUT) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+
+    events = []
+    for day in _extract_calendar_days(html):
+        # date sieht z.B. so aus: "Mon <span>Jan 1</span>" - HTML-Tags raus,
+        # dann die Tageszahl am Ende nehmen (robuster als eine feste Anzahl
+        # Woerter davor zu erwarten).
+        date_text = re.sub(r"<[^>]+>", " ", day.get("date") or "")
+        day_match = re.search(r"(\d{1,2})\s*$", date_text.strip())
+        if not day_match:
+            continue
+        day_iso = f"{year:04d}-{month:02d}-{int(day_match.group(1)):02d}"
+        for ev in day.get("events", []):
+            impact_label = _IMPACT_NAME_TO_LABEL.get(ev.get("impactName"))
+            if not impact_label:
+                continue
+            title = (ev.get("name") or "").strip()
+            if not title:
+                continue
+            events.append(dict(
+                day=day_iso,
+                title=title,
+                currency=ev.get("currency") or ev.get("country") or "",
+                impact=impact_label,
+                event_type=_categorize(title),
+                time=f"{day_iso}T12:00:00",
+                ff_url=_ff_day_url(datetime.fromisoformat(day_iso)),
+            ))
+    return events

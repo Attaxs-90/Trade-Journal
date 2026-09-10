@@ -584,15 +584,39 @@
         <div class="card-title">Tage</div>
         <div class="card-title-actions">
           <div class="inline-filter month-settings-filter">
-            <button type="button" class="inline-filter-toggle" id="month-settings-toggle">Einstellungen</button>
-            <div class="inline-filter-panel" id="month-settings-panel" hidden>
+            <button type="button" class="inline-filter-toggle" id="month-settings-toggle">News-Einstellungen</button>
+            <div class="inline-filter-panel month-news-settings-panel" id="month-settings-panel" hidden>
               <label class="filter-item">
-                <input type="checkbox" id="month-news-toggle"> News-Markierungen anzeigen
+                <input type="checkbox" id="month-news-toggle"> News-Markierungen im Kalender anzeigen
               </label>
+              <div class="newsbar-filter-group">
+                <div class="newsbar-filter-group-title">
+                  Impact (<a href="#" data-filter="impact" data-mode="all">alle</a>, <a href="#" data-filter="impact" data-mode="none">keine</a>)
+                </div>
+                <div class="newsbar-chip-row" id="month-news-filter-impact"></div>
+              </div>
+              <div class="newsbar-filter-group">
+                <div class="newsbar-filter-group-title">
+                  Event-Typ (<a href="#" data-filter="type" data-mode="all">alle</a>, <a href="#" data-filter="type" data-mode="none">keine</a>)
+                </div>
+                <div class="newsbar-chip-row" id="month-news-filter-types"></div>
+              </div>
+              <div class="newsbar-filter-group">
+                <div class="newsbar-filter-group-title">
+                  Währungen (<a href="#" data-filter="currency" data-mode="all">alle</a>, <a href="#" data-filter="currency" data-mode="none">keine</a>)
+                </div>
+                <div class="newsbar-chip-row" id="month-news-filter-currencies"></div>
+              </div>
               <div class="month-settings-hint">
-                Zeigt einen kleinen Punkt bei Tagen mit einem markierten Termin (Stern-Symbol
-                in der Newsbar rechts). Markierte Termine bleiben dauerhaft erhalten, auch in
-                vergangenen Monaten.
+                Zeigt ein Label bei Tagen mit einem erfassten Termin (High-Impact oder
+                Feiertag) - anklicken zeigt, welcher Termin das war. Einmal erfasste Termine
+                bleiben dauerhaft erhalten. Wird automatisch einmal pro Monat bis Ende des
+                laufenden Jahres nachgeladen (auch bereits veröffentlichte künftige Monate);
+                der Button unten stößt das bei Bedarf sofort an.
+              </div>
+              <div class="month-news-scrape-row">
+                <button type="button" class="btn btn-secondary" id="month-news-scrape-btn">Jetzt aktualisieren</button>
+                <div class="month-news-scrape-status" id="month-news-scrape-status"></div>
               </div>
             </div>
           </div>

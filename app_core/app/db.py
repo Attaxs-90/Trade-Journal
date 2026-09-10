@@ -66,11 +66,13 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     sync_path TEXT DEFAULT ''
 );
 
--- Vom Nutzer in der Newsbar markierte Wirtschaftskalender-Termine (siehe
--- news.py) - eigenstaendig gespeichert, weil der ForexFactory-Feed selbst
--- nur die aktuelle und naechste Woche liefert. Ohne diese Tabelle wuerde ein
--- als wichtig markierter Termin (z.B. ein Feiertag) aus der Monatsuebersicht
--- verschwinden, sobald er aus dem Feed-Fenster herausfaellt.
+-- Dauerhafter Verlauf wichtiger Wirtschaftskalender-Termine (High-Impact,
+-- Feiertage) - siehe news.scrape_month() in news.py. Eigenstaendig
+-- gespeichert, weil der ForexFactory-Feed selbst nur die aktuelle und
+-- naechste Woche liefert; ohne diese Tabelle waere ein solcher Termin (z.B.
+-- ein Feiertag) in der Monatsuebersicht weg, sobald er aus dem
+-- Feed-Fenster herausfaellt. Name "marked_news" ist historisch (frueher per
+-- Klick markiert) und bleibt so, siehe Kommentar bei list_news_history().
 CREATE TABLE IF NOT EXISTS marked_news (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     day TEXT NOT NULL,
@@ -84,6 +86,16 @@ CREATE TABLE IF NOT EXISTS marked_news (
     UNIQUE(title, currency, time)
 );
 CREATE INDEX IF NOT EXISTS idx_marked_news_day ON marked_news(day);
+
+-- Kleine generische Key-Value-Ablage fuer Anwendungszustand, der nicht in
+-- config.json gehoert (Nutzereinstellung, siehe CLAUDE.md), sondern von der
+-- App selbst geschrieben wird - aktuell nur der Monat des letzten
+-- automatischen News-Verlauf-Abgleichs (siehe _maybe_scrape_news_history in
+-- main.py).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS images (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -415,6 +427,10 @@ MIGRATIONS: list[str] = [
         UNIQUE(title, currency, time)
     )""",                                                                # -> Version 35
     "CREATE INDEX IF NOT EXISTS idx_marked_news_day ON marked_news(day)",  # -> Version 36
+    """CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""",                                                                # -> Version 37
 ]
 
 
@@ -2143,13 +2159,16 @@ def strategy_summary(strategy_id: int) -> dict:
     }
 
 
-# ---------- Markierte News (siehe news.py und marked_news in SCHEMA) ----------
-# Der ForexFactory-Feed liefert nur die aktuelle+naechste Woche - was der
-# Nutzer in der Newsbar markiert, muss deshalb dauerhaft in einer eigenen
-# Tabelle stehen, sonst verschwaende die Markierung aus der Monatsuebersicht,
-# sobald der Termin aus dem Feed-Fenster herausfaellt.
+# ---------- News-Verlauf (Tabelle heisst in SCHEMA/Migrationen weiter
+# marked_news - eine Umbenennung braeuchte eine weitere Migration fuer nichts
+# als Kosmetik, siehe CLAUDE.md "Migrationen: append-only") ----------
+# Der ForexFactory-Feed liefert nur die aktuelle+naechste Woche - dauerhaft
+# wichtige Termine (High-Impact, Feiertage) muessen deshalb in einer eigenen
+# Tabelle stehen, sonst waeren sie in der Monatsuebersicht weg, sobald sie aus
+# dem Feed-Fenster herausfallen. Gefuellt wird sie durch news.scrape_month()
+# (siehe api_scrape_news_history in main.py), nicht mehr durch Nutzer-Klicks.
 
-def list_marked_news(start: str | None = None, end: str | None = None) -> list[dict]:
+def list_news_history(start: str | None = None, end: str | None = None) -> list[dict]:
     where, params = "", []
     if start and end:
         where, params = "WHERE day BETWEEN ? AND ?", [start, end]
@@ -2160,24 +2179,49 @@ def list_marked_news(start: str | None = None, end: str | None = None) -> list[d
         return [dict(r) for r in rows]
 
 
-def add_marked_news(day: str, title: str, currency: str, impact: str, event_type: str,
-                     time: str, ff_url: str) -> dict:
-    """INSERT OR IGNORE ueber (title, currency, time) - derselbe Termin laesst
-    sich nicht doppelt markieren. Gibt die (neue oder schon vorhandene) Zeile
-    zurueck, damit das Frontend sofort die id fuer ein spaeteres Entmarkieren hat."""
+def has_news_history_month(year: int, month: int) -> bool:
+    """Ob fuer diesen Monat schon Verlaufsdaten vorliegen - der Scraper
+    ueberspringt so bereits geholte Monate bei einem erneuten Lauf (ausser
+    force=True), nur der jeweils laufende Monat wird immer neu geholt."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM marked_news WHERE day LIKE ? LIMIT 1", (f"{year:04d}-{month:02d}-%",)
+        ).fetchone()
+        return row is not None
+
+
+def bulk_add_news_history(events: list[dict]) -> int:
+    """INSERT OR IGNORE in einem Rutsch (Dauerregel: keine Schleife mit N
+    Einzel-Queries) statt einer Anfrage pro Termin - beim Erstimport kommen
+    schnell einige tausend Zeilen zusammen. Gibt zurueck, wie viele davon
+    tatsaechlich neu waren (schon vorhandene Termine werden uebersprungen,
+    siehe UNIQUE(title, currency, time))."""
+    if not events:
+        return 0
+    now_iso = datetime.now().isoformat()
+    rows = [{**e, "created_at": now_iso} for e in events]
+    with get_conn() as conn:
+        before = conn.total_changes
+        conn.executemany(
+            """INSERT OR IGNORE INTO marked_news (day, title, currency, impact, event_type, time, ff_url, created_at)
+               VALUES (:day, :title, :currency, :impact, :event_type, :time, :ff_url, :created_at)""",
+            rows,
+        )
+        return conn.total_changes - before
+
+
+# ---------- Generische Einstellungs-Ablage (siehe app_settings in SCHEMA) ----------
+
+def get_app_setting(key: str) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+
+def set_app_setting(key: str, value: str):
     with get_conn() as conn:
         conn.execute(
-            """INSERT OR IGNORE INTO marked_news (day, title, currency, impact, event_type, time, ff_url, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (day, title, currency, impact, event_type, time, ff_url, datetime.now().isoformat()),
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
         )
-        row = conn.execute(
-            "SELECT * FROM marked_news WHERE title = ? AND currency = ? AND time = ?",
-            (title, currency, time),
-        ).fetchone()
-        return dict(row)
-
-
-def remove_marked_news(marked_id: int):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM marked_news WHERE id = ?", (marked_id,))

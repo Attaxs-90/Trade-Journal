@@ -4,14 +4,14 @@ import { api, escapeHtml, state } from './core.js';
 
 /* ---------- Newsbar (ForexFactory-Wirtschaftskalender) ---------- */
 
-const NEWS_IMPACT_LEVELS = [
+export const NEWS_IMPACT_LEVELS = [
   { key: "High", label: "High Impact" },
   { key: "Medium", label: "Medium Impact" },
   { key: "Low", label: "Low Impact" },
   { key: "Holiday", label: "Non-Economic / Holiday" },
 ];
-const NEWS_CURRENCIES = ["AUD", "CAD", "CHF", "CNY", "EUR", "GBP", "JPY", "NZD", "USD"];
-const NEWS_EVENT_TYPES = ["Growth", "Housing", "Inflation", "Consumer Surveys", "Employment", "Business Surveys", "Central Bank", "Speeches", "Bonds", "Misc"];
+export const NEWS_CURRENCIES = ["AUD", "CAD", "CHF", "CNY", "EUR", "GBP", "JPY", "NZD", "USD"];
+export const NEWS_EVENT_TYPES = ["Growth", "Housing", "Inflation", "Consumer Surveys", "Employment", "Business Surveys", "Central Bank", "Speeches", "Bonds", "Misc"];
 
 const newsFilterState = {
   impact: new Set(NEWS_IMPACT_LEVELS.map(l => l.key)),
@@ -48,85 +48,82 @@ export function impactColorVar(impact) {
   return cs.getPropertyValue(map[impact] || "--impact-none").trim();
 }
 
-/* Vom Nutzer markierte Termine (Stern-Button je Zeile) - persistiert in der
-   DB (siehe marked_news in db.py), weil der ForexFactory-Feed selbst nur die
-   aktuelle+naechste Woche liefert und eine Markierung sonst nicht dauerhaft
-   in der Monatsuebersicht stehen bleiben koennte. key -> id, damit sich eine
-   Markierung ueber DELETE /api/news/marked/{id} wieder entfernen laesst. */
-let markedNewsMap = new Map();
+/* Wiederverwendbarer Impact/Kategorie/Waehrung-Chip-Filter - dieselbe Optik
+   und Bedienung fuer Newsbar-Panel UND das News-Einstellungen-Panel der
+   Monatsuebersicht (siehe calendar.js), damit sich beide identisch anfuehlen
+   statt zwei unabhaengige Filter-UIs zu pflegen. panelEl ist der Container,
+   der sowohl die drei Chip-Reihen als auch die "alle/keine"-Links enthaelt.
+   Listener werden nur einmal verdrahtet (dataset-Flag) - die Funktion wird
+   z.B. bei jedem Theme-Wechsel erneut aufgerufen (siehe chrome.js), um die
+   Impact-Punktfarben aufzufrischen, ohne bei jedem Aufruf weitere Listener
+   auf denselben Elementen zu stapeln. */
+export function renderImpactTypeCurrencyChips(panelEl, ids, filterState, onChange) {
+  const impactEl = panelEl.querySelector(`#${ids.impact}`);
+  const typeEl = panelEl.querySelector(`#${ids.type}`);
+  const currencyEl = panelEl.querySelector(`#${ids.currency}`);
 
-function markedKey(e) { return `${e.title}|${e.currency}|${e.time}`; }
+  const renderChips = () => {
+    impactEl.innerHTML = NEWS_IMPACT_LEVELS.map(lvl => `
+      <button type="button" class="newsbar-chip${filterState.impact.has(lvl.key) ? " active" : ""}" data-group="impact" data-key="${lvl.key}" title="${lvl.label}">
+        <span class="newsbar-chip-dot" style="background:${impactColorVar(lvl.key)}"></span>${lvl.key}
+      </button>
+    `).join("");
+    typeEl.innerHTML = NEWS_EVENT_TYPES.map(t => `
+      <button type="button" class="newsbar-chip${filterState.type.has(t) ? " active" : ""}" data-group="type" data-key="${t}">${t}</button>
+    `).join("");
+    currencyEl.innerHTML = NEWS_CURRENCIES.map(c => `
+      <button type="button" class="newsbar-chip${filterState.currency.has(c) ? " active" : ""}" data-group="currency" data-key="${c}">${c}</button>
+    `).join("");
+  };
+  renderChips();
 
-async function loadMarkedNews() {
-  try {
-    const { events } = await api("/api/news/marked");
-    markedNewsMap = new Map(events.map(ev => [`${ev.title}|${ev.currency}|${ev.time}`, ev.id]));
-  } catch (err) { /* Markierungen bleiben dann einfach unsichtbar, kein harter Fehler */ }
-}
+  if (panelEl.dataset.chipsWired) return;
+  panelEl.dataset.chipsWired = "1";
 
-async function toggleMarkedNews(e) {
-  const key = markedKey(e);
-  const existingId = markedNewsMap.get(key);
-  if (existingId) {
-    await api(`/api/news/marked/${existingId}`, { method: "DELETE" });
-  } else {
-    await api("/api/news/marked", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        day: e.time.slice(0, 10), title: e.title, currency: e.currency,
-        impact: e.impact, event_type: e.event_type, time: e.time, ff_url: e.ff_url,
-      }),
-    });
+  function toggleChip(e) {
+    const chip = e.target.closest(".newsbar-chip");
+    if (!chip) return;
+    const group = chip.dataset.group, key = chip.dataset.key;
+    if (filterState[group].has(key)) filterState[group].delete(key); else filterState[group].add(key);
+    chip.classList.toggle("active");
+    onChange();
   }
-  // Kein optimistisches Update - dieselbe Vorgehensweise wie bei den
-  // To-Do-Listen (siehe todos.js): nach jeder Aenderung neu laden statt
-  // den lokalen Zustand zu raten.
-  await loadMarkedNews();
-  renderNewsSections();
+  impactEl.addEventListener("click", toggleChip);
+  typeEl.addEventListener("click", toggleChip);
+  currencyEl.addEventListener("click", toggleChip);
+
+  panelEl.querySelectorAll("a[data-filter]").forEach(a => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const group = a.dataset.filter, mode = a.dataset.mode;
+      const source = group === "impact" ? NEWS_IMPACT_LEVELS.map(l => l.key) : group === "currency" ? NEWS_CURRENCIES : NEWS_EVENT_TYPES;
+      filterState[group] = new Set(mode === "all" ? source : []);
+      renderChips();
+      onChange();
+    });
+  });
 }
 
 export function renderNewsFilters() {
-  const impactWrap = document.getElementById("newsbar-filter-impact");
-  impactWrap.innerHTML = NEWS_IMPACT_LEVELS.map(lvl => `
-    <button type="button" class="newsbar-chip${newsFilterState.impact.has(lvl.key) ? " active" : ""}" data-group="impact" data-key="${lvl.key}" title="${lvl.label}">
-      <span class="newsbar-chip-dot" style="background:${impactColorVar(lvl.key)}"></span>${lvl.key}
-    </button>
-  `).join("");
-
-  const typeWrap = document.getElementById("newsbar-filter-types");
-  typeWrap.innerHTML = NEWS_EVENT_TYPES.map(t => `
-    <button type="button" class="newsbar-chip${newsFilterState.type.has(t) ? " active" : ""}" data-group="type" data-key="${t}">${t}</button>
-  `).join("");
-
-  const curWrap = document.getElementById("newsbar-filter-currencies");
-  curWrap.innerHTML = NEWS_CURRENCIES.map(c => `
-    <button type="button" class="newsbar-chip${newsFilterState.currency.has(c) ? " active" : ""}" data-group="currency" data-key="${c}">${c}</button>
-  `).join("");
+  const panel = document.getElementById("newsbar-filter-panel");
+  renderImpactTypeCurrencyChips(
+    panel,
+    { impact: "newsbar-filter-impact", type: "newsbar-filter-types", currency: "newsbar-filter-currencies" },
+    newsFilterState,
+    () => { saveNewsFilterState(); renderNewsSections(); },
+  );
 
   const ftmoWrap = document.getElementById("newsbar-filter-ftmo");
   ftmoWrap.innerHTML = `
     <button type="button" class="newsbar-chip${newsFilterState.ftmo.has("on") ? " active" : ""}" data-group="ftmo" data-key="on" title="FTMO Restricted Events (2 Min. vor/nach kein Trade erlaubt) anzeigen/ausblenden">❗ FTMO News</button>
     <button type="button" class="newsbar-chip${newsFilterState.ftmoHighlight.has("on") ? " active" : ""}" data-group="ftmoHighlight" data-key="on" title="FTMO Restricted Events rot hinterlegen">Rot hervorheben</button>
   `;
-
-  document.querySelectorAll("#newsbar-filter-panel .newsbar-chip").forEach(chip => {
+  ftmoWrap.querySelectorAll(".newsbar-chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const group = chip.dataset.group, key = chip.dataset.key;
       if (newsFilterState[group].has(key)) newsFilterState[group].delete(key); else newsFilterState[group].add(key);
       chip.classList.toggle("active");
       saveNewsFilterState();
-      renderNewsSections();
-    });
-  });
-
-  document.querySelectorAll("#newsbar-filter-panel a[data-filter]").forEach(a => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      const group = a.dataset.filter, mode = a.dataset.mode;
-      const source = group === "impact" ? NEWS_IMPACT_LEVELS.map(l => l.key) : group === "currency" ? NEWS_CURRENCIES : NEWS_EVENT_TYPES;
-      newsFilterState[group] = new Set(mode === "all" ? source : []);
-      saveNewsFilterState();
-      renderNewsFilters();
       renderNewsSections();
     });
   });
@@ -145,31 +142,21 @@ function newsRowHtml(e, showFtmo) {
   const weekday = dt.toLocaleDateString("de-DE", { weekday: "short" });
   const time = dt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   const highlight = showFtmo && e.ftmo_status && newsFilterState.ftmoHighlight.has("on");
-  const marked = markedNewsMap.has(markedKey(e));
   return `
-    <div class="news-row${highlight ? " news-row-ftmo-highlight" : ""}">
-      <a class="news-row-link" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
-        <div class="news-row-line1">
-          <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
-          <span class="news-row-time">${weekday} ${time}</span>
-          <span class="news-row-currency">${escapeHtml(e.currency)}</span>
-          <span class="news-row-title">${escapeHtml(e.title)}</span>
-          ${showFtmo ? ftmoMarkerHtml(e) : ""}
-        </div>
-      </a>
-      <button type="button" class="news-row-mark${marked ? " active" : ""}"
-        title="${marked ? "Markierung entfernen" : "Für die Monatsübersicht markieren - bleibt dauerhaft erhalten, auch in vergangenen Monaten"}">
-        <svg viewBox="0 0 24 24" fill="${marked ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      </button>
-    </div>`;
+    <a class="news-row${highlight ? " news-row-ftmo-highlight" : ""}" href="${escapeHtml(e.ff_url)}" target="_blank" rel="noopener" title="${escapeHtml(e.title)}">
+      <div class="news-row-line1">
+        <span class="news-row-dot" style="background:${impactColorVar(e.impact)}"></span>
+        <span class="news-row-time">${weekday} ${time}</span>
+        <span class="news-row-currency">${escapeHtml(e.currency)}</span>
+        <span class="news-row-title">${escapeHtml(e.title)}</span>
+        ${showFtmo ? ftmoMarkerHtml(e) : ""}
+      </div>
+    </a>`;
 }
 
 function fillNewsList(elId, events, emptyMsg, showFtmo = false) {
   const el = document.getElementById(elId);
   el.innerHTML = events.length ? events.map(e => newsRowHtml(e, showFtmo)).join("") : `<div class="empty-state">${emptyMsg}</div>`;
-  el.querySelectorAll(".news-row-mark").forEach((btn, i) => {
-    btn.addEventListener("click", () => toggleMarkedNews(events[i]));
-  });
 }
 
 export function renderNewsSections() {
@@ -229,7 +216,6 @@ async function loadNews() {
   } catch (e) {
     newsLoadFailed = true;
   }
-  await loadMarkedNews();
   renderNewsSections();
 }
 

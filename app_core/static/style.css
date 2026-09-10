@@ -774,14 +774,23 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
    Netto-Ergebnis, das es hier nicht gibt). */
 .month-cell.clickable { cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .month-cell.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.25); }
-.month-cell .cell-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); }
-/* Subtiler Punkt bei einem markierten News-Termin (Stern in der Newsbar,
-   siehe news.js) - bewusst klein und dezent, keine grosse Flaeche/Badge. */
-.cell-news-dot {
-  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
-  margin-left: 4px; vertical-align: middle;
+.month-cell .cell-date { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); display: flex; align-items: center; gap: 4px; }
+/* Erfasster News-Termin (siehe db.list_news_history/news.scrape_month) - nur
+   noch das kurze Text-Label neben dem Datum (z.B. "Feiertag"), kein Rahmen
+   mehr um die ganze Kachel (siehe Nutzer-Feedback: das war zu viel). Als
+   Button, damit ein Klick die eigentlichen Termine zeigt (openNewsInfoModal). */
+.cell-news-chip {
+  all: unset; cursor: pointer; display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  color: #fff; line-height: 1.5; white-space: nowrap;
 }
-.month-settings-hint { font-size: 11px; color: var(--text-faint); max-width: 220px; margin-top: 6px; line-height: 1.4; }
+.cell-news-chip:hover { filter: brightness(1.15); }
+.news-day-info-list { display: flex; flex-direction: column; gap: 6px; }
+.news-day-info-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.month-settings-hint { font-size: 11px; color: var(--text-faint); max-width: 260px; margin-top: 6px; line-height: 1.4; }
+.month-news-settings-panel { width: 300px; }
+.month-news-scrape-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.month-news-scrape-status { font-size: 11px; color: var(--text-faint); margin-top: 6px; line-height: 1.4; }
 .month-cell .cell-net { font-family: var(--font-mono); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 .month-cell .cell-count { font-size: 11.5px; color: var(--text-faint); }
 
@@ -1539,22 +1548,14 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .newsbar-list .empty-state { padding: 4px 0; font-size: 11.5px; }
 
 .news-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+  display: block;
   padding: 4px 5px;
   border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
   line-height: 1.3;
 }
 .news-row:hover { background: var(--bg-hover); }
-.news-row-link { flex: 1; min-width: 0; text-decoration: none; color: inherit; }
-.news-row-mark {
-  all: unset; cursor: pointer; flex-shrink: 0; display: flex; padding: 3px;
-  border-radius: 5px; color: var(--text-faint);
-}
-.news-row-mark svg { width: 12px; height: 12px; }
-.news-row-mark:hover { color: var(--text); background: var(--bg-hover); }
-.news-row-mark.active { color: #eab308; }
 .news-row-ftmo-highlight { background: color-mix(in srgb, var(--red) 14%, transparent); }
 .news-row-ftmo-highlight:hover { background: color-mix(in srgb, var(--red) 22%, transparent); }
 .news-row-line1 {

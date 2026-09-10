@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -34,6 +35,7 @@ STARTUP_SYNC_TIMEOUT = 25
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _startup_sync_accounts()
+    _maybe_scrape_news_history()
     yield
 
 
@@ -155,16 +157,6 @@ class BulkTagAssign(BaseModel):
 
 class BulkTradeDelete(BaseModel):
     trade_ids: list[int]
-
-
-class MarkedNewsCreate(BaseModel):
-    day: str
-    title: str
-    currency: str = ""
-    impact: str = "Low"
-    event_type: str = "Misc"
-    time: str
-    ff_url: str = ""
 
 
 class JournalEntryUpdate(BaseModel):
@@ -1183,23 +1175,88 @@ def api_news_calendar():
     return {"events": result["events"], "fetched_at": fetched_at}
 
 
-@app.get("/api/news/marked")
-def api_list_marked_news(start: str | None = None, end: str | None = None):
-    return {"events": db.list_marked_news(start, end)}
+@app.get("/api/news/history")
+def api_list_news_history(start: str | None = None, end: str | None = None):
+    return {"events": db.list_news_history(start, end)}
 
 
-@app.post("/api/news/marked")
-def api_add_marked_news(payload: MarkedNewsCreate):
-    return db.add_marked_news(
-        payload.day, payload.title, payload.currency, payload.impact,
-        payload.event_type, payload.time, payload.ff_url,
-    )
+# Erster Monat, den der Verlaufs-Scraper holt (siehe Nutzer-Entscheidung: kein
+# voller Import bis 2010, nur ab 2024 - kleinerer, aktuell relevanter Datensatz).
+NEWS_HISTORY_START_YEAR = 2024
+NEWS_HISTORY_START_MONTH = 1
+_NEWS_SCRAPE_DELAY_SECONDS = 1.5
+# Monatlicher automatischer Abgleich (siehe _maybe_scrape_news_history) darf
+# den Start nicht ewig blockieren, falls ForexFactory mal haengt/langsam ist.
+NEWS_SCRAPE_STARTUP_TIMEOUT = 90
 
 
-@app.delete("/api/news/marked/{marked_id}")
-def api_remove_marked_news(marked_id: int):
-    db.remove_marked_news(marked_id)
-    return {"ok": True}
+def _run_news_history_scrape(force: bool = False) -> dict:
+    """Holt Monat fuer Monat (ab NEWS_HISTORY_START_YEAR/MONTH bis zum 31.12.
+    des LAUFENDEN Jahres - ForexFactory veroeffentlicht Feiertage/Termine oft
+    schon Monate im Voraus, siehe Nutzer-Beobachtung fuer November) High-
+    Impact- und Feiertagstermine von ForexFactory nach. Bereits vorhandene
+    Monate werden uebersprungen (force=True erzwingt ein erneutes Holen), der
+    laufende Monat wird immer neu geholt, weil er noch unvollstaendig sein
+    kann. Von zwei Stellen genutzt: dem manuellen Button
+    (api_scrape_news_history) und dem automatischen monatlichen Abgleich
+    (_maybe_scrape_news_history) - beide sollen exakt dieselbe Monatsspanne
+    und Ueberspring-Logik verwenden."""
+    now = datetime.now(UTC)
+    y, m = NEWS_HISTORY_START_YEAR, NEWS_HISTORY_START_MONTH
+    end_year, end_month = now.year, 12
+    inserted_total = 0
+    months_scraped: list[str] = []
+    months_failed: list[str] = []
+    while (y, m) <= (end_year, end_month):
+        is_current_month = (y, m) == (now.year, now.month)
+        if force or is_current_month or not db.has_news_history_month(y, m):
+            try:
+                events = news.scrape_month(y, m)
+                inserted_total += db.bulk_add_news_history(events)
+                months_scraped.append(f"{y:04d}-{m:02d}")
+            except Exception as e:
+                logger.warning("News-Verlauf %04d-%02d fehlgeschlagen: %s", y, m, e)
+                months_failed.append(f"{y:04d}-{m:02d}")
+            time.sleep(_NEWS_SCRAPE_DELAY_SECONDS)
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return {"inserted": inserted_total, "months_scraped": months_scraped, "months_failed": months_failed}
+
+
+@app.post("/api/news/history/scrape")
+def api_scrape_news_history(force: bool = False):
+    """Laeuft synchron im Request - bei einem Erstimport ueber mehrere Jahre
+    kann das eine Weile dauern, siehe Pause zwischen den Monats-Anfragen
+    (kein offizielles API, siehe news.py). Fuer den laufenden Betrieb reicht
+    der automatische monatliche Abgleich beim Start (siehe
+    _maybe_scrape_news_history) - dieser Button ist der manuelle Fallback/
+    Sofort-Anstoss."""
+    return _run_news_history_scrape(force)
+
+
+def _maybe_scrape_news_history():
+    """Einmal pro Kalendermonat automatisch beim App-Start angestossen (siehe
+    lifespan) - merkt sich den zuletzt abgeglichenen Monat in app_settings,
+    damit nicht jeder Neustart innerhalb desselben Monats erneut alle Monate
+    durchgeht. Fehler werden nur geloggt, nie dem Nutzer angezeigt (analog zu
+    _startup_sync_accounts) - der manuelle Button bleibt der sichtbare
+    Fallback, falls das mal schiefgeht."""
+    now = datetime.now(UTC)
+    current_ym = f"{now.year:04d}-{now.month:02d}"
+    if db.get_app_setting("news_history_last_scrape_month") == current_ym:
+        return
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        pool.submit(_run_news_history_scrape, False).result(timeout=NEWS_SCRAPE_STARTUP_TIMEOUT)
+        db.set_app_setting("news_history_last_scrape_month", current_ym)
+    except concurrent.futures.TimeoutError:
+        logger.warning("Automatischer News-Verlauf-Abgleich nach %ss abgebrochen.", NEWS_SCRAPE_STARTUP_TIMEOUT)
+    except Exception as e:
+        logger.warning("Automatischer News-Verlauf-Abgleich fehlgeschlagen: %s", e)
+    finally:
+        pool.shutdown(wait=False)
 
 
 app.mount("/media", StaticFiles(directory=str(IMAGES_DIR)), name="media")

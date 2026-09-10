@@ -96,6 +96,8 @@ Nicht „aufräumen“, ohne den Grund zu kennen — jede ist Ergebnis eines kon
 - **Journal-Einträge** hängen an `entry_type` + `ref_key`, nicht an einer `day`-Spalte — damit Wochen-/Monatsreviews (`'2026-W35'`, `'2026-08'`) ohne Schema-Migration dazukommen können. `day_notes` ist der abgelöste Vorgänger und bleibt nur stehen, weil Migrationen append-only sind und auf sie verweisen — nicht mehr benutzen.
 - **Ein einziger Journal-Editor** (`mountJournalEditor()`) wird an zwei Stellen eingehängt (Journal-Seite, Karte im Tagesview). `activeJournal` hält ihn fest, damit `mountView()`, `closeModal()` und `beforeunload` noch ungespeicherten Text rausschreiben können. `host.dataset.journalRef` verhindert, dass `populateDay()` (läuft nach jedem Bild-Upload erneut) ihn samt Eingaben neu aufbaut.
 - **Spalten-Auswahl der Übersicht speichert die _ausgeblendeten_ Spalten** (`overviewHiddenColumns`), nicht die sichtbaren — sonst bliebe jede neu hinzugefügte Spalte für Bestandsnutzer unsichtbar.
+- **News-Verlauf für die Monatsübersicht** (`marked_news`-Tabelle, Name historisch) wird nicht live vom ForexFactory-Feed befüllt (der deckt nur die aktuelle/nächste Woche ab), sondern per `news.scrape_month()` einmalig je Monat aus der öffentlichen Kalenderseite gescrapt (eingebettetes JSON `window.calendarComponentStates`, kein offizielles API) und dauerhaft gespeichert — nur High-Impact und Feiertage, ausgelöst über den Button in der Monatsübersicht, nie automatisch beim Start.
+
 
 `app_core/static/vendor/` enthält Quill (Editor) als lokale Kopie: die App muss ohne Netz laufen, ein CDN kommt nicht in Frage. Kein Build-Step, die Dateien werden direkt eingebunden und mitcommittet.
 
