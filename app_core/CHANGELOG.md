@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.11.0
+- Monatsübersicht: dauerhafter News-Verlauf (High-Impact-Termine und Feiertage)
+  statt der manuellen Stern-Markierung in der Newsbar - wird automatisch einmal
+  pro Monat beim Start nachgeladen, inklusive bereits von ForexFactory
+  veröffentlichter künftiger Monate bis zum Jahresende. Ein Klick auf das
+  Tages-Label ("High"/"Feiertag") zeigt die tatsächlichen Termine dieses Tages;
+  der zuvor sichtbare Rahmen um die Kalenderkachel ist entfernt, das Label
+  allein reicht als Hinweis. Eigene Filter (Impact/Event-Typ/Währung) in den
+  News-Einstellungen neben dem Kalender, ein Button stößt den Abgleich bei
+  Bedarf sofort manuell an.
+
 ## 1.10.0
 - Neuer Menüpunkt-übergreifender Hilfe-Button (Fragezeichen oben rechts) auf
   jeder Seite mit einer kurzen Anleitung, was die Seite zeigt und wie man
