@@ -172,6 +172,11 @@ export function renderNewsSections() {
   // ff_calendar_thisweek als auch ff_calendar_nextweek (siehe news.py).
   const nextMonday0 = new Date(saturday0); nextMonday0.setDate(nextMonday0.getDate() + 2);
   const nextSaturday0 = new Date(nextMonday0); nextSaturday0.setDate(nextSaturday0.getDate() + 5);
+  // Die Woche gilt als abgeschlossen ab Freitag 22 Uhr (Forex-Handelsschluss),
+  // nicht erst am naechsten Montag 00:00 - sonst zeigt "Diese Woche" das ganze
+  // Wochenende ueber noch die bereits vergangene Woche an (Nutzer-Feedback).
+  const weekCutoff = new Date(monday0); weekCutoff.setDate(weekCutoff.getDate() + 4); weekCutoff.setHours(22, 0, 0, 0);
+  const weekConcluded = now >= weekCutoff;
 
   const filtered = newsEvents.filter(e =>
     newsFilterState.impact.has(e.impact) && newsFilterState.currency.has(e.currency) && newsFilterState.type.has(e.event_type) &&
@@ -182,10 +187,11 @@ export function renderNewsSections() {
   for (const e of filtered) {
     const t = new Date(e.time);
     const day0 = startOfDay(t);
-    if (day0 >= monday0 && day0 < saturday0) week.push(e);
+    const inCurrentWeekRange = day0 >= monday0 && day0 < saturday0;
+    if (inCurrentWeekRange && !weekConcluded) week.push(e);
     else if (day0 >= nextMonday0 && day0 < nextSaturday0) nextWeek.push(e);
     if (day0.getTime() === today0.getTime() && t < now) hot.push(e);
-    else if (day0 < monday0) history.push(e);
+    else if (day0 < monday0 || (inCurrentWeekRange && weekConcluded)) history.push(e);
   }
   week.sort((a, b) => new Date(a.time) - new Date(b.time));
   nextWeek.sort((a, b) => new Date(a.time) - new Date(b.time));
@@ -197,7 +203,8 @@ export function renderNewsSections() {
   // enge Filterauswahl verschwinden darf. Deckt diese UND naechste Woche ab.
   const weekHasFtmo = newsEvents.some(e => {
     const day0 = startOfDay(new Date(e.time));
-    return ((day0 >= monday0 && day0 < saturday0) || (day0 >= nextMonday0 && day0 < nextSaturday0)) && e.ftmo_status;
+    const inCurrentWeekRange = day0 >= monday0 && day0 < saturday0;
+    return ((inCurrentWeekRange && !weekConcluded) || (day0 >= nextMonday0 && day0 < nextSaturday0)) && e.ftmo_status;
   });
   document.getElementById("newsbar-icon-alert").hidden = !weekHasFtmo;
 

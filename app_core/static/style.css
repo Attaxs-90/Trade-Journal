@@ -88,18 +88,206 @@ html, body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+/* .page: neuer Aussen-Wrapper um Earnings-Ticker + .app, damit der Ticker als
+   eigene Zeile ueber Sidebar/Content/Newsbar liegt statt nur ueber .content -
+   .app bekommt seine Hoehe jetzt per flex:1 vom Wrapper statt direkt von
+   html/body. */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .app {
   display: grid;
   grid-template-columns: auto 1fr auto;
   grid-template-rows: minmax(0, 1fr);
-  /* height:100% statt 100vh: unter dem CSS-Zoom weiter oben (ab 2200px/3200px
-     Fensterbreite) berechnet Chrome 100vh falsch (Faktor = zoom-Stufe) und
-     macht die App zu hoch - der Ueberschuss wurde unten von html/body
-     abgeschnitten, unabhaengig von jedem Padding in .content. height:100%
-     bezieht sich stattdessen korrekt auf html/body, die bereits height:100%
-     haben. */
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
+
+/* ---------- Earnings-Ticker (Big Seven) ---------- */
+.earnings-ticker {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+html[data-earnings-ticker="hidden"] .earnings-ticker { display: none; }
+
+.earnings-ticker-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.earnings-ticker-label svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+.earnings-ticker-track {
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+}
+
+.earnings-ticker-marquee {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 12px;
+}
+/* Modus (durchlaufend/statisch) und Hover-Verhalten setzt earnings-ticker.js
+   direkt per Inline-Style (animation / animation-play-state) - je nach
+   Einstellung laeuft die Animation dauerhaft und pausiert bei Hover, oder
+   steht dauerhaft und laeuft nur bei Hover durch. */
+
+@keyframes earnings-ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .earnings-ticker-marquee { animation: none !important; transform: none !important; }
+  .earnings-ticker-track { overflow-x: auto; }
+}
+
+.earnings-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.earnings-ticker-co { color: var(--text); font-weight: 600; }
+.earnings-ticker-date {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.earnings-ticker-when {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.earnings-ticker-when.sev-today { color: var(--red); background: var(--red-fill); }
+.earnings-ticker-when.sev-week  { color: var(--impact-medium); background: color-mix(in srgb, var(--impact-medium) 16%, transparent); }
+.earnings-ticker-when.sev-month { color: var(--impact-low); background: color-mix(in srgb, var(--impact-low) 18%, transparent); }
+.earnings-ticker-when.sev-later { color: var(--text-faint); background: var(--bg-hover); }
+.earnings-ticker-empty { color: var(--text-faint); font-style: italic; }
+
+.earnings-ticker-collapse {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.earnings-ticker-collapse:hover { background: var(--bg-hover); color: var(--text); }
+.earnings-ticker-collapse svg { width: 13px; height: 13px; }
+
+.earnings-ticker-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.earnings-ticker-source-hint a { color: var(--accent); }
+.earnings-ticker-speed-row select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+
+.earnings-ticker-item.unknown .earnings-ticker-co { color: var(--text-dim); }
+.earnings-ticker-item.unknown .earnings-ticker-when {
+  color: var(--text-faint);
+  background: none;
+  border: 1px dashed var(--border);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* Einstellungen: verfolgte Unternehmen (Top 10 nach Nasdaq-100-Gewichtung) */
+.earnings-companies-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.earnings-companies-title { margin-bottom: 8px; }
+.sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.sync-row .account-hint { margin-top: 0; }
+.earnings-companies-resync-btn { font-size: 12.5px; padding: 7px 12px; flex-shrink: 0; }
+
+.weight-table { display: flex; flex-direction: column; margin-top: 10px; }
+.weight-row {
+  display: grid;
+  grid-template-columns: 22px 20px 44px 1fr 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--border);
+}
+.weight-row:first-child { border-top: none; }
+.weight-rank { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); text-align: right; }
+.weight-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.weight-badge {
+  width: 44px;
+  height: 30px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--text);
+}
+.weight-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.weight-name .n { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weight-new {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--green);
+  background: var(--green-fill);
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.weight-bar-wrap { display: flex; flex-direction: column; gap: 3px; }
+.weight-pct { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }
+.weight-bar-track { width: 100%; height: 4px; border-radius: 2px; background: var(--bg-hover); overflow: hidden; }
+.weight-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
 
 /* Sidebar - Breite direkt am Element animiert (statt am Grid-Track: Chromium
    interpoliert grid-template-columns nicht zuverlaessig, die Aenderung blieb
@@ -216,12 +404,14 @@ html[data-sidebar="collapsed"] .app .brand-actions { margin-left: 0; }
 html[data-sidebar="collapsed"] .app .nav-item { justify-content: center; }
 html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { transform: rotate(180deg); }
 
-/* Globaler Konten-Filter-Status, unten in der Sidebar (margin-top:auto
-   schiebt ihn ans Ende des Flex-Containers) - auf jeder Seite sichtbar, weil
-   die Sidebar bei jedem View-Wechsel bestehen bleibt (nur #content wird
-   ersetzt). Klick oeffnet direkt die Konten-Auswahl (.inline-filter-panel,
-   siehe dort), ohne die Seite zu wechseln. */
-.sidebar-account-status { margin-top: auto; position: relative; }
+/* Globaler Konten-Filter-Status, zwischen Brand und Navigation - bewusst vor
+   den Nav-Punkten statt danach: er ist kein weiteres Navigationsziel, sondern
+   der Scope, durch den alle Ziele darunter betrachtet werden (siehe Nutzer-
+   Entscheidung). .sidebar's flex-gap uebernimmt den Abstand nach oben/unten.
+   Auf jeder Seite sichtbar, weil die Sidebar bei jedem View-Wechsel bestehen
+   bleibt (nur #content wird ersetzt). Klick oeffnet direkt die Konten-Auswahl
+   (.inline-filter-panel, siehe dort), ohne die Seite zu wechseln. */
+.sidebar-account-status { position: relative; }
 .sidebar-account-status-toggle {
   all: unset;
   box-sizing: border-box;
@@ -241,8 +431,10 @@ html[data-sidebar="collapsed"] .app .sidebar-collapse-btn .collapse-icon svg { t
    Doppelte Klasse fuer hoehere Spezifitaet, unabhaengig von der Reihenfolge
    im Stylesheet gegenueber der Basis-Regel. */
 .inline-filter-panel.sidebar-account-status-panel {
-  top: auto;
-  bottom: calc(100% + 8px);
+  /* Oeffnet nach unten (Standardverhalten von .inline-filter-panel) - der
+     Filter sitzt jetzt oben in der Sidebar (siehe Nutzer-Entscheidung, direkt
+     unter der Brand-Zeile), ein Oeffnen nach oben wuerde das Panel ueber den
+     Sidebar-Rand hinausschieben und unbedienbar machen. */
   left: 0;
   right: 0;
   width: auto;

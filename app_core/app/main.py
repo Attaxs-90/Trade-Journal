@@ -1,8 +1,10 @@
+import asyncio
 import concurrent.futures
 import csv
 import io
 import json
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -13,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import db, news
+from . import db, earnings, news, weights
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
 from .config import IMAGES_DIR
 from .images import save_image, delete_image_files
@@ -32,12 +34,68 @@ logger = logging.getLogger("uvicorn.error")
 STARTUP_SYNC_TIMEOUT = 25
 
 
+async def _earnings_scan_loop():
+    """Nasdaq veroeffentlicht einen Earnings-Termin oft erst wenige Wochen
+    vorher (siehe earnings.py) - ein Symbol, das beim Start noch fehlte, kann
+    schon am naechsten Tag im Kalender auftauchen. _maybe_scan_earnings()
+    laeuft deshalb nicht nur einmal beim Start, sondern alle paar Stunden
+    erneut, damit ein fehlender Termin nicht auf den naechsten Server-Neustart
+    warten muss - dank des Tages-Gates in _maybe_scan_earnings() kostet ein
+    Aufruf nach einem bereits vollstaendigen Scan praktisch nichts."""
+    while True:
+        await asyncio.sleep(6 * 60 * 60)
+        _maybe_scan_earnings()
+
+
+async def _weights_sync_loop():
+    """Analog zu _earnings_scan_loop, aber fuer den Nasdaq-100-Gewichtungs-
+    abgleich (siehe _maybe_sync_weights) - Indexgewichte schwanken nicht
+    stuendlich, ein Blick alle paar Stunden reicht, um den woechentlichen
+    Turnus zuverlaessig einzuhalten, auch wenn der Server ueber Tage
+    durchlaeuft statt neu zu starten."""
+    while True:
+        await asyncio.sleep(12 * 60 * 60)
+        _maybe_sync_weights()
+
+
+async def _news_calendar_loop():
+    """Haelt news.fetch_calendar() dauerhaft im Hintergrund warm, statt es nur
+    auf Zuruf ueber /api/news/calendar zu fuellen. Ohne diese Schleife wuerde
+    "naechste Woche" erst beim ersten Seitenaufruf nach Montag 00:00 Uhr
+    nachgeladen - schlaegt genau dieser eine Live-Scrape fehl (Netzwerk,
+    ForexFactory kurzzeitig nicht erreichbar), saehe der Nutzer eine leere
+    Woche. Der Nutzer will ausdruecklich nie ein leeres Wochenfeld sehen,
+    die Termine sollen "im Vorfeld" bereitstehen - deshalb wird hier
+    regelmaessig im Hintergrund aktualisiert, unabhaengig davon, ob gerade
+    jemand die Newsbar ansieht. Intervall = news._CACHE_TTL, also genau die
+    Feed-Aktualitaet, die fetch_calendar() ohnehin garantiert."""
+    while True:
+        await asyncio.sleep(news._CACHE_TTL.total_seconds())
+        try:
+            news.fetch_calendar()
+        except Exception:
+            logger.exception("Hintergrund-Refresh des Newskalenders fehlgeschlagen")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _startup_sync_accounts()
     _seed_news_history_from_bundle()
     _maybe_scrape_news_history()
+    _maybe_sync_weights()
+    _maybe_scan_earnings()
+    # Im Hintergrund-Thread, nicht direkt aufgerufen: fetch_calendar() macht
+    # zwei blockierende HTTP-Requests (Feed + Scrape), die den Start sonst um
+    # mehrere Sekunden verzoegern wuerden (siehe STARTUP_SYNC_TIMEOUT-Kommentar
+    # oben zum selben Prinzip bei _maybe_scan_earnings).
+    threading.Thread(target=news.fetch_calendar, daemon=True).start()
+    scan_task = asyncio.create_task(_earnings_scan_loop())
+    weights_task = asyncio.create_task(_weights_sync_loop())
+    news_task = asyncio.create_task(_news_calendar_loop())
     yield
+    scan_task.cancel()
+    weights_task.cancel()
+    news_task.cancel()
 
 
 app = FastAPI(title="Trade Journal", lifespan=lifespan)
@@ -1309,6 +1367,164 @@ def _maybe_scrape_news_history():
         logger.warning("Automatischer News-Verlauf-Abgleich fehlgeschlagen: %s", e)
     finally:
         pool.shutdown(wait=False)
+
+
+# ---------- Nasdaq-100-Gewichtung (Top 10) ----------
+
+WEIGHTS_SYNC_INTERVAL = timedelta(days=7)
+
+
+def _tracked_companies() -> dict[str, str]:
+    """Aktuell verfolgte Firmen (Ticker -> Name), Stand des letzten
+    Gewichtungs-Abgleichs (siehe _maybe_sync_weights) - leer, bevor der erste
+    Abgleich gelaufen ist (kurz nach dem allerersten Start)."""
+    top10 = json.loads(db.get_app_setting("nasdaq100_top10") or "[]")
+    return {c["ticker"]: c["name"] for c in top10}
+
+
+def _sync_weights_now() -> dict:
+    """Fragt die aktuelle Nasdaq-100-Gewichtung ab (ueber die QQQ-Holdings,
+    siehe weights.py) und speichert die Top 10 dauerhaft. Firmen, die neu in
+    die Top 10 aufgestiegen sind, werden separat gemerkt (nasdaq100_new_
+    tickers), damit die Einstellungen sie einmalig als "NEU" markieren
+    koennen - der naechste Abgleich ueberschreibt diese Markierung wieder."""
+    result = weights.fetch_top10()
+    previous_tickers = {c["ticker"] for c in json.loads(db.get_app_setting("nasdaq100_top10") or "[]")}
+    current_tickers = {c["ticker"] for c in result["companies"]}
+    new_tickers = sorted(current_tickers - previous_tickers)
+    db.set_app_setting("nasdaq100_top10", json.dumps(result["companies"]))
+    db.set_app_setting("nasdaq100_new_tickers", json.dumps(new_tickers))
+    db.set_app_setting("nasdaq100_last_sync", datetime.now(UTC).isoformat())
+    db.set_app_setting("nasdaq100_effective_date", result.get("effective_date") or "")
+    return result
+
+
+def _maybe_sync_weights():
+    """Einmal woechentlich automatisch (siehe lifespan/_weights_sync_loop) -
+    Indexgewichte schwanken nicht taeglich stark, ein woechentlicher Abgleich
+    reicht (Nutzer-Entscheidung). Fehler werden nur geloggt, der zuletzt
+    bekannte Stand bleibt einfach stehen, analog zu _maybe_scrape_news_history."""
+    last_sync = db.get_app_setting("nasdaq100_last_sync")
+    if last_sync:
+        try:
+            if datetime.now(UTC) - datetime.fromisoformat(last_sync) < WEIGHTS_SYNC_INTERVAL:
+                return
+        except ValueError:
+            pass
+    try:
+        _sync_weights_now()
+    except Exception as e:
+        logger.warning("Nasdaq-100-Gewichtungsabgleich fehlgeschlagen: %s", e)
+        return
+    # Neu aufgenommene Firmen sofort nach einem Termin durchsuchen, statt auf
+    # den naechsten 6-Stunden-Takt von _maybe_scan_earnings zu warten.
+    new_tickers = set(json.loads(db.get_app_setting("nasdaq100_new_tickers") or "[]"))
+    if new_tickers:
+        _maybe_scan_earnings(force_symbols=new_tickers)
+
+
+# ---------- Earnings-Ticker ----------
+
+
+def _maybe_scan_earnings(force_symbols: set[str] | None = None):
+    """Einmal pro Kalendertag automatisch beim App-Start angestossen (siehe
+    lifespan) - und dabei auch nur fuer Symbole, deren zuletzt bekannter
+    Termin fehlt oder schon verstrichen ist (siehe earnings.scan_upcoming).
+    `force_symbols` scannt zusaetzliche Symbole auch dann, wenn der heutige
+    Tages-Scan schon als erledigt markiert ist - genutzt von
+    _maybe_sync_weights() fuer frisch aufgenommene Firmen, die nicht auf den
+    naechsten reguraeren Lauf warten sollen.
+
+    Laeuft bewusst in einem eigenen, nicht abgewarteten Thread statt wie
+    _maybe_scrape_news_history mit Timeout im Start-Request zu warten: ein
+    Scan kann bei realistischer Nasdaq-Antwortzeit auch mit paralleler
+    Abfrage (siehe earnings._BATCH_SIZE) eine Weile dauern, und der App-Start
+    soll darauf nicht warten muessen. Der Ticker zeigt bis dahin die
+    betroffenen Firmen einfach ohne Termin an. Fehler werden nur geloggt, nie
+    dem Nutzer angezeigt, analog zu _maybe_scrape_news_history."""
+    today_iso = date.today().isoformat()
+    tracked = _tracked_companies()
+    if db.get_app_setting("earnings_last_scan_date") == today_iso and not force_symbols:
+        return
+    stored: dict = json.loads(db.get_app_setting("earnings_next_dates") or "{}")
+    pending = {
+        sym for sym in tracked
+        if not stored.get(sym) or stored[sym]["date"] < today_iso
+    }
+    if force_symbols:
+        pending |= {sym for sym in force_symbols if sym in tracked}
+    if not pending:
+        db.set_app_setting("earnings_last_scan_date", today_iso)
+        return
+
+    def _run():
+        found: dict = {}
+        try:
+            earnings.scan_upcoming(pending, found)
+        except Exception as e:
+            logger.warning("Earnings-Scan fehlgeschlagen: %s", e)
+        if found:
+            current = json.loads(db.get_app_setting("earnings_next_dates") or "{}")
+            current.update(found)
+            db.set_app_setting("earnings_next_dates", json.dumps(current))
+        missing = pending - set(found)
+        if missing:
+            logger.warning("Earnings-Scan unvollstaendig: %s ohne Termin im Suchfenster gefunden.", ", ".join(sorted(missing)))
+        else:
+            db.set_app_setting("earnings_last_scan_date", today_iso)
+
+    threading.Thread(target=_run, name="earnings-scan", daemon=True).start()
+
+
+@app.get("/api/earnings/upcoming")
+def api_earnings_upcoming():
+    """Alle aktuell verfolgten Firmen (Top 10 nach Gewichtung) - auch ohne
+    bekannten Termin, dann mit date=None (siehe Nutzer-Entscheidung: sichtbar
+    bleiben statt zu verschwinden). Welche davon der Nutzer im Ticker sehen
+    will, filtert das Frontend anhand der lokal gespeicherten Abwahl."""
+    stored: dict = json.loads(db.get_app_setting("earnings_next_dates") or "{}")
+    today_iso = date.today().isoformat()
+    items = []
+    for symbol, name in _tracked_companies().items():
+        entry = stored.get(symbol)
+        has_date = bool(entry) and entry["date"] >= today_iso
+        items.append({
+            "symbol": symbol,
+            "name": name,
+            "date": entry["date"] if has_date else None,
+            "time": (entry.get("time") or "") if has_date else "",
+        })
+    items.sort(key=lambda i: (i["date"] is None, i["date"] or ""))
+    return {"items": items}
+
+
+@app.get("/api/earnings/companies")
+def api_earnings_companies():
+    """Fuer die Einstellungen: die aktuellen Top 10 nach Nasdaq-100-Gewichtung
+    inkl. Rang und "neu seit letztem Abgleich"-Markierung. Welche Firmen der
+    Nutzer davon abgewaehlt hat, ist reine Client-Praeferenz (localStorage,
+    analog zu anderen Anzeige-Einstellungen) und steht nicht hier."""
+    top10 = json.loads(db.get_app_setting("nasdaq100_top10") or "[]")
+    new_tickers = set(json.loads(db.get_app_setting("nasdaq100_new_tickers") or "[]"))
+    return {
+        "companies": [
+            {**c, "rank": i + 1, "is_new": c["ticker"] in new_tickers}
+            for i, c in enumerate(top10)
+        ],
+        "last_sync": db.get_app_setting("nasdaq100_last_sync"),
+        "effective_date": db.get_app_setting("nasdaq100_effective_date") or None,
+    }
+
+
+@app.post("/api/earnings/companies/resync")
+def api_earnings_companies_resync():
+    try:
+        _sync_weights_now()
+    except Exception as e:
+        raise HTTPException(502, f"Gewichtungsabgleich fehlgeschlagen: {e}")
+    new_tickers = set(json.loads(db.get_app_setting("nasdaq100_new_tickers") or "[]"))
+    _maybe_scan_earnings(force_symbols=new_tickers if new_tickers else None)
+    return api_earnings_companies()
 
 
 app.mount("/media", StaticFiles(directory=str(IMAGES_DIR)), name="media")

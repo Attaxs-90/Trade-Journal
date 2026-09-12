@@ -2,6 +2,7 @@
 
 import { api, cls, escapeHtml, fmtNum, fmtSigned, ICON_JOURNAL, safeColor, showAppError, state } from './core.js';
 import { confirmDelete, deleteAccountFlow } from './dialogs.js';
+import { renderEarningsTickerSettings } from './earnings-ticker.js';
 import { getTags, invalidateTagsCache, renderTagFilter } from './filters.js';
 import { JOURNAL_TOOLBAR, flushJournal, getJournalTemplates, initQuillFormats } from './journal.js';
 import { mountView, setActiveNav } from './overview.js';
@@ -91,6 +92,7 @@ export async function openSettings() {
   const content = await mountView("tpl-settings");
   initSettingsCollapse(content);
   renderFontSettings();
+  renderEarningsTickerSettings();
   await renderSettingsAccountDelete();
   await renderTagsSettings();
   await renderJournalTemplatesSettings();

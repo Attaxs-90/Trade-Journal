@@ -24,6 +24,7 @@ import './analytics.js';
 import './strategies.js';
 import './nav.js';
 import { initNewsbar } from './news.js';
+import { initEarningsTicker } from './earnings-ticker.js';
 
 /* Letztes Netz fuer fehlgeschlagene Server-Anfragen. Die Render-Funktionen der
    Ansichten fangen ihre api()-Fehler nicht einzeln ab - vorher endete ein
@@ -49,4 +50,5 @@ loadNotebookExpandedState();
 renderSidebarAccountStatus();
 openOverview();
 initNewsbar();
+initEarningsTicker();
 loadTodoWidget();

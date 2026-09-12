@@ -3,15 +3,20 @@ von ForexFactory selbst fuer Kalender-Widgets bereitgestellten JSON-Feed
 (https://nfs.faireconomy.media/) statt die Seite zu scrapen - liefert nur
 Termin/Titel/Impact/Prognose/Vorwert, keinen tatsaechlichen Ergebniswert und
 erst recht keine redaktionellen Artikeltexte. Fuer "was ist tatsaechlich
-passiert" verlinkt die App stattdessen auf die jeweilige ForexFactory-Seite."""
+passiert" verlinkt die App stattdessen auf die jeweilige ForexFactory-Seite.
+
+Der Feed bietet inzwischen nur noch "thisweek" an - "ff_calendar_nextweek.json"
+liefert dauerhaft 404 (Stand 09/2026, live geprueft, kein Rate-Limit-Fehler).
+"Naechste Woche" wird deshalb per Scraping der Kalenderseite selbst
+nachgeladen (siehe fetch_week/get_next_week), mit derselben eingebetteten
+JSON-Struktur wie der Monats-Verlaufs-Scraper weiter unten."""
 import json
 import re
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 FEED_URLS = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
 ]
 
 # Ohne eigenen User-Agent antwortet der Feed bei wiederholten Anfragen mit
@@ -140,7 +145,14 @@ def fetch_calendar(force: bool = False) -> dict:
     if not force and _cache["fetched_at"] and now - _cache["fetched_at"] < _CACHE_TTL:
         return _cache
 
-    merged: dict[tuple, dict] = {}
+    # Mit dem letzten guten Stand vorbefuellen statt leer zu starten: schlaegt
+    # z.B. nur der Live-Feed fehl (Rate-Limit), waeren sonst alle "diese
+    # Woche"-Termine fuer diesen Zyklus verschwunden, obwohl der Scrape fuer
+    # "naechste Woche" parallel erfolgreich war - frische Treffer ueberschreiben
+    # den alten Stand pro Schluessel ganz normal weiter unten.
+    merged: dict[tuple, dict] = {
+        (e["title"], e["currency"], e["time"]): e for e in _cache["events"]
+    }
     fetched_any = False
     for url in FEED_URLS:
         try:
@@ -154,6 +166,14 @@ def fetch_calendar(force: bool = False) -> dict:
                 continue
             key = (parsed["title"], parsed["currency"], parsed["time"])
             merged[key] = parsed
+
+    # Naechste Woche kommt nicht mehr aus dem Live-Feed (siehe Modul-Docstring),
+    # sondern aus einem gecachten Scrape der Kalenderseite - get_next_week()
+    # fragt automatisch neu ab, sobald sich die Zielwoche aendert (Montag 00:00).
+    for parsed in get_next_week(next_week_monday(now.astimezone().date())):
+        fetched_any = True
+        key = (parsed["title"], parsed["currency"], parsed["time"])
+        merged[key] = parsed
 
     if not fetched_any:
         # Kompletter Fehlschlag: alten Cache-Stand behalten statt ihn zu leeren.
@@ -263,3 +283,91 @@ def scrape_month(year: int, month: int) -> list[dict]:
                 ff_url=_ff_day_url(datetime.fromisoformat(day_iso)),
             ))
     return events
+
+
+# ---------- "Naechste Woche" (Ersatz fuer den 404 gewordenen nextweek-Feed) ----------
+# Dieselbe eingebettete JSON-Struktur wie scrape_month, aber mit vollem
+# Feld-Umfang (Uhrzeit als Unix-Timestamp, Impact aller Stufen, Prognose/
+# Vorwert) - reicht, um dieselbe Form wie _parse_event() (Live-Feed) zu bauen,
+# damit beide Quellen im selben Cache landen koennen (siehe fetch_calendar).
+
+_IMPACT_NAME_TO_TITLE = {"high": "High", "medium": "Medium", "low": "Low", "holiday": "Holiday"}
+
+
+def _parse_scraped_event(raw: dict) -> dict | None:
+    title = (raw.get("prefixedName") or raw.get("name") or "").strip()
+    dateline = raw.get("dateline")
+    if not title or not dateline:
+        return None
+    dt = datetime.fromtimestamp(dateline, tz=timezone.utc).astimezone()
+    currency = raw.get("currency") or ""
+    impact_label = _IMPACT_NAME_TO_TITLE.get((raw.get("impactName") or "").lower(), "Low")
+    return dict(
+        title=title,
+        currency=currency,
+        time=dt.isoformat(),
+        impact=impact_label,
+        forecast=raw.get("forecast") or "",
+        previous=raw.get("previous") or "",
+        event_type=_categorize(title),
+        ff_url=_ff_day_url(dt),
+        ftmo_status=_ftmo_status(currency, title),
+    )
+
+
+def fetch_week(monday: date) -> list[dict]:
+    """Montag bis Freitag einer bestimmten Kalenderwoche, direkt von der
+    ForexFactory-Kalenderseite (?week=...) gescrapt. Filtert ueber den eigenen
+    Zeitstempel jedes Events (dateline), nicht ueber die Tages-Ueberschriften
+    der Seite - die Seite liefert bei einem week-Parameter auch ein paar Tage
+    vor/nach der eigentlichen Woche mit, die so zuverlaessig rausfallen."""
+    week_str = f"{monday.strftime('%b').lower()}{monday.day}.{monday.year}"
+    url = f"https://www.forexfactory.com/calendar?week={week_str}"
+    req = urllib.request.Request(url, headers=_CALENDAR_PAGE_HEADERS)
+    with urllib.request.urlopen(req, timeout=_CALENDAR_PAGE_TIMEOUT) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+
+    friday = monday + timedelta(days=4)
+    events = []
+    for day in _extract_calendar_days(html):
+        for raw in day.get("events", []):
+            parsed = _parse_scraped_event(raw)
+            if not parsed:
+                continue
+            if monday <= datetime.fromisoformat(parsed["time"]).date() <= friday:
+                events.append(parsed)
+    return events
+
+
+_next_week_cache: dict = {"monday": None, "fetched_at": None, "events": []}
+# Wirtschaftstermine fuer die Folgewoche aendern sich nicht stuendlich - anders
+# als der Live-Feed oben ist das hier ein echter Seitenabruf (kein offizielles
+# API), deshalb bewusst ein deutlich laengerer Cache als _CACHE_TTL.
+_NEXT_WEEK_CACHE_TTL = timedelta(hours=3)
+
+
+def get_next_week(monday: date) -> list[dict]:
+    """Wie fetch_week(), aber gecacht - und fragt automatisch neu ab, sobald
+    sich `monday` aendert (z.B. Montag 00:00 Uhr, wenn die bisherige
+    "naechste Woche" zur aktuellen wird und die neue Folgewoche geladen werden
+    soll). Schlaegt der Abruf fehl, bleibt der letzte gute Stand fuer dieselbe
+    Woche stehen; fuer eine andere Woche liefert es dann eine leere Liste,
+    statt veraltete Termine der falschen Woche zu zeigen."""
+    now = datetime.now(timezone.utc)
+    if (_next_week_cache["monday"] == monday and _next_week_cache["fetched_at"]
+            and now - _next_week_cache["fetched_at"] < _NEXT_WEEK_CACHE_TTL):
+        return _next_week_cache["events"]
+    try:
+        events = fetch_week(monday)
+    except Exception:
+        return _next_week_cache["events"] if _next_week_cache["monday"] == monday else []
+    _next_week_cache["monday"] = monday
+    _next_week_cache["fetched_at"] = now
+    _next_week_cache["events"] = events
+    return events
+
+
+def next_week_monday(today: date | None = None) -> date:
+    today = today or date.today()
+    this_monday = today - timedelta(days=today.weekday())
+    return this_monday + timedelta(days=7)

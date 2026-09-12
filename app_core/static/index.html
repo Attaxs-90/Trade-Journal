@@ -18,11 +18,29 @@
     if (localStorage.getItem("newsbarCollapsed") === "true") {
       document.documentElement.setAttribute("data-newsbar", "collapsed");
     }
+    if (localStorage.getItem("earningsTickerEnabled") === "false") {
+      document.documentElement.setAttribute("data-earnings-ticker", "hidden");
+    }
   })();
 </script>
 </head>
 <body>
-<div class="app">
+<div class="page">
+
+  <div class="earnings-ticker" id="earnings-ticker">
+    <div class="earnings-ticker-label" title="Naechste Quartalszahlen der Big Seven" aria-label="Naechste Quartalszahlen der Big Seven">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8 13 13.7l-3.5-3.5L3 17"/></svg>
+      Earnings
+    </div>
+    <div class="earnings-ticker-track" id="earnings-ticker-track">
+      <div class="earnings-ticker-marquee" id="earnings-ticker-marquee"></div>
+    </div>
+    <button type="button" class="earnings-ticker-collapse" id="earnings-ticker-collapse" title="Ticker ausblenden" aria-label="Earnings-Ticker ausblenden">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <div class="app">
 
   <aside class="sidebar" id="sidebar">
     <div class="brand">
@@ -37,6 +55,14 @@
           <span class="collapse-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></span>
         </button>
       </div>
+    </div>
+
+    <div class="inline-filter sidebar-account-status" id="sidebar-account-status">
+      <button type="button" class="sidebar-account-status-toggle" id="sidebar-account-status-toggle" title="Konten-Filter wechseln" aria-label="Konten-Filter wechseln">
+        <span class="sidebar-account-status-label">Konten</span>
+        <div class="sidebar-account-status-chips" id="sidebar-account-status-chips"></div>
+      </button>
+      <div class="inline-filter-panel sidebar-account-status-panel" id="sidebar-account-status-panel" hidden></div>
     </div>
 
     <nav class="nav">
@@ -81,14 +107,6 @@
         <span class="nav-label">Einstellungen</span>
       </div>
     </nav>
-
-    <div class="inline-filter sidebar-account-status" id="sidebar-account-status">
-      <button type="button" class="sidebar-account-status-toggle" id="sidebar-account-status-toggle" title="Konten-Filter wechseln" aria-label="Konten-Filter wechseln">
-        <span class="sidebar-account-status-label">Konten</span>
-        <div class="sidebar-account-status-chips" id="sidebar-account-status-chips"></div>
-      </button>
-      <div class="inline-filter-panel sidebar-account-status-panel" id="sidebar-account-status-panel" hidden></div>
-    </div>
   </aside>
 
   <main class="content" id="content">
@@ -169,6 +187,8 @@
       </div>
     </div>
   </aside>
+
+  </div>
 
 </div>
 
@@ -778,6 +798,59 @@
       </button>
       <div class="settings-card-body">
         <div class="font-grid" id="font-grid"></div>
+      </div>
+    </div>
+
+    <div class="card settings-card" data-settings-card="earnings-ticker">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Earnings-Ticker</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-hint">
+          Laufband oben auf jeder Seite mit den naechsten Quartalszahlen der zehn am staerksten gewichteten
+          Nasdaq-100-Unternehmen (welche das gerade sind, unten unter „Verfolgte Unternehmen").
+        </div>
+        <label class="filter-item">
+          <input type="checkbox" id="earnings-ticker-enabled-toggle"> Earnings-Ticker anzeigen
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" id="earnings-ticker-autoscroll-toggle"> Text automatisch durchlaufen lassen
+        </label>
+        <div class="earnings-ticker-speed-row">
+          <label for="earnings-ticker-speed-select">Geschwindigkeit</label>
+          <select id="earnings-ticker-speed-select">
+            <option value="slow">Langsam</option>
+            <option value="normal">Normal</option>
+            <option value="fast">Schnell</option>
+          </select>
+        </div>
+        <div class="account-hint" id="earnings-ticker-speed-hint"></div>
+        <div class="account-hint earnings-ticker-source-hint">
+          Termine-Quelle: der öffentliche Earnings-Kalender von
+          <a href="https://www.nasdaq.com/market-activity/earnings" target="_blank" rel="noopener">nasdaq.com</a>
+          - läuft automatisch im Hintergrund (beim Start und danach alle paar Stunden erneut) und wird dauerhaft
+          gespeichert, kein Abruf bei jedem Seitenaufruf. Ist ein Termin noch nicht im Ticker zu sehen, steht die
+          Firma trotzdem drin, nur ohne Datum - Nasdaq hat den Termin selbst noch nicht veröffentlicht
+          (typischerweise 3-6 Wochen vorher) und er erscheint automatisch, sobald die Quelle ihn führt.
+        </div>
+
+        <div class="earnings-companies-section">
+          <div class="settings-card-title earnings-companies-title">Verfolgte Unternehmen</div>
+          <div class="sync-row">
+            <span class="account-hint" id="earnings-companies-sync-info"></span>
+            <button type="button" class="btn btn-secondary earnings-companies-resync-btn" id="earnings-companies-resync-btn">Jetzt abgleichen</button>
+          </div>
+          <div class="account-hint">
+            Gewichtung kommt aus den taeglich veroeffentlichten Holdings des Invesco-QQQ-ETF (bildet den
+            Nasdaq-100 1:1 nach) - Nasdaq selbst veroeffentlicht die exakten Indexgewichte nicht kostenlos. Die
+            zehn am staerksten gewichteten Unternehmen sind vorausgewaehlt; abwaehlen entfernt eine Firma aus dem
+            Ticker, auch wenn sie weiter zu den Top 10 gehoert. Steigt eine neue Firma in die Top 10 auf,
+            erscheint sie automatisch hier (Markierung „NEU") und wird - sofern nicht abgewaehlt - direkt mit in
+            den Ticker aufgenommen.
+          </div>
+          <div class="weight-table" id="earnings-companies-list"></div>
+        </div>
       </div>
     </div>
 

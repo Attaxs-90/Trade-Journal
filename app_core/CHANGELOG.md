@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.13.0
+- Neuer Earnings-Ticker: Laufband oben auf jeder Seite mit den nächsten
+  Quartalszahlen der zehn am stärksten gewichteten Nasdaq-100-Unternehmen
+  (Gewichtung per Invesco-QQQ-Holdings, wöchentlicher Abgleich). Unternehmen
+  ohne bekannten Termin bleiben sichtbar ("Termin noch nicht bekannt") statt
+  zu verschwinden, neu aufgenommene Unternehmen sind mit "NEU" markiert.
+  Einstellungen (an/aus, Laufrichtung, Geschwindigkeit, sichtbare
+  Unternehmen inkl. Gewichtungsanzeige, manueller Abgleich) im
+  Einstellungen-Tab.
+- Marktnews: "Diese Woche" wandert jetzt schon Freitagabend um 22 Uhr in die
+  Historie statt erst am Montag - "Nächste Woche" ist ab diesem Zeitpunkt
+  entsprechend eher sichtbar. Da der offizielle ForexFactory-Feed für
+  "nächste Woche" weggefallen ist, wird diese Woche jetzt per Scraping der
+  Kalenderseite nachgeladen und laufend im Hintergrund warm gehalten, damit
+  nie ein leeres Wochenfeld entsteht.
+- Konten-Filter in der Sidebar öffnet sich wieder korrekt nach unten (öffnete
+  seit dem Umzug an den oberen Rand der Sidebar fälschlich nach oben und
+  verdeckte dabei die Kontenliste).
+
 ## 1.12.0
 - News-Verlauf: das Nachlade-Fenster hält jetzt immer ein volles Jahr Vorlauf
   (wandert mit jedem Monat weiter) statt fix bis Ende des laufenden Jahres.
