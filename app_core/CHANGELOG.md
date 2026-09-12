@@ -1,10 +1,30 @@
 # Changelog
 
+## 1.12.0
+- News-Verlauf: das Nachlade-Fenster hält jetzt immer ein volles Jahr Vorlauf
+  (wandert mit jedem Monat weiter) statt fix bis Ende des laufenden Jahres.
+  Der aktuelle und alle künftigen Monate werden bei jedem Abgleich komplett
+  neu geholt statt nur ergänzt, damit verschobene oder entfernte Termine
+  korrekt übernommen werden statt als Dublette stehen zu bleiben. Ein
+  mitgelieferter Datenstand sorgt dafür, dass die Historie auch ohne
+  ForexFactory-Zugriff sofort verfügbar ist.
+- Monatsübersicht: neuer "Heute"-Button springt direkt zum aktuellen Monat.
+- Einstellungen: Tags-Gruppen und -Einträge kompakter und besser lesbar
+  gestaltet, Journal-Vorlagen haben jetzt eine eigene, übersichtliche
+  Zeilendarstellung mit Überschrift.
+- Konten: Löschen archiviert ein Konto jetzt nur noch, statt es zu entfernen -
+  bereits importierte Trades bleiben ihrem (ehemaligen) Konto zugeordnet und
+  erscheinen weiterhin als "Kontoname (gelöscht)" in Filtern und Übersicht,
+  statt ununterscheidbar im Sammeltopf "Nicht zugeordnet" zu verschwinden.
+  Archivierte Konten werden im Konten-Filter in einem eigenen Block unten
+  angezeigt.
+
 ## 1.11.0
 - Monatsübersicht: dauerhafter News-Verlauf (High-Impact-Termine und Feiertage)
   statt der manuellen Stern-Markierung in der Newsbar - wird automatisch einmal
   pro Monat beim Start nachgeladen, inklusive bereits von ForexFactory
-  veröffentlichter künftiger Monate bis zum Jahresende. Ein Klick auf das
+  veröffentlichter künftiger Monate ein volles Jahr im Voraus (das Fenster
+  wandert mit jedem Monat einen Monat weiter). Ein Klick auf das
   Tages-Label ("High"/"Feiertag") zeigt die tatsächlichen Termine dieses Tages;
   der zuvor sichtbare Rahmen um die Kalenderkachel ist entfernt, das Label
   allein reicht als Hinweis. Eigene Filter (Impact/Event-Typ/Währung) in den

@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     last_sync TEXT,
     starting_balance REAL DEFAULT 0,
     synced_balance REAL,
-    sync_path TEXT DEFAULT ''
+    sync_path TEXT DEFAULT '',
+    archived INTEGER NOT NULL DEFAULT 0
 );
 
 -- Dauerhafter Verlauf wichtiger Wirtschaftskalender-Termine (High-Impact,
@@ -431,6 +432,7 @@ MIGRATIONS: list[str] = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",                                                                # -> Version 37
+    "ALTER TABLE broker_accounts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",  # -> Version 38
 ]
 
 
@@ -591,11 +593,12 @@ def insert_trades(trades: list[dict], source: str = "import", account_id: int | 
     return inserted
 
 
-def list_accounts() -> list[dict]:
+def list_accounts(include_archived: bool = False) -> list[dict]:
+    where = "" if include_archived else "WHERE archived = 0"
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance, sync_path "
-            "FROM broker_accounts ORDER BY name"
+            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance, sync_path, archived "
+            f"FROM broker_accounts {where} ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -644,12 +647,17 @@ def set_synced_balance(account_id: int, balance: float):
 
 
 def delete_account(account_id: int):
+    """Archiviert statt hart zu loeschen (gleiches Muster wie bei Strategien,
+    siehe CLAUDE.md 'Loeschen ist zweigleisig'): Trades behalten ihre
+    account_id, das Konto verschwindet nur aus Verwaltung/Sync/Neuanlage-
+    Dropdowns (list_accounts() filtert archivierte Konten standardmaessig
+    raus). list_account_options() nimmt archivierte Konten trotzdem mit auf,
+    damit betroffene Trades weiter ihrem (ehemaligen) Konto zuordenbar
+    bleiben und als "(geloescht)" markiert werden koennen, statt im Sammel-
+    Topf "Nicht zugeordnet" von echten CSV-Importen ohne Konto ununter-
+    scheidbar zu werden - siehe Nutzer-Feedback dazu."""
     with get_conn() as conn:
-        # Trades vor dem Loeschen des Kontos entkoppeln, sonst zeigen sie auf
-        # eine nicht mehr existente account_id und tauchen in keinem Filter
-        # mehr auf (weder Konto noch "Nicht zugeordnet").
-        conn.execute("UPDATE trades SET account_id = NULL WHERE account_id = ?", (account_id,))
-        conn.execute("DELETE FROM broker_accounts WHERE id = ?", (account_id,))
+        conn.execute("UPDATE broker_accounts SET archived = 1 WHERE id = ?", (account_id,))
 
 
 def delete_trade(trade_id: int) -> list[dict]:
@@ -882,8 +890,14 @@ def account_net_totals() -> dict[int, float]:
 
 
 def list_account_options() -> list[dict]:
-    """Alle waehlbaren Filter-Optionen: echte Konten + ggf. 'csv' fuer nicht zugeordnete Importe."""
-    options = [dict(key=str(a["id"]), name=a["name"]) for a in list_accounts()]
+    """Alle waehlbaren Filter-Optionen: echte Konten (inkl. archivierter, siehe
+    delete_account() - deren Trades sollen weiter ihrem ehemaligen Konto
+    zuordenbar bleiben statt im 'Nicht zugeordnet'-Sammeltopf zu verschwinden)
+    + ggf. 'csv' fuer nicht zugeordnete Importe."""
+    options = [
+        dict(key=str(a["id"]), name=f'{a["name"]} (gelöscht)' if a["archived"] else a["name"], archived=bool(a["archived"]))
+        for a in list_accounts(include_archived=True)
+    ]
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) as n FROM trades WHERE account_id IS NULL").fetchone()
     if row["n"]:
@@ -2181,13 +2195,34 @@ def list_news_history(start: str | None = None, end: str | None = None) -> list[
 
 def has_news_history_month(year: int, month: int) -> bool:
     """Ob fuer diesen Monat schon Verlaufsdaten vorliegen - der Scraper
-    ueberspringt so bereits geholte Monate bei einem erneuten Lauf (ausser
-    force=True), nur der jeweils laufende Monat wird immer neu geholt."""
+    ueberspringt damit bereits abgeschlossene (vergangene) Monate bei einem
+    erneuten Lauf. Aktuelle/zukuenftige Monate werden davon unabhaengig immer
+    neu geholt, siehe replace_news_history_month() und _run_news_history_scrape."""
     with get_conn() as conn:
         row = conn.execute(
             "SELECT 1 FROM marked_news WHERE day LIKE ? LIMIT 1", (f"{year:04d}-{month:02d}-%",)
         ).fetchone()
         return row is not None
+
+
+def replace_news_history_month(year: int, month: int, events: list[dict]) -> int:
+    """Ersetzt alle Termine eines Monats durch einen frischen Scrape-Stand -
+    im Gegensatz zu bulk_add_news_history() (reines INSERT OR IGNORE) werden
+    hier auch verschobene Zeiten und entfernte Termine korrekt uebernommen,
+    statt als doppelte Zeile stehen zu bleiben. Nur fuer den aktuellen und
+    zukuenftige Monate gedacht - abgeschlossene Vergangenheit bleibt ueber
+    bulk_add_news_history()/has_news_history_month() eingefroren."""
+    now_iso = datetime.now().isoformat()
+    rows = [{**e, "created_at": now_iso} for e in events]
+    with get_conn() as conn:
+        conn.execute("DELETE FROM marked_news WHERE day LIKE ?", (f"{year:04d}-{month:02d}-%",))
+        if rows:
+            conn.executemany(
+                """INSERT OR IGNORE INTO marked_news (day, title, currency, impact, event_type, time, ff_url, created_at)
+                   VALUES (:day, :title, :currency, :impact, :event_type, :time, :ff_url, :created_at)""",
+                rows,
+            )
+        return len(rows)
 
 
 def bulk_add_news_history(events: list[dict]) -> int:

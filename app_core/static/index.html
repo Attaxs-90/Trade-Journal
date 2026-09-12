@@ -574,6 +574,7 @@
         <button class="btn btn-secondary month-prev">←</button>
         <div class="month-label">Monat</div>
         <button class="btn btn-secondary month-next">→</button>
+        <button type="button" class="btn btn-secondary month-today" title="Zum aktuellen Monat springen">Heute</button>
       </div>
     </header>
 
@@ -610,9 +611,9 @@
               <div class="month-settings-hint">
                 Zeigt ein Label bei Tagen mit einem erfassten Termin (High-Impact oder
                 Feiertag) - anklicken zeigt, welcher Termin das war. Einmal erfasste Termine
-                bleiben dauerhaft erhalten. Wird automatisch einmal pro Monat bis Ende des
-                laufenden Jahres nachgeladen (auch bereits veröffentlichte künftige Monate);
-                der Button unten stößt das bei Bedarf sofort an.
+                bleiben dauerhaft erhalten. Wird automatisch einmal pro Monat ein volles Jahr
+                im Voraus nachgeladen (auch bereits veröffentlichte künftige Monate); der
+                Button unten stößt das bei Bedarf sofort an.
               </div>
               <div class="month-news-scrape-row">
                 <button type="button" class="btn btn-secondary" id="month-news-scrape-btn">Jetzt aktualisieren</button>
@@ -835,7 +836,7 @@
           <button type="button" class="btn btn-secondary" id="journal-tpl-cancel" hidden>Abbrechen</button>
         </form>
         <div class="journal-tpl-editor-host" id="journal-tpl-editor"></div>
-        <div class="tag-list" id="journal-tpl-list"></div>
+        <div class="journal-tpl-list" id="journal-tpl-list"></div>
       </div>
     </div>
   </section>

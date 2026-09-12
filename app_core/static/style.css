@@ -318,6 +318,10 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .filter-item input { accent-color: var(--accent); cursor: pointer; }
 .filter-item.master { font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 7px; margin-bottom: 3px; }
 .filter-item-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.filter-group-divider {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-faint); padding: 8px 6px 4px; border-top: 1px solid var(--border); margin-top: 4px;
+}
 
 .tag-logic-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .tag-logic-btn {
@@ -1108,30 +1112,38 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 }
 .tag-swatch.active { box-shadow: inset 0 0 0 2px var(--bg-elevated), 0 0 0 2px var(--text); }
 
-.tag-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.tag-list { display: flex; flex-direction: column; gap: 20px; margin-top: 14px; }
 .tag-group-block { display: flex; flex-direction: column; gap: 8px; }
 .tag-group-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
+.tag-group-rows { display: flex; flex-wrap: wrap; gap: 8px; }
 .tag-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 16px;
-  align-items: center;
-  padding: 10px 14px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--bg);
+  max-width: 260px;
 }
-.tag-row-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
-.tag-row-stats { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; grid-column: 1 / -1; }
+.tag-row-top { display: flex; align-items: center; gap: 6px; }
+.tag-row-name {
+  display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tag-row-stats { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
 .tag-row-stats .pos { color: var(--green); }
 .tag-row-stats .neg { color: var(--red); }
-.tag-row-actions { display: flex; gap: 8px; }
-.tag-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tag-row-actions { display: flex; gap: 2px; opacity: 0; flex-shrink: 0; margin-left: auto; }
+.tag-row:hover .tag-row-actions, .tag-row:focus-within .tag-row-actions { opacity: 1; }
+.tag-color-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 .tag-chip {
   display: inline-flex;
@@ -1898,6 +1910,26 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 
 /* Quill an das Theme anpassen - die Snow-Vorlage bringt eigene helle Farben mit,
    die im Dark Mode sonst als weisser Kasten stehen bleiben. */
+.journal-tpl-editor-host { margin-top: 14px; }
+.journal-tpl-list { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.journal-tpl-list-title {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--border);
+}
+.journal-tpl-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 8px 10px; border-radius: 8px;
+}
+.journal-tpl-row:hover { background: var(--bg-hover); }
+.journal-tpl-row:hover .journal-tpl-row-actions,
+.journal-tpl-row:focus-within .journal-tpl-row-actions { opacity: 1; }
+.journal-tpl-row-name {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto;
+}
+.journal-tpl-row-icon { flex-shrink: 0; display: flex; color: var(--text-faint); }
+.journal-tpl-row-icon svg { width: 15px; height: 15px; }
+.journal-tpl-row-actions { display: flex; align-items: center; gap: 2px; opacity: 0; flex-shrink: 0; }
 .journal-quill { background: var(--bg); border-radius: 0 0 8px 8px; }
 .ql-toolbar.ql-snow {
   border-color: var(--border) !important; background: var(--bg-elevated);

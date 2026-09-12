@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trade-journal",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app_core/run.py"],
+      "port": 8420
+    }
+  ]
+}

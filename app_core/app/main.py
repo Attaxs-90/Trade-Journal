@@ -35,6 +35,7 @@ STARTUP_SYNC_TIMEOUT = 25
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _startup_sync_accounts()
+    _seed_news_history_from_bundle()
     _maybe_scrape_news_history()
     yield
 
@@ -1190,29 +1191,80 @@ _NEWS_SCRAPE_DELAY_SECONDS = 1.5
 NEWS_SCRAPE_STARTUP_TIMEOUT = 90
 
 
+NEWS_HISTORY_SEED_FILE = Path(__file__).resolve().parent / "news_history_seed.json"
+
+
+def _seed_news_history_from_bundle():
+    """Laedt einen mit der App ausgelieferten Datenstand (siehe
+    NEWS_HISTORY_SEED_FILE, erzeugt per einmaligem Export aus marked_news) in
+    die Datenbank - damit ein frischer Nutzer die Termine ab
+    NEWS_HISTORY_START_YEAR/MONTH sofort und offline hat, statt erst auf einen
+    vollstaendigen ForexFactory-Scrape warten zu muessen (und selbst wenn das
+    Scraping irgendwann durch eine Seitenaenderung ausfaellt, bleibt dieser
+    Stand als Grundlage erhalten). INSERT OR IGNORE macht das bei jedem Start
+    unkritisch wiederholbar, echte Netzwerk-Anfragen bleiben ausschliesslich
+    _run_news_history_scrape vorbehalten.
+
+    Nur bereits VERGANGENE Monate werden aus dem Seed geladen: fuer den
+    aktuellen/zukuenftige Monate soll ausschliesslich der Live-Scrape
+    (replace_news_history_month) die Wahrheit sein - sonst koennte der Seed
+    bei jedem Start einen Termin wieder aufleben lassen, den eine spaetere
+    Live-Korrektur (verschoben/entfernt) bereits berichtigt hat."""
+    now = datetime.now(UTC)
+    current_month_prefix = f"{now.year:04d}-{now.month:02d}"
+    try:
+        with open(NEWS_HISTORY_SEED_FILE, "r", encoding="utf-8") as f:
+            events = json.load(f)
+        past_events = [e for e in events if e["day"][:7] < current_month_prefix]
+        inserted = db.bulk_add_news_history(past_events)
+        if inserted:
+            logger.info("News-Verlauf: %d Termine aus mitgeliefertem Datenstand geladen.", inserted)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning("News-Verlauf-Datenstand konnte nicht geladen werden: %s", e)
+
+
 def _run_news_history_scrape(force: bool = False) -> dict:
-    """Holt Monat fuer Monat (ab NEWS_HISTORY_START_YEAR/MONTH bis zum 31.12.
-    des LAUFENDEN Jahres - ForexFactory veroeffentlicht Feiertage/Termine oft
-    schon Monate im Voraus, siehe Nutzer-Beobachtung fuer November) High-
-    Impact- und Feiertagstermine von ForexFactory nach. Bereits vorhandene
-    Monate werden uebersprungen (force=True erzwingt ein erneutes Holen), der
-    laufende Monat wird immer neu geholt, weil er noch unvollstaendig sein
-    kann. Von zwei Stellen genutzt: dem manuellen Button
-    (api_scrape_news_history) und dem automatischen monatlichen Abgleich
-    (_maybe_scrape_news_history) - beide sollen exakt dieselbe Monatsspanne
-    und Ueberspring-Logik verwenden."""
+    """Holt Monat fuer Monat (ab NEWS_HISTORY_START_YEAR/MONTH bis zwoelf
+    Monate ab dem LAUFENDEN Monat - ForexFactory veroeffentlicht Feiertage/
+    Termine oft schon Monate im Voraus, siehe Nutzer-Beobachtung fuer
+    November) High-Impact- und Feiertagstermine von ForexFactory nach. Das
+    Zwoelf-Monats-Fenster wandert mit jedem Kalendermonat einen Monat weiter
+    (siehe Nutzer-Vorgabe: immer ein volles Jahr Vorlauf halten, nicht nur bis
+    Ende des laufenden Jahres).
+
+    Bereits VERGANGENE Monate werden uebersprungen, wenn schon Daten
+    vorliegen (force=True erzwingt trotzdem ein erneutes Holen) - die
+    Termine sind abgeschlossen, an ihrer Zeit aendert sich nichts mehr.
+    Der aktuelle Monat und alle zukuenftigen im Fenster werden dagegen bei
+    JEDEM Lauf komplett ersetzt (replace_news_history_month statt nur
+    ergaenzen) - ForexFactory kann Termine bis zu ihrem Eintreten noch
+    verschieben, entfernen oder neue hinzufuegen, siehe Nutzer-Frage dazu.
+    Ein reines INSERT OR IGNORE wuerde eine verschobene Zeit nur als
+    zusaetzliche Zeile stehen lassen statt die alte zu korrigieren.
+
+    Von zwei Stellen genutzt: dem manuellen Button (api_scrape_news_history)
+    und dem automatischen monatlichen Abgleich (_maybe_scrape_news_history) -
+    beide sollen exakt dieselbe Monatsspanne und Ueberspring-Logik
+    verwenden."""
     now = datetime.now(UTC)
     y, m = NEWS_HISTORY_START_YEAR, NEWS_HISTORY_START_MONTH
-    end_year, end_month = now.year, 12
+    end_total = now.year * 12 + (now.month - 1) + 12
+    end_year, end_month = divmod(end_total, 12)
+    end_month += 1
     inserted_total = 0
     months_scraped: list[str] = []
     months_failed: list[str] = []
     while (y, m) <= (end_year, end_month):
-        is_current_month = (y, m) == (now.year, now.month)
-        if force or is_current_month or not db.has_news_history_month(y, m):
+        is_past_month = (y, m) < (now.year, now.month)
+        if not is_past_month or force or not db.has_news_history_month(y, m):
             try:
                 events = news.scrape_month(y, m)
-                inserted_total += db.bulk_add_news_history(events)
+                if is_past_month:
+                    inserted_total += db.bulk_add_news_history(events)
+                else:
+                    inserted_total += db.replace_news_history_month(y, m, events)
                 months_scraped.append(f"{y:04d}-{m:02d}")
             except Exception as e:
                 logger.warning("News-Verlauf %04d-%02d fehlgeschlagen: %s", y, m, e)

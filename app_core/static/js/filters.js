@@ -99,7 +99,7 @@ export async function renderAccountFilter(panelId = "ov-account-filter-panel", c
     return;
   }
 
-  for (const opt of options) {
+  const addOption = (opt) => {
     const label = document.createElement("label");
     label.className = "filter-item";
     label.innerHTML = `<input type="checkbox" data-key="${escapeHtml(opt.key)}"> ${escapeHtml(opt.name)}`;
@@ -119,6 +119,21 @@ export async function renderAccountFilter(panelId = "ov-account-filter-panel", c
       refreshCurrentView();
     });
     panel.appendChild(label);
+  };
+
+  // Geloeschte (archivierte) Konten unten in einem eigenen Block statt in der
+  // normalen alphabetischen Reihenfolge dazwischen - siehe Nutzer-Wunsch,
+  // sie klar von den aktiven Konten zu trennen (list_account_options()
+  // liefert sie bewusst weiter mit, siehe CLAUDE.md).
+  const activeOptions = options.filter(o => !o.archived);
+  const archivedOptions = options.filter(o => o.archived);
+  activeOptions.forEach(addOption);
+  if (archivedOptions.length) {
+    const divider = document.createElement("div");
+    divider.className = "filter-group-divider";
+    divider.textContent = "Gelöschte Konten";
+    panel.appendChild(divider);
+    archivedOptions.forEach(addOption);
   }
 }
 

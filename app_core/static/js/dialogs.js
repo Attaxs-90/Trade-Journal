@@ -124,7 +124,7 @@ export function promptDialog(message, defaultValue = "") {
    Confirm-/Request-/Refresh-Logik an zwei Stellen. */
 export async function deleteAccountFlow(accountId, accountName) {
   const ok = await confirmDelete(
-    `Konto "${accountName}" wirklich entfernen? Bereits importierte Trades bleiben erhalten, verlieren aber die Zuordnung zu diesem Konto.`
+    `Konto "${accountName}" wirklich entfernen? Bereits importierte Trades bleiben erhalten und weiter diesem Konto zugeordnet - es erscheint dafür noch als "${accountName} (gelöscht)" in Filtern und Übersicht.`
   );
   if (!ok) return false;
   await api(`/api/accounts/${accountId}`, { method: "DELETE" });

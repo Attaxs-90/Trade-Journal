@@ -1,6 +1,6 @@
 /* Einstellungen: Schriftart, ein-/ausklappbare Karten, Journal-Vorlagen, Tag-Verwaltung. */
 
-import { api, cls, escapeHtml, fmtNum, fmtSigned, safeColor, showAppError, state } from './core.js';
+import { api, cls, escapeHtml, fmtNum, fmtSigned, ICON_JOURNAL, safeColor, showAppError, state } from './core.js';
 import { confirmDelete, deleteAccountFlow } from './dialogs.js';
 import { getTags, invalidateTagsCache, renderTagFilter } from './filters.js';
 import { JOURNAL_TOOLBAR, flushJournal, getJournalTemplates, initQuillFormats } from './journal.js';
@@ -156,14 +156,15 @@ async function renderJournalTemplatesSettings() {
       list.innerHTML = `<div class="empty-state">Noch keine Vorlagen angelegt.</div>`;
       return;
     }
+    list.innerHTML = `<div class="journal-tpl-list-title">Bereits angelegte Vorlagen</div>`;
     for (const tpl of templates) {
       const row = document.createElement("div");
-      row.className = "tag-row";
+      row.className = "journal-tpl-row";
       row.innerHTML = `
-        <div class="tag-row-name">${escapeHtml(tpl.name)}</div>
-        <div class="tag-row-actions">
-          <button type="button" class="btn btn-secondary tpl-edit">Bearbeiten</button>
-          <button type="button" class="btn btn-secondary tpl-delete">Löschen</button>
+        <div class="journal-tpl-row-name"><span class="journal-tpl-row-icon">${ICON_JOURNAL}</span>${escapeHtml(tpl.name)}</div>
+        <div class="journal-tpl-row-actions">
+          <button type="button" class="nb-icon-btn tpl-edit" aria-label="Vorlage bearbeiten" title="Bearbeiten">✎</button>
+          <button type="button" class="nb-icon-btn nb-delete tpl-delete" aria-label="Vorlage löschen" title="Löschen">×</button>
         </div>`;
       row.querySelector(".tpl-edit").addEventListener("click", () => {
         editingId = tpl.id;
@@ -327,16 +328,19 @@ async function renderTagsList() {
   for (const [group, groupTags] of byGroup) {
     const block = document.createElement("div");
     block.className = "tag-group-block";
-    block.innerHTML = `<div class="tag-group-title">${escapeHtml(group)}</div>`;
+    block.innerHTML = `<div class="tag-group-title">${escapeHtml(group)}</div><div class="tag-group-rows"></div>`;
+    const rowsEl = block.querySelector(".tag-group-rows");
     for (const t of groupTags) {
       const s = statsById.get(t.id) || { trade_count: 0, net_usd: 0, winrate: 0 };
       const row = document.createElement("div");
       row.className = "tag-row";
       row.innerHTML = `
-        <div class="tag-row-name"><span class="tag-color-dot" style="background:${safeColor(t.color)}"></span>${escapeHtml(t.name)}</div>
-        <div class="tag-row-actions">
-          <button type="button" class="btn btn-secondary tag-edit">Bearbeiten</button>
-          <button type="button" class="btn btn-danger tag-delete">Löschen</button>
+        <div class="tag-row-top">
+          <div class="tag-row-name"><span class="tag-color-dot" style="background:${safeColor(t.color)}"></span>${escapeHtml(t.name)}</div>
+          <div class="tag-row-actions">
+            <button type="button" class="nb-icon-btn tag-edit" aria-label="Tag bearbeiten" title="Bearbeiten">✎</button>
+            <button type="button" class="nb-icon-btn nb-delete tag-delete" aria-label="Tag löschen" title="Löschen">×</button>
+          </div>
         </div>
         <div class="tag-row-stats">${s.trade_count} Trade(s) · <span class="${cls(s.net_usd)}">${fmtSigned(s.net_usd)} $</span> · Winrate ${fmtNum(s.winrate, 1)}%</div>
       `;
@@ -361,7 +365,7 @@ async function renderTagsList() {
         await renderTagFilter();
         if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
       });
-      block.appendChild(row);
+      rowsEl.appendChild(row);
     }
     list.appendChild(block);
   }

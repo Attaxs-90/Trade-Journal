@@ -102,6 +102,7 @@ export async function openMonth() {
 
   content.querySelector(".month-prev").addEventListener("click", () => shiftMonth(-1));
   content.querySelector(".month-next").addEventListener("click", () => shiftMonth(1));
+  content.querySelector(".month-today").addEventListener("click", () => goToCurrentMonth());
 
   loadMonthNewsFilterState();
   const settingsToggle = content.querySelector("#month-settings-toggle");
@@ -149,6 +150,13 @@ function shiftMonth(delta) {
   if (m > 12) { m = 1; y += 1; }
   state.monthYear = y;
   state.monthNum = m;
+  renderMonth();
+}
+
+function goToCurrentMonth() {
+  const now = new Date();
+  state.monthYear = now.getFullYear();
+  state.monthNum = now.getMonth() + 1;
   renderMonth();
 }
 
