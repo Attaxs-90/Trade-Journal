@@ -2,7 +2,7 @@
 
 import { api, attachOutsideClose, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_IMAGE, ICON_JOURNAL, state, tile, withFilter } from './core.js';
 import { getAccountOptions } from './filters.js';
-import { closeLightbox } from './images.js';
+import { closeLightbox, exitLightboxFullscreen, isLightboxFullscreen } from './images.js';
 import { clearActiveJournal, flushJournal, mountJournalEditor, renderJournalList } from './journal.js';
 import { impactColorVar, NEWS_CURRENCIES, NEWS_EVENT_TYPES, NEWS_IMPACT_LEVELS, renderImpactTypeCurrencyChips } from './news.js';
 import { flushNotebookNote } from './notebooks.js';
@@ -241,12 +241,13 @@ export async function renderMonth() {
       + (d.has_image ? `<span class="cell-image-icon" title="Bild vorhanden">${ICON_IMAGE}</span>` : "")
       + `</div>`
       + (hasTrades ? `<div class="cell-net">${fmtSigned(d.net)} $</div><div class="cell-count">${d.trades} Trades</div>` : "");
-    // Icon oeffnet immer den Journal-Eintrag des Tages (auch zum Neuanlegen an
-    // Tagen ohne Trade) - eigener Klick-Handler, damit er unabhaengig vom
-    // Zellen-Klick (der nur bei Handelstagen das Tagesdetail oeffnet) funktioniert.
+    // Icon oeffnet immer dasselbe Tagesdetail-Modal wie ein Klick auf die Zelle
+    // (auch zum Neuanlegen eines Journal-Eintrags an Tagen ohne Trade) - eigener
+    // Klick-Handler mit stopPropagation, damit das Modal nicht durch den
+    // Zellen-Klick-Handler ein zweites Mal geoeffnet wird.
     el.querySelector(".cell-journal-icon").addEventListener("click", (e) => {
       e.stopPropagation();
-      openJournalModal(d.date);
+      openDayModal(d.date);
     });
     const newsChipBtn = el.querySelector(".cell-news-chip");
     if (newsChipBtn) {
@@ -290,7 +291,7 @@ export async function renderMonth() {
     `;
     tr.querySelector(".journal-cell").addEventListener("click", (e) => {
       e.stopPropagation();
-      openJournalModal(d.date);
+      openDayModal(d.date);
     });
     if (hasTrades) {
       tr.addEventListener("click", () => toggleMonthDayExpand(tr, d.date, accountNames, strategyNames));
@@ -347,7 +348,7 @@ export function monthLabel(year, month) {
 
 /* ---------- Tages-Modal ---------- */
 
-async function openDayModal(day) {
+export async function openDayModal(day) {
   await flushJournal();
   clearActiveJournal();
   const overlay = document.getElementById("modal-overlay");
@@ -355,41 +356,21 @@ async function openDayModal(day) {
   body.innerHTML = "";
   body.appendChild(document.getElementById("tpl-day").content.cloneNode(true));
   overlay.classList.add("visible");
-  // Nach dem Schliessen die Monatsuebersicht neu laden, damit ein frisch
-  // angelegter/geaenderter Journal-Eintrag (oder ein geloeschtes Bild) sofort
-  // im Kalender-Icon auftaucht, ohne dass man selbst neu laden muss.
-  modalOnClose = () => { if (state.view === "month") renderMonth(); };
-  await populateDay(body, day);
-}
-
-/* Journal-Eintrag eines Tages in einem Fenster statt auf der Journal-Seite -
-   fuer die Monatsuebersicht: Eintrag machen, Fenster schliessen, direkt mit
-   dem naechsten Tag im Kalender weitermachen, ohne die Seite zu verlassen. */
-export async function openJournalModal(day) {
-  await flushJournal();
-  clearActiveJournal();
-  const overlay = document.getElementById("modal-overlay");
-  const body = document.getElementById("modal-body");
-  body.innerHTML = `
-    <section class="view">
-      <header class="view-header"><h1>${fmtDate(day)}</h1></header>
-      <div class="journal-editor-host" id="journal-modal-host"></div>
-    </section>`;
-  overlay.classList.add("visible");
-  // Nach dem Schliessen die Monatsuebersicht bzw. (bei einem aus der
-  // Journal-Suche geoeffneten Eintrag) die Trefferliste neu laden, damit ein
-  // frisch angelegter/geloeschter Eintrag sofort sichtbar ist.
+  // Nach dem Schliessen die Monatsuebersicht bzw. (wenn von der Journal-Seite
+  // geoeffnet, siehe journal.js) die Tagebuch-Liste neu laden, damit ein
+  // frisch angelegter/geaenderter Journal-Eintrag (oder ein geloeschtes Bild)
+  // sofort sichtbar ist, ohne dass man selbst neu laden muss.
   modalOnClose = () => {
     if (state.view === "month") renderMonth();
     else if (state.view === "journal") renderJournalList();
   };
-  await mountJournalEditor(document.getElementById("journal-modal-host"), day);
+  await populateDay(body, day);
 }
 
 /* Klick auf das News-Label einer Kalenderkachel (siehe renderMonth) - zeigt
    die tatsaechlichen Termine dieses Tages statt nur des kurzen "High"/
    "Feiertag"-Labels. Nutzt denselben generischen Modal-Rahmen wie
-   openJournalModal(), aber ohne modalOnClose - reines Anzeigen, nichts wird
+   openDayModal(), aber ohne modalOnClose - reines Anzeigen, nichts wird
    hier gespeichert/geaendert, ein Neuladen der Monatsuebersicht beim
    Schliessen ist also nicht noetig. */
 function openNewsInfoModal(day, entry) {
@@ -427,7 +408,8 @@ attachOutsideClose(document.getElementById("modal-overlay"), closeModal);
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (document.getElementById("lightbox-overlay").classList.contains("visible")) {
-    closeLightbox();
+    if (isLightboxFullscreen()) exitLightboxFullscreen();
+    else closeLightbox();
   } else {
     closeModal();
   }

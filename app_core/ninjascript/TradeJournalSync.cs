@@ -121,7 +121,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 execution.ExecutionId,
                 entryExit,
                 "-",  // "Position"-Spalte wird vom Trade-Journal-Parser nicht gelesen
-                execution.Order.Id.ToString(CultureInfo.InvariantCulture),
+                OrderIdForDedup(execution),
                 execution.Order.Name ?? "",
                 execution.Commission.ToString("F2", CultureInfo.InvariantCulture) + " $",
                 "1",
@@ -133,6 +133,19 @@ namespace NinjaTrader.NinjaScript.AddOns
             {
                 File.AppendAllText(SyncFilePath, row + Environment.NewLine, new UTF8Encoding(true));
             }
+        }
+
+        // Muss mit der "Order ID"-Spalte von NinjaTraders eigenem manuellen
+        // Executions-Export uebereinstimmen (dort: Execution-ID ohne den "_n"-Fill-Suffix) -
+        // sonst erkennt das Trade Journal beim manuellen Nachimportieren fehlender Trades
+        // denselben, bereits per Auto-Sync eingelesenen Fill nicht als Duplikat
+        // (execution.Order.Id waere hier NinjaScripts interne, sitzungsbezogene Zaehler-ID
+        // und passt nicht zur Broker-Order-ID im manuellen Export).
+        private static string OrderIdForDedup(Execution execution)
+        {
+            string execId = execution.ExecutionId;
+            int lastUnderscore = execId.LastIndexOf('_');
+            return lastUnderscore > 0 ? execId.Substring(0, lastUnderscore) : execId;
         }
 
         // Entry, wenn die Position dem Betrag nach waechst (0 -> N oder N -> N+delta in

@@ -1,15 +1,15 @@
 /* Sidebar-Navigation und Reihenfolge der Menuepunkte. */
 
 import { openStrategy } from './strategies.js';
-import { openAccounts, openAnalytics } from './analytics.js';
+import { goToAccountsCard, openAccounts, openAnalytics } from './analytics.js';
 import { openMonth } from './calendar.js';
-import { makeSortable, readStoredArray, writeStored } from './core.js';
+import { api, makeSortable, readStoredArray, state, writeStored } from './core.js';
 import { openExport } from './export.js';
 import { renderAccountFilter } from './filters.js';
 import { flushJournal, openJournal } from './journal.js';
 import { openOverview, openTrades } from './overview.js';
-import { openSettings } from './settings.js';
-import { openTodos } from './todos.js';
+import { goToSettingsCard, openSettings } from './settings.js';
+import { goToTodoList, openTodos } from './todos.js';
 
 /* ---------- Nav ---------- */
 
@@ -61,10 +61,121 @@ document.querySelectorAll(".nav-item").forEach(el => {
     if (el.dataset.view === "accounts") openAccounts();
     if (el.dataset.view === "export") openExport();
     if (el.dataset.view === "settings") openSettings();
+    syncJournalNavActive();
   });
 });
 
 makeSortable(document.querySelector(".nav"), ".nav-item", saveNavOrder, { keyAttr: "view" });
+
+/* Ausklappbare Unterpunkte je Nav-Eintrag (Journal: Tagebuch/Notizbuecher;
+   Einstellungen: einzelne Karten; Konten & Sync: einzelne Karten; To-Do-Listen:
+   eine je angelegter Liste, siehe refreshTodoNavSubnav()). Ein Klick auf einen
+   Unterpunkt springt direkt zur passenden Stelle statt erst die Hauptseite zu
+   oeffnen und dort selbst zu suchen. Auf-/Zuklappen ist je Eintrag eigenstaendig
+   gespeichert (Nutzer soll einzelne Listen dauerhaft einklappen koennen, ohne
+   dass sie beim naechsten Start wieder aufklappen). */
+function wireSubnavToggle(key) {
+  const toggle = document.querySelector(`.nav-subnav-toggle[data-subnav-toggle-for="${key}"]`);
+  const subnav = document.querySelector(`.nav-subnav[data-subnav-for="${key}"]`);
+  if (!toggle || !subnav) return;
+  const storeKey = `navSubnavExpanded:${key}`;
+  const setExpanded = (expanded) => {
+    subnav.hidden = !expanded;
+    toggle.setAttribute("aria-expanded", String(expanded));
+  };
+  // readStoredArray liefert nur bei Arrays etwas zurueck (siehe core.js) - hier
+  // reicht der rohe String, writeStored() unten schreibt ihn als JSON-Boolean.
+  setExpanded(localStorage.getItem(storeKey) !== "false");
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const expanded = subnav.hidden;
+    setExpanded(expanded);
+    writeStored(storeKey, expanded);
+  });
+}
+["journal", "todos", "accounts", "settings"].forEach(wireSubnavToggle);
+
+function wireSubnavItemKeyboard(el) {
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    el.click();
+  });
+}
+
+document.querySelectorAll('.nav-subnav[data-subnav-for="journal"] .nav-subitem').forEach(el => {
+  wireSubnavItemKeyboard(el);
+  el.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await flushJournal();
+    state.journalTab = el.dataset.journalTab;
+    await openJournal();
+  });
+});
+
+document.querySelectorAll('.nav-subnav[data-subnav-for="settings"] .nav-subitem').forEach(el => {
+  wireSubnavItemKeyboard(el);
+  el.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await flushJournal();
+    await goToSettingsCard(el.dataset.settingsCard);
+  });
+});
+
+document.querySelectorAll('.nav-subnav[data-subnav-for="accounts"] .nav-subitem').forEach(el => {
+  wireSubnavItemKeyboard(el);
+  el.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await flushJournal();
+    await goToAccountsCard(el.dataset.accountsCard);
+  });
+});
+
+/* Spiegelt state.view/journalTab auf die Hervorhebung der Journal-Unterpunkte -
+   wird sowohl hier (nach jedem Nav-Klick) als auch von switchJournalTab()
+   in notebooks.js aufgerufen, damit der In-Page-Umschalter auf der
+   Journal-Seite die Sidebar ebenfalls aktuell haelt. */
+export function syncJournalNavActive() {
+  document.querySelectorAll('.nav-subnav[data-subnav-for="journal"] .nav-subitem').forEach(el => {
+    el.classList.toggle("active", state.view === "journal" && state.journalTab === el.dataset.journalTab);
+  });
+}
+
+/* To-Do-Listen-Unterpunkte sind dynamisch (eine je angelegter Liste) - wird
+   einmal beim Start sowie nach jeder Aenderung (Anlegen/Umbenennen/Loeschen,
+   siehe refreshTodoUI() in todos.js) neu aufgebaut. Ganz ohne Liste bleibt der
+   Aufklapp-Pfeil versteckt - eine leere Unterliste haette nichts zu zeigen. */
+export async function refreshTodoNavSubnav() {
+  const toggle = document.querySelector('.nav-subnav-toggle[data-subnav-toggle-for="todos"]');
+  const subnav = document.querySelector('.nav-subnav[data-subnav-for="todos"]');
+  if (!toggle || !subnav) return;
+  let lists = [];
+  try {
+    ({ lists } = await api("/api/todo-lists"));
+  } catch (e) {
+    return; // z.B. beim allerersten Laden noch nicht erreichbar - naechster Refresh holt es nach
+  }
+  toggle.hidden = lists.length === 0;
+  subnav.hidden = lists.length === 0 || localStorage.getItem("navSubnavExpanded:todos") === "false";
+  subnav.innerHTML = "";
+  for (const list of lists) {
+    const el = document.createElement("span");
+    el.className = "nav-subitem";
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    el.textContent = list.name;
+    el.title = list.name;
+    el.dataset.todoListId = String(list.id);
+    wireSubnavItemKeyboard(el);
+    el.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await flushJournal();
+      await goToTodoList(list.id);
+    });
+    subnav.appendChild(el);
+  }
+}
+refreshTodoNavSubnav();
 
 /* Globaler Konten-Filter-Status unten in der Sidebar: Klick oeffnet die
    Konten-Auswahl direkt an Ort und Stelle (dasselbe Panel wie ueberall sonst,

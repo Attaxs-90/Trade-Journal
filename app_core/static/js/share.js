@@ -395,13 +395,20 @@ export async function populateDay(container, day, opts = {}) {
   const s = data.stats;
   const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
 
-  container.querySelector(".day-stats").innerHTML =
-    tile("Punkte", fmtSigned(s.total_points))
-    + tile("Netto", fmtSigned(s.total_net) + " $", cls(s.total_net))
-    + tile("Trades", s.trade_count)
-    + tile("Tagestief (kum.)", fmtSigned(s.lowest_cum) + " $", "neg")
-    + tile("Tageshoch (kum.)", fmtSigned(s.highest_cum) + " $", "pos")
-    + tile("Peak-to-Valley Drawdown", fmtSigned(s.max_drawdown) + " $");
+  // Reine Trade-Kennzahlen - an einem Tag ohne Trades (nur Bild und/oder
+  // Journal, siehe openDayModal() in calendar.js) gibt es hier nichts sinnvoll
+  // zu zeigen, das Template drumherum (Bilder, Journal-Editor) bleibt gleich.
+  const statsEl = container.querySelector(".day-stats");
+  statsEl.hidden = !data.trades.length;
+  if (data.trades.length) {
+    statsEl.innerHTML =
+      tile("Punkte", fmtSigned(s.total_points))
+      + tile("Netto", fmtSigned(s.total_net) + " $", cls(s.total_net))
+      + tile("Trades", s.trade_count)
+      + tile("Tagestief (kum.)", fmtSigned(s.lowest_cum) + " $", "neg")
+      + tile("Tageshoch (kum.)", fmtSigned(s.highest_cum) + " $", "pos")
+      + tile("Peak-to-Valley Drawdown", fmtSigned(s.max_drawdown) + " $");
+  }
 
   let cum = 0;
   const cumVals = data.trades.map(t => (cum += t.net_usd));

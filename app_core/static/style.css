@@ -376,6 +376,50 @@ html[data-sidebar="collapsed"] .app .sidebar { width: 68px; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .nav-item.active { background: var(--bg-hover); color: var(--text); }
 .nav-item.dragging { opacity: 0.4; }
+
+/* Nav-Eintraege mit Unterpunkten (Journal, To-Do-Listen, Konten & Sync,
+   Einstellungen) brechen auf zwei Zeilen (Kopfzeile + Unterpunkte) statt der
+   sonst ueberall einzeiligen .nav-item-Reihe. Bleibt trotzdem EIN
+   .nav-item-Element, damit Drag&Drop-Umsortierung (siehe nav.js) die
+   Unterpunkte automatisch mitnimmt statt sie zurueckzulassen. */
+.nav-item-has-subnav { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 0; }
+.nav-item-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
+.nav-subnav-toggle {
+  all: unset; margin-left: auto; flex-shrink: 0; cursor: pointer;
+  align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 5px; color: var(--text-faint);
+  -webkit-user-drag: none;
+}
+/* [hidden] muss gegen "all: unset" oben gewinnen (das setzt display ebenfalls,
+   noch dazu mit gleicher Spezifitaet wie die UA-Regel "[hidden]{display:none}" -
+   ohne das hier waere der Button trotz hidden-Attribut sichtbar). Siehe
+   .nav-subnav weiter unten fuer dieselbe Falle in ausfuehrlicher Begruendung. */
+.nav-subnav-toggle:not([hidden]) { display: flex; }
+.nav-subnav-toggle[hidden] { display: none; }
+.nav-subnav-toggle:hover { background: var(--bg-elevated); color: var(--text); }
+.nav-subnav-toggle svg { transition: transform 0.15s ease; }
+.nav-subnav-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.nav-subnav {
+  padding: 2px 10px 6px 38px; -webkit-user-drag: none;
+}
+/* [hidden] muss gegen die eigene display-Regel gewinnen, sonst zieht die
+   Spezifitaet der Klasse an der UA-Regel "[hidden] { display:none }" vorbei
+   (beides Spezifitaet 0,1,0, aber die eigene Regel laedt spaeter). */
+.nav-subnav:not([hidden]) { display: flex; flex-direction: column; gap: 1px; }
+.nav-subitem {
+  cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: 12.5px;
+  font-weight: 500; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-subitem:hover { background: var(--bg-hover); color: var(--text); }
+.nav-subitem.active { background: var(--accent-fill); color: var(--accent); }
+/* Eingeklappte Sidebar zeigt nur noch Icons - Unterpunkte haben dort keinen
+   Platz und keinen sichtbaren Text mehr, den sie beschriften koennten. */
+html[data-sidebar="collapsed"] .app .nav-item-has-subnav { align-items: center; }
+html[data-sidebar="collapsed"] .app .nav-subnav-toggle,
+html[data-sidebar="collapsed"] .app .nav-subnav {
+  display: none;
+}
 .nav-icon {
   display: flex;
   align-items: center;
@@ -625,7 +669,7 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 .view-help-btn:hover { filter: brightness(1.12); }
 
 /* Stat tiles */
-.stat-grid {
+.stat-grid:not([hidden]) {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
@@ -1586,6 +1630,22 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 }
 .lightbox-handle:hover::before { border-color: var(--accent); }
 
+/* Vollbild: Doppelklick aufs Bild oder Button in der Toolbar (siehe images.js).
+   Ueberschreibt die per JS gesetzte Inline-Position/-Groesse (positionLightboxBox)
+   nicht per hoeherer Spezifitaet - dafuer werden diese Inline-Styles beim
+   Aktivieren in images.js explizit geleert, sonst wuerde Inline-CSS immer
+   gewinnen. Handle und Groessen-Buttons ergeben im Vollbild keinen Sinn. */
+.lightbox-box.lightbox-fullscreen {
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+.lightbox-fullscreen .lightbox-handle,
+.lightbox-fullscreen .lightbox-size-btn { display: none; }
+
 /* Newsbar (ForexFactory-Wirtschaftskalender, rechte Spalte) */
 .newsbar {
   width: 300px;
@@ -1832,8 +1892,28 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-year-net { font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
 .journal-year-net.pos { color: var(--green); }
 .journal-year-net.neg { color: var(--red); }
+.journal-months-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.journal-group-mode-label { font-size: 12px; color: var(--text-faint); }
+.journal-year-body { display: flex; flex-direction: column; gap: 16px; }
+.journal-month-subgroup-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px;
+}
+.journal-month-subgroup-net { font-family: var(--font-mono); }
+.journal-month-subgroup-net.pos { color: var(--green); }
+.journal-month-subgroup-net.neg { color: var(--red); }
 .journal-month-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 10px;
+}
+/* Quartal/Halbjahr: feste Spaltenzahl statt auto-fill, damit die Monate eines
+   Blocks immer nebeneinander stehen statt je nach Fensterbreite umzubrechen. */
+.journal-month-grid--fixed-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.journal-month-grid--fixed-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .journal-month-grid--fixed-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .journal-month-grid--fixed-3, .journal-month-grid--fixed-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .journal-month-tile {
   all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
@@ -1857,9 +1937,15 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .journal-month-rating { display: flex; align-items: center; gap: 4px; color: var(--text-dim); }
 .journal-month-gap { font-size: 11px; color: var(--text-faint); }
 
-.journal-layout:not([hidden]) { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; align-items: start; }
+/* Eine Spalte statt vorher Liste+Editor nebeneinander - ein Eintrag oeffnet
+   jetzt dieselbe Tagesansicht wie in der Monatsuebersicht (openDayModal(),
+   siehe journal.js) statt eines schlankeren Editors nur fuer diese Liste. Die
+   Liste bleibt schmal (max-width) statt ueber die volle Breite gestreckt zu
+   werden - die kompakten Karten sind nicht fuer volle Seitenbreite ausgelegt. */
+.journal-layout:not([hidden]) { display: block; }
 
 .journal-list-pane {
+  max-width: 480px;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px; display: flex; flex-direction: column; gap: 10px;
 }
@@ -1940,8 +2026,10 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 }
 .journal-tpl-manage-link:hover { text-decoration: underline; }
 
-/* Kurzes Aufblitzen, wenn von "Vorlagen verwalten" im Editor hierher gesprungen wird. */
-.settings-card-highlight { animation: settings-card-flash 1.6s ease; }
+/* Kurzes Aufblitzen bei einem Sprung von aussen an eine Stelle der Seite -
+   "Vorlagen verwalten" im Journal-Editor sowie die Sidebar-Unternavigation
+   (Einstellungen/Konten/To-Do-Listen, siehe nav.js). */
+.settings-card-highlight, .nav-jump-highlight { animation: settings-card-flash 1.6s ease; }
 @keyframes settings-card-flash {
   0% { box-shadow: 0 0 0 2px var(--accent); }
   100% { box-shadow: none; }
@@ -1967,13 +2055,27 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 
 /* ---------- Journal: Tagebuch/Notizbuecher-Umschalter ---------- */
 
-.journal-view-tabs { display: flex; gap: 4px; margin-left: 8px; }
+/* Unter der Ueberschrift statt daneben - "Journal" ist die Hauptueberschrift
+   und soll allein stehen, der Umschalter ist ihr klar untergeordnet. */
+.view-journal .view-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+.journal-view-tabs-group { display: flex; flex-direction: column; gap: 6px; }
+.journal-view-tabs-label {
+  font-size: 10px; font-weight: 700; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+/* Ein zusammenhaengender Track statt zwei lose schwebender Pillen - macht auf
+   den ersten Blick klar, dass beide Optionen zusammengehoeren und sich
+   gegenseitig ausschliessen (Segmented Control statt zweier Einzel-Buttons). */
+.journal-view-tabs {
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+}
 .journal-view-tab {
-  all: unset; cursor: pointer; padding: 6px 14px; border-radius: 20px; font-size: 13px;
-  font-weight: 600; color: var(--text-dim); border: 1px solid transparent;
+  all: unset; cursor: pointer; padding: 6px 16px; border-radius: 7px; font-size: 13px;
+  font-weight: 600; color: var(--text-dim);
 }
 .journal-view-tab:hover { color: var(--text); }
-.journal-view-tab.active { background: var(--accent-fill); color: var(--accent); border-color: var(--accent); }
+.journal-view-tab.active { background: var(--accent-fill); color: var(--accent); }
 .journal-view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- Notizbuecher: frei verschachtelbare Ordner/Notizen ---------- */

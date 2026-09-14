@@ -5,6 +5,7 @@ import { setModalOnClose } from './calendar.js';
 import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, attachOutsideClose, escapeHtml, showAppError, state, writeStored } from './core.js';
 import { confirmDelete, promptDialog } from './dialogs.js';
 import { initQuillFormats, renderJournalList } from './journal.js';
+import { syncJournalNavActive } from './nav.js';
 
 /* ---------- Notizbuecher: frei verschachtelbare Ordner/Notizen ----------
    Zweiter Bereich neben dem Tages-Tagebuch, fuer Inhalte ohne Kalenderbezug
@@ -21,6 +22,7 @@ export async function switchJournalTab(tab, force = false) {
   await flushNotebookNote();
   state.journalTab = tab;
   document.querySelectorAll(".journal-view-tab").forEach(t => t.classList.toggle("active", t.dataset.journalTab === tab));
+  syncJournalNavActive();
   document.getElementById("journal-diary-panel").hidden = tab !== "diary";
   document.getElementById("notebook-panel").hidden = tab !== "notebooks";
   if (tab === "notebooks") await renderNotebookTree();

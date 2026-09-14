@@ -401,11 +401,10 @@ def api_day_detail(day: str, accounts: str | None = None, tags: str | None = Non
     trades = db.get_day_trades(day, _parse_keys(accounts), _parse_keys(tags), tag_logic,
                                _parse_keys(strategies))
     images = db.get_images_for_day(day)
-    # Auch ohne Trades erreichbar, wenn es an dem Tag ein Bild oder einen
-    # Journal-Eintrag gibt (z.B. ueber den Quill-Editor eingebettetes Bild an
-    # einem Tag ohne Handel) - sonst liesse sich das von nirgendwo oeffnen.
-    if not trades and not images and not db.get_journal_entry("day", day):
-        raise HTTPException(404, "Kein Tag mit Trades, Bildern oder Journal-Eintrag gefunden.")
+    # Kein 404 mehr fuer einen komplett leeren Tag: das Journal-Icon der
+    # Monatsuebersicht (siehe calendar.js) oeffnet ueber openDayModal() bewusst
+    # auch Tage ganz ohne Trade/Bild/Journal-Eintrag, um dort den allerersten
+    # Eintrag anzulegen - mit demselben Tagesdetail-Template wie ueberall sonst.
     stats = day_stats(trades)
     return {"trades": trades, "stats": stats, "images": images}
 
@@ -729,8 +728,9 @@ async def api_upload_image(day: str, file: UploadFile = File(...), trade_id: int
     if trade_id is not None and not db.get_trade(trade_id):
         raise HTTPException(404, "Trade nicht gefunden.")
     raw = await _read_upload(file, MAX_IMAGE_BYTES)
+    name_hint = f"{day}_trade{trade_id}" if trade_id is not None else f"{day}_tag"
     try:
-        filename, thumb_filename = save_image(raw)
+        filename, thumb_filename = save_image(raw, name_hint)
     except Exception:
         raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
     image_id = db.add_image(day, trade_id, filename, thumb_filename)
@@ -966,7 +966,7 @@ async def api_upload_notebook_image(node_id: int, file: UploadFile = File(...)):
         raise HTTPException(404, "Notiz nicht gefunden.")
     raw = await _read_upload(file, MAX_IMAGE_BYTES)
     try:
-        filename, thumb_filename = save_image(raw)
+        filename, thumb_filename = save_image(raw, f"notiz_{node_id}")
     except Exception:
         raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
     return {"filename": filename, "thumb_filename": thumb_filename}

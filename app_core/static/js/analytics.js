@@ -3,7 +3,7 @@
 import { getPlatforms, renderImportAccountSelect } from './accounts.js';
 import { closeModal } from './calendar.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
-import { accountsQS, api, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, makeSortable, readStoredArray, showAppError, state, tagsQS, tile, withFilter, writeStored } from './core.js';
+import { accountsQS, api, cls, escapeHtml, expandCollapsibleCard, fmtDate, fmtNum, fmtSigned, initCollapsibleCards, makeSortable, readStoredArray, scrollAndHighlight, setAllCollapsibleCards, showAppError, state, tagsQS, tile, withFilter, writeStored } from './core.js';
 import { deleteAccountFlow } from './dialogs.js';
 import { refreshCurrentView, renderAccountFilter, renderTagFilter } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
@@ -503,12 +503,29 @@ export async function openAnalytics() {
   await renderAllAnalyticsWidgets();
 }
 
+const ACCOUNTS_COLLAPSE_KEY = "accountsCardsCollapsed";
+
+/* Springt zu einer Karte der Konten-Seite (Sidebar-Unternavigation, siehe
+   nav.js) - oeffnet die Seite bei Bedarf, klappt die Karte bei Bedarf auf
+   und hebt sie kurz hervor. */
+export async function goToAccountsCard(key) {
+  if (state.view !== "accounts") await openAccounts();
+  expandCollapsibleCard(ACCOUNTS_COLLAPSE_KEY, key);
+  const card = document.querySelector(`.settings-card[data-settings-card="${key}"]`);
+  scrollAndHighlight(card);
+}
+
 export async function openAccounts() {
   state.view = "accounts";
   state.currentDay = null;
   setActiveNav("accounts");
 
   const content = await mountView("tpl-accounts");
+  initCollapsibleCards(content, ACCOUNTS_COLLAPSE_KEY);
+  document.getElementById("accounts-expand-all").addEventListener("click",
+    () => setAllCollapsibleCards(content, ACCOUNTS_COLLAPSE_KEY, false));
+  document.getElementById("accounts-collapse-all").addEventListener("click",
+    () => setAllCollapsibleCards(content, ACCOUNTS_COLLAPSE_KEY, true));
 
   const platforms = await getPlatforms();
   const platformSelect = document.getElementById("account-platform-select");

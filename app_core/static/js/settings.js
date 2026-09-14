@@ -1,6 +1,6 @@
 /* Einstellungen: Schriftart, ein-/ausklappbare Karten, Journal-Vorlagen, Tag-Verwaltung. */
 
-import { api, cls, escapeHtml, fmtNum, fmtSigned, ICON_JOURNAL, safeColor, showAppError, state } from './core.js';
+import { api, cls, escapeHtml, expandCollapsibleCard, fmtNum, fmtSigned, ICON_JOURNAL, initCollapsibleCards, safeColor, scrollAndHighlight, setAllCollapsibleCards, showAppError, state } from './core.js';
 import { confirmDelete, deleteAccountFlow } from './dialogs.js';
 import { renderEarningsTickerSettings } from './earnings-ticker.js';
 import { getTags, invalidateTagsCache, renderTagFilter } from './filters.js';
@@ -45,44 +45,7 @@ function renderFontSettings() {
   }
 }
 
-/* Ein-/ausklappbare Karten der Einstellungen - Zustand je Karte (per
-   data-settings-card-Key) in localStorage gemerkt, analog zu Sidebar-/
-   Newsbar-Einklappzustand. Nur der jeweilige Body wird versteckt, die
-   Kopfzeile (Titel + Pfeil) bleibt immer sichtbar. */
-function loadSettingsCollapsedState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("settingsCollapsed") || "null");
-    return Array.isArray(saved) ? new Set(saved) : new Set();
-  } catch (e) {
-    return new Set();
-  }
-}
-function saveSettingsCollapsedState(collapsedKeys) {
-  localStorage.setItem("settingsCollapsed", JSON.stringify([...collapsedKeys]));
-}
-function initSettingsCollapse(content) {
-  const collapsed = loadSettingsCollapsedState();
-  content.querySelectorAll(".settings-card").forEach(card => {
-    const key = card.dataset.settingsCard;
-    card.classList.toggle("collapsed", collapsed.has(key));
-    card.querySelector(".settings-card-header").addEventListener("click", () => {
-      const nowCollapsed = card.classList.toggle("collapsed");
-      if (nowCollapsed) collapsed.add(key); else collapsed.delete(key);
-      saveSettingsCollapsedState(collapsed);
-    });
-  });
-}
-/* Klappt eine einzelne Settings-Karte auf, falls sie eingeklappt ist (z.B.
-   bevor sie hervorgehoben/angesprungen wird) - sonst saehe der Nutzer den
-   Sprungziel-Inhalt trotz Hervorhebung nicht. */
-function expandSettingsCard(key) {
-  const card = document.querySelector(`.settings-card[data-settings-card="${key}"]`);
-  if (!card || !card.classList.contains("collapsed")) return;
-  card.classList.remove("collapsed");
-  const collapsed = loadSettingsCollapsedState();
-  collapsed.delete(key);
-  saveSettingsCollapsedState(collapsed);
-}
+const SETTINGS_COLLAPSE_KEY = "settingsCollapsed";
 
 export async function openSettings() {
   state.view = "settings";
@@ -90,7 +53,11 @@ export async function openSettings() {
   setActiveNav("settings");
 
   const content = await mountView("tpl-settings");
-  initSettingsCollapse(content);
+  initCollapsibleCards(content, SETTINGS_COLLAPSE_KEY);
+  document.getElementById("settings-expand-all").addEventListener("click",
+    () => setAllCollapsibleCards(content, SETTINGS_COLLAPSE_KEY, false));
+  document.getElementById("settings-collapse-all").addEventListener("click",
+    () => setAllCollapsibleCards(content, SETTINGS_COLLAPSE_KEY, true));
   renderFontSettings();
   renderEarningsTickerSettings();
   await renderSettingsAccountDelete();
@@ -98,28 +65,23 @@ export async function openSettings() {
   await renderJournalTemplatesSettings();
 }
 
+/* Springt zu einer Einstellungen-Karte (Sidebar-Unternavigation, siehe nav.js,
+   sowie "Vorlagen verwalten" im Journal-Editor) - klappt sie bei Bedarf auf
+   und hebt sie kurz hervor, damit sie sofort auffindbar ist statt in der
+   Seite gesucht werden zu muessen. */
+export async function goToSettingsCard(key) {
+  if (state.view !== "settings") await openSettings();
+  expandCollapsibleCard(SETTINGS_COLLAPSE_KEY, key);
+  const card = document.querySelector(`.settings-card[data-settings-card="${key}"]`);
+  scrollAndHighlight(card);
+}
+
 /* Springt aus dem Journal-Editor direkt zur Vorlagenverwaltung in den
-   Einstellungen und hebt die Karte kurz hervor, damit sie sofort auffindbar
-   ist statt in der Seite gesucht werden zu muessen. */
+   Einstellungen (schliesst dafuer erst ein offenes Modal). */
 async function goToJournalTemplateSettings() {
   await flushJournal();
   document.getElementById("modal-overlay").classList.remove("visible");
-  await openSettings();
-  expandSettingsCard("journal-templates");
-  const card = document.getElementById("journal-templates-card");
-  // Kein card.scrollIntoView(): direkt nach dem innerHTML-Neuaufbau der Seite
-  // ermittelt Chromium den scrollbaren Vorfahren manchmal falsch und scrollt
-  // kurz die ganze Seite (inkl. Sidebar/Newsbar) statt nur .content - deshalb
-  // stattdessen gezielt .content scrollen.
-  const scrollHost = document.querySelector(".content");
-  if (card && scrollHost) {
-    const cardRect = card.getBoundingClientRect();
-    const hostRect = scrollHost.getBoundingClientRect();
-    const target = scrollHost.scrollTop + (cardRect.top - hostRect.top) - 12;
-    scrollHost.scrollTo({ top: target, behavior: "smooth" });
-  }
-  card?.classList.add("settings-card-highlight");
-  setTimeout(() => card?.classList.remove("settings-card-highlight"), 1600);
+  await goToSettingsCard("journal-templates");
 }
 
 /* ---------- Journal-Vorlagen (Einstellungen) ---------- */

@@ -74,13 +74,28 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="7" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="7" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg></span>
         <span class="nav-label">Trades</span>
       </div>
-      <div class="nav-item" data-view="journal" title="Journal" aria-label="Journal" role="button" tabindex="0" draggable="true">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><line x1="8" y1="2" x2="8" y2="22"/><line x1="11.5" y1="7" x2="15.5" y2="7"/><line x1="11.5" y1="11" x2="15.5" y2="11"/></svg></span>
-        <span class="nav-label">Journal</span>
+      <div class="nav-item nav-item-has-subnav" data-view="journal" title="Journal" aria-label="Journal" role="button" tabindex="0" draggable="true">
+        <div class="nav-item-row">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h12a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2z"/><line x1="8" y1="2" x2="8" y2="22"/><line x1="11.5" y1="7" x2="15.5" y2="7"/><line x1="11.5" y1="11" x2="15.5" y2="11"/></svg></span>
+          <span class="nav-label">Journal</span>
+          <button type="button" class="nav-subnav-toggle" data-subnav-toggle-for="journal" aria-label="Journal-Unterpunkte ein-/ausklappen" aria-expanded="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        </div>
+        <div class="nav-subnav" data-subnav-for="journal" hidden>
+          <span class="nav-subitem" data-journal-tab="diary" role="button" tabindex="0">Tagebuch</span>
+          <span class="nav-subitem" data-journal-tab="notebooks" role="button" tabindex="0">Notizbücher</span>
+        </div>
       </div>
-      <div class="nav-item" data-view="todos" title="To-Do-Listen" aria-label="To-Do-Listen" role="button" tabindex="0" draggable="true">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 20 6"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></span>
-        <span class="nav-label">To-Do-Listen</span>
+      <div class="nav-item nav-item-has-subnav" data-view="todos" title="To-Do-Listen" aria-label="To-Do-Listen" role="button" tabindex="0" draggable="true">
+        <div class="nav-item-row">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 20 6"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg></span>
+          <span class="nav-label">To-Do-Listen</span>
+          <button type="button" class="nav-subnav-toggle" data-subnav-toggle-for="todos" aria-label="To-Do-Listen-Unterpunkte ein-/ausklappen" aria-expanded="false" tabindex="-1" hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        </div>
+        <div class="nav-subnav" data-subnav-for="todos" hidden></div>
       </div>
       <div class="nav-item" data-view="analytics" title="Auswertungen" aria-label="Auswertungen" role="button" tabindex="0" draggable="true">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
@@ -94,17 +109,39 @@
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21 7.5 13.5 2 9h7z"/></svg></span>
         <span class="nav-label">Strategie</span>
       </div>
-      <div class="nav-item" data-view="accounts" title="Konten &amp; Sync" aria-label="Konten &amp; Sync" role="button" tabindex="0" draggable="true">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
-        <span class="nav-label">Konten &amp; Sync</span>
+      <div class="nav-item nav-item-has-subnav" data-view="accounts" title="Konten &amp; Sync" aria-label="Konten &amp; Sync" role="button" tabindex="0" draggable="true">
+        <div class="nav-item-row">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+          <span class="nav-label">Konten &amp; Sync</span>
+          <button type="button" class="nav-subnav-toggle" data-subnav-toggle-for="accounts" aria-label="Konten-Unterpunkte ein-/ausklappen" aria-expanded="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        </div>
+        <div class="nav-subnav" data-subnav-for="accounts" hidden>
+          <span class="nav-subitem" data-accounts-card="add" role="button" tabindex="0">Konto hinzufügen</span>
+          <span class="nav-subitem" data-accounts-card="import" role="button" tabindex="0">CSV importieren</span>
+          <span class="nav-subitem" data-accounts-card="list" role="button" tabindex="0">Verbundene Konten</span>
+        </div>
       </div>
       <div class="nav-item" data-view="export" title="Export" aria-label="Export" role="button" tabindex="0" draggable="true">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
         <span class="nav-label">Export</span>
       </div>
-      <div class="nav-item" data-view="settings" title="Einstellungen" aria-label="Einstellungen" role="button" tabindex="0" draggable="true">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>
-        <span class="nav-label">Einstellungen</span>
+      <div class="nav-item nav-item-has-subnav" data-view="settings" title="Einstellungen" aria-label="Einstellungen" role="button" tabindex="0" draggable="true">
+        <div class="nav-item-row">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span>
+          <span class="nav-label">Einstellungen</span>
+          <button type="button" class="nav-subnav-toggle" data-subnav-toggle-for="settings" aria-label="Einstellungen-Unterpunkte ein-/ausklappen" aria-expanded="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>
+          </button>
+        </div>
+        <div class="nav-subnav" data-subnav-for="settings" hidden>
+          <span class="nav-subitem" data-settings-card="font" role="button" tabindex="0">Schriftart</span>
+          <span class="nav-subitem" data-settings-card="earnings-ticker" role="button" tabindex="0">Earnings-Ticker</span>
+          <span class="nav-subitem" data-settings-card="account-delete" role="button" tabindex="0">Konto löschen</span>
+          <span class="nav-subitem" data-settings-card="tags" role="button" tabindex="0">Tags</span>
+          <span class="nav-subitem" data-settings-card="journal-templates" role="button" tabindex="0">Journal-Vorlagen</span>
+        </div>
       </div>
     </nav>
   </aside>
@@ -222,8 +259,9 @@
     <button class="modal-close lightbox-close" id="lightbox-close" aria-label="Schließen">&times;</button>
     <img class="lightbox-img" id="lightbox-img" src="" alt="">
     <div class="lightbox-toolbar">
-      <button class="btn btn-secondary" id="lightbox-save">Größe speichern</button>
-      <button class="btn btn-secondary" id="lightbox-reset">Standardgröße</button>
+      <button class="btn btn-secondary" id="lightbox-fullscreen">Vollbild</button>
+      <button class="btn btn-secondary lightbox-size-btn" id="lightbox-save">Größe speichern</button>
+      <button class="btn btn-secondary lightbox-size-btn" id="lightbox-reset">Standardgröße</button>
       <button class="btn btn-secondary" id="lightbox-delete">Löschen</button>
     </div>
     <div class="lightbox-handle" id="lightbox-handle" title="Ziehen zum Vergrößern (zentriert)"></div>
@@ -489,9 +527,12 @@
   <section class="view view-journal">
     <header class="view-header">
       <h1>Journal</h1>
-      <div class="journal-view-tabs" id="journal-view-tabs">
-        <button type="button" class="journal-view-tab active" data-journal-tab="diary">Tagebuch</button>
-        <button type="button" class="journal-view-tab" data-journal-tab="notebooks">Notizbücher</button>
+      <div class="journal-view-tabs-group">
+        <div class="journal-view-tabs-label">Ausgewählt</div>
+        <div class="journal-view-tabs" id="journal-view-tabs">
+          <button type="button" class="journal-view-tab active" data-journal-tab="diary">Tagebuch</button>
+          <button type="button" class="journal-view-tab" data-journal-tab="notebooks">Notizbücher</button>
+        </div>
       </div>
     </header>
 
@@ -534,6 +575,10 @@
       </div>
 
       <div class="journal-months" id="journal-months">
+        <div class="journal-months-toolbar">
+          <span class="journal-group-mode-label">Anzeigen:</span>
+          <div class="newsbar-chip-row journal-group-mode-row" id="journal-group-mode-chips"></div>
+        </div>
         <div class="journal-year-jump" id="journal-year-jump"></div>
         <div class="journal-year-groups" id="journal-year-groups"></div>
       </div>
@@ -543,10 +588,6 @@
           <div class="journal-list" id="journal-list"></div>
           <div class="journal-list notebook-search-list" id="notebook-search-list" hidden></div>
         </aside>
-
-        <div class="journal-editor-pane">
-          <div class="journal-editor-host" id="journal-page-host"></div>
-        </div>
       </div>
     </div>
 
@@ -666,43 +707,62 @@
   <section class="view">
     <header class="view-header">
       <h1>Konten &amp; Sync</h1>
+      <div class="view-header-actions">
+        <button type="button" class="btn btn-secondary" id="accounts-expand-all">Alle aufklappen</button>
+        <button type="button" class="btn btn-secondary" id="accounts-collapse-all">Alle einklappen</button>
+      </div>
     </header>
 
-    <div class="card">
-      <div class="card-title">Konto hinzufügen</div>
-      <form class="account-form" id="account-form">
-        <input type="text" name="name" placeholder="Bezeichnung (z. B. Lucid Trading)" required>
-        <select name="platform" id="account-platform-select"></select>
-        <input type="text" name="login" id="account-login" placeholder="Login (Kontonummer)">
-        <input type="password" name="password" id="account-password" placeholder="Passwort (Read-Only / Investor)">
-        <input type="text" name="server" id="account-server" placeholder="Server (z. B. FTMO-Server)">
-        <input type="text" name="sync_path" id="account-sync-path" placeholder="Pfad zur Sync-Datei (optional, siehe ninjascript/TradeJournalSync.cs)" hidden>
-        <input type="number" name="starting_balance" id="account-starting-balance" placeholder="Startkapital (z. B. 10000)" step="0.01">
-        <button type="submit" class="btn btn-primary">Konto speichern</button>
-      </form>
-      <div class="account-hint" id="account-hint">
-        Nutze ausschließlich das Investor-/Read-Only-Passwort. Zugangsdaten werden nur lokal
-        in deiner SQLite-Datenbank gespeichert und nie an Dritte übertragen.
+    <div class="card settings-card" data-settings-card="add">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Konto hinzufügen</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <form class="account-form" id="account-form">
+          <input type="text" name="name" placeholder="Bezeichnung (z. B. Lucid Trading)" required>
+          <select name="platform" id="account-platform-select"></select>
+          <input type="text" name="login" id="account-login" placeholder="Login (Kontonummer)">
+          <input type="password" name="password" id="account-password" placeholder="Passwort (Read-Only / Investor)">
+          <input type="text" name="server" id="account-server" placeholder="Server (z. B. FTMO-Server)">
+          <input type="text" name="sync_path" id="account-sync-path" placeholder="Pfad zur Sync-Datei (optional, siehe ninjascript/TradeJournalSync.cs)" hidden>
+          <input type="number" name="starting_balance" id="account-starting-balance" placeholder="Startkapital (z. B. 10000)" step="0.01">
+          <button type="submit" class="btn btn-primary">Konto speichern</button>
+        </form>
+        <div class="account-hint" id="account-hint">
+          Nutze ausschließlich das Investor-/Read-Only-Passwort. Zugangsdaten werden nur lokal
+          in deiner SQLite-Datenbank gespeichert und nie an Dritte übertragen.
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">CSV importieren</div>
-      <div class="import-box">
-        <select class="import-account-select" id="import-account-select">
-          <option value="">Kein Konto (freier Import)</option>
-        </select>
-        <input type="file" id="csv-input" accept=".csv" hidden>
-        <button type="button" class="btn btn-primary" id="import-btn">Datei wählen</button>
-        <div class="import-status" id="import-status"></div>
+    <div class="card settings-card" data-settings-card="import">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">CSV importieren</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="import-box">
+          <select class="import-account-select" id="import-account-select">
+            <option value="">Kein Konto (freier Import)</option>
+          </select>
+          <input type="file" id="csv-input" accept=".csv" hidden>
+          <button type="button" class="btn btn-primary" id="import-btn">Datei wählen</button>
+          <div class="import-status" id="import-status"></div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-title">Verbundene Konten</div>
-      <div class="account-list-label" id="account-list-favorites-label" hidden>Favoriten</div>
-      <div class="account-list" id="account-list-favorites"></div>
-      <div class="account-list" id="account-list"></div>
+    <div class="card settings-card" data-settings-card="list">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Verbundene Konten</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-list-label" id="account-list-favorites-label" hidden>Favoriten</div>
+        <div class="account-list" id="account-list-favorites"></div>
+        <div class="account-list" id="account-list"></div>
+      </div>
     </div>
   </section>
 </template>
@@ -789,6 +849,10 @@
   <section class="view">
     <header class="view-header">
       <h1>Einstellungen</h1>
+      <div class="view-header-actions">
+        <button type="button" class="btn btn-secondary" id="settings-expand-all">Alle aufklappen</button>
+        <button type="button" class="btn btn-secondary" id="settings-collapse-all">Alle einklappen</button>
+      </div>
     </header>
 
     <div class="card settings-card" data-settings-card="font">

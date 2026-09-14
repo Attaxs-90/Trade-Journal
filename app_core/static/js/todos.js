@@ -1,7 +1,8 @@
 /* To-Do-Listen (Verwaltung im Journal, Anzeige in der Newsbar). */
 
-import { api, state } from './core.js';
+import { api, scrollAndHighlight, state } from './core.js';
 import { confirmDelete, promptDialog } from './dialogs.js';
+import { refreshTodoNavSubnav } from './nav.js';
 import { mountView, setActiveNav } from './overview.js';
 
 /* ---------- To-Do-Listen ----------
@@ -16,6 +17,15 @@ import { mountView, setActiveNav } from './overview.js';
 async function refreshTodoUI() {
   await loadTodoWidget();
   if (state.view === "todos") await renderTodoManagePanel();
+  await refreshTodoNavSubnav();
+}
+
+/* Springt zu einer To-Do-Liste (Sidebar-Unternavigation, siehe nav.js) -
+   oeffnet die Seite bei Bedarf und hebt die Karte kurz hervor. */
+export async function goToTodoList(listId) {
+  if (state.view !== "todos") await openTodos();
+  const card = document.querySelector(`.todo-manage-card[data-todo-list-id="${listId}"]`);
+  scrollAndHighlight(card);
 }
 
 export async function openTodos() {
@@ -101,6 +111,7 @@ async function renderTodoManagePanel() {
 function todoManageCardEl(list) {
   const card = document.createElement("div");
   card.className = "todo-manage-card";
+  card.dataset.todoListId = String(list.id);
 
   const header = document.createElement("div");
   header.className = "todo-manage-card-header";

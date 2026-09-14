@@ -201,6 +201,72 @@ export function clearAppError() {
   if (box) box.hidden = true;
 }
 
+/* Scrollt ein Element in den sichtbaren Bereich und laesst es kurz aufblitzen -
+   fuer Sprungziele aus der Sidebar-Unternavigation (Einstellungen-Karten,
+   Konten-Karten, To-Do-Listen) und den bestehenden Sprung von "Vorlagen
+   verwalten" im Journal-Editor zu den Einstellungen. Kein el.scrollIntoView():
+   direkt nach einem innerHTML-Neuaufbau der Seite ermittelt Chromium den
+   scrollbaren Vorfahren manchmal falsch und scrollt kurz die ganze Seite
+   (inkl. Sidebar/Newsbar) statt nur .content - deshalb gezielt .content
+   scrollen. */
+export function scrollAndHighlight(el) {
+  if (!el) return;
+  const scrollHost = document.querySelector(".content");
+  if (scrollHost) {
+    const elRect = el.getBoundingClientRect();
+    const hostRect = scrollHost.getBoundingClientRect();
+    const target = scrollHost.scrollTop + (elRect.top - hostRect.top) - 12;
+    scrollHost.scrollTo({ top: target, behavior: "smooth" });
+  }
+  el.classList.add("nav-jump-highlight");
+  setTimeout(() => el.classList.remove("nav-jump-highlight"), 1600);
+}
+
+/* Ein-/ausklappbare Karten (".settings-card", siehe Einstellungen und
+   Konten & Sync) - Zustand je Karte in localStorage gemerkt, ein eigener
+   Storage-Key je Seite, damit beide Seiten unabhaengig voneinander ihren
+   Auf-/Zugeklappt-Zustand behalten. Nur der jeweilige Body wird versteckt,
+   die Kopfzeile (Titel + Pfeil) bleibt immer sichtbar. */
+function loadCollapsedCardState(storageKey) {
+  const saved = readStoredArray(storageKey);
+  return new Set(saved || []);
+}
+function saveCollapsedCardState(storageKey, collapsedKeys) {
+  writeStored(storageKey, [...collapsedKeys]);
+}
+export function initCollapsibleCards(root, storageKey) {
+  const collapsed = loadCollapsedCardState(storageKey);
+  root.querySelectorAll(".settings-card").forEach(card => {
+    const key = card.dataset.settingsCard;
+    card.classList.toggle("collapsed", collapsed.has(key));
+    card.querySelector(".settings-card-header").addEventListener("click", () => {
+      const nowCollapsed = card.classList.toggle("collapsed");
+      if (nowCollapsed) collapsed.add(key); else collapsed.delete(key);
+      saveCollapsedCardState(storageKey, collapsed);
+    });
+  });
+}
+/* Klappt eine einzelne Karte auf, falls sie eingeklappt ist (z.B. bevor sie
+   hervorgehoben/angesprungen wird) - sonst saehe man das Sprungziel trotz
+   Hervorhebung nicht. */
+export function expandCollapsibleCard(storageKey, key) {
+  const card = document.querySelector(`.settings-card[data-settings-card="${key}"]`);
+  if (!card || !card.classList.contains("collapsed")) return;
+  card.classList.remove("collapsed");
+  const collapsed = loadCollapsedCardState(storageKey);
+  collapsed.delete(key);
+  saveCollapsedCardState(storageKey, collapsed);
+}
+/* Fuer "Alle aufklappen"/"Alle einklappen" im Seitenkopf. */
+export function setAllCollapsibleCards(root, storageKey, collapsed) {
+  const keys = [];
+  root.querySelectorAll(".settings-card").forEach(card => {
+    card.classList.toggle("collapsed", collapsed);
+    keys.push(card.dataset.settingsCard);
+  });
+  saveCollapsedCardState(storageKey, collapsed ? keys : []);
+}
+
 document.getElementById("app-error-close")?.addEventListener("click", clearAppError);
 
 /* Liest eine gespeicherte Liste (Reihenfolge, ausgeblendete Spalten, ...) aus

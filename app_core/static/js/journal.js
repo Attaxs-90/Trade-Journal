@@ -1,7 +1,7 @@
 /* Journal: Editor (Quill), Journal-Seite, Jahr/Monat-Uebersicht, Suche. */
 
-import { monthLabel, openJournalModal } from './calendar.js';
-import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, cls, escapeHtml, fmtDate, fmtSigned, state, tile } from './core.js';
+import { monthLabel, openDayModal } from './calendar.js';
+import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, cls, escapeHtml, fmtDate, fmtSigned, readStoredArray, state, tile, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { buildTagChipGroups, getTags } from './filters.js';
 import { activeNotebookNote, clearNbDrag, nbDrag, notebookCreateDirect, notebookMoveTo, renderNotebookSearchResults, saveNotebookNote, switchJournalTab } from './notebooks.js';
@@ -457,11 +457,65 @@ async function renderJournalMonths() {
         <span>${year}</span>
         <span class="journal-year-net ${cls(yearNet)}">${fmtSigned(yearNet)} $</span>
       </div>
-      <div class="journal-month-grid"></div>`;
-    const grid = group.querySelector(".journal-month-grid");
-    for (const m of list) grid.appendChild(journalMonthTileEl(m));
+      <div class="journal-year-body"></div>`;
+    const body = group.querySelector(".journal-year-body");
+    const gridSizeClass = journalMonthGroupMode === "quarter" ? " journal-month-grid--fixed-3"
+      : journalMonthGroupMode === "half" ? " journal-month-grid--fixed-6" : "";
+    for (const sub of journalMonthSubGroups(list, journalMonthGroupMode)) {
+      const subEl = document.createElement("div");
+      subEl.className = "journal-month-subgroup";
+      if (sub.label) {
+        const subNet = sub.months.reduce((sum, m) => sum + (m.net_usd || 0), 0);
+        const heading = document.createElement("div");
+        heading.className = "journal-month-subgroup-heading";
+        heading.innerHTML = `<span>${sub.label}</span><span class="journal-month-subgroup-net ${cls(subNet)}">${fmtSigned(subNet)} $</span>`;
+        subEl.appendChild(heading);
+      }
+      const grid = document.createElement("div");
+      grid.className = "journal-month-grid" + gridSizeClass;
+      for (const m of sub.months) grid.appendChild(journalMonthTileEl(m));
+      subEl.appendChild(grid);
+      body.appendChild(subEl);
+    }
     groupsEl.appendChild(group);
   }
+}
+
+/* Gruppierung der Monats-Kacheln innerhalb eines Jahres: fortlaufend (wie
+   bisher, eine Kachelreihe pro Jahr) oder in festen 3er-/6er-Bloecken
+   (Quartal/Halbjahr), jeweils in Kalenderreihenfolge nebeneinander statt
+   verteilt ueber mehrere Zeilen. Gespeichert wird nur die Praeferenz, nicht
+   die berechneten Gruppen. */
+const JOURNAL_GROUP_MODES = [
+  { key: "chrono", label: "Fortlaufend" },
+  { key: "quarter", label: "Quartalsweise" },
+  { key: "half", label: "Halbjährlich" },
+];
+
+function loadJournalGroupMode() {
+  const saved = readStoredArray("journalMonthGroupMode");
+  return JOURNAL_GROUP_MODES.some(g => g.key === saved) ? saved : "chrono";
+}
+let journalMonthGroupMode = loadJournalGroupMode();
+
+/* list ist bereits absteigend nach Monat sortiert (siehe journal_month_summary())
+   - eine Map behaelt beim Befuellen die Reihenfolge des ersten Auftretens,
+   das ergibt die Bloecke automatisch in derselben absteigenden Reihenfolge,
+   ohne separat sortieren zu muessen. */
+function journalMonthSubGroups(list, mode) {
+  if (mode === "chrono") return [{ label: null, months: list }];
+  const size = mode === "quarter" ? 3 : 6;
+  const buckets = new Map();
+  for (const m of list) {
+    const moNum = Number(m.month.slice(5, 7));
+    const idx = Math.ceil(moNum / size);
+    if (!buckets.has(idx)) buckets.set(idx, []);
+    buckets.get(idx).push(m);
+  }
+  return [...buckets.entries()].map(([idx, months]) => ({
+    label: mode === "quarter" ? `Q${idx}` : (idx === 1 ? "1. Halbjahr" : "2. Halbjahr"),
+    months,
+  }));
 }
 
 function journalMonthTileEl(m) {
@@ -573,14 +627,11 @@ export async function renderJournalList() {
       ${meta ? `<div class="journal-item-meta">${meta}</div>` : ""}
       <div class="journal-item-preview${entry.id ? "" : " muted"}">${escapeHtml(journalPreview(entry))}</div>
       <div class="journal-item-tags">${entry.tags.map(tagChipHtml).join("")}</div>`;
-    // Bei aktiver Volltextsuche im Modal oeffnen statt in die Editor-Spalte zu
-    // laden: die Liste bleibt dann unveraendert im Hintergrund sichtbar und
-    // "Schliessen" fuehrt direkt zu den Suchergebnissen zurueck, statt dass
-    // man - wie zuvor - keinen Weg zurueck zur Suche hatte.
-    item.addEventListener("click", () => {
-      if (state.journalQuery) openJournalModal(entry.ref_key);
-      else selectJournalEntry(entry.ref_key);
-    });
+    // Oeffnet dieselbe Tagesansicht wie ein Klick in der Monatsuebersicht
+    // (Kennzahlen, Trade-Karten, Bildergalerie, Journal-Editor) - vorher hing
+    // hier nur ein schlanker Editor ohne Bildergalerie, ein dort hochgeladenes
+    // Bild tauchte dann in der Monatsuebersicht scheinbar nie wieder auf.
+    item.addEventListener("click", () => selectJournalEntry(entry.ref_key));
     row.appendChild(item);
     listEl.appendChild(row);
   }
@@ -609,26 +660,15 @@ async function bulkDeleteJournalEntries() {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ref_keys: keys }),
   });
-  if (keys.includes(state.journalRefKey)) {
-    // Der offene Eintrag wurde mitgeloescht - Editor leeren statt auf
-    // gespeicherte, jetzt nicht mehr existente Daten zu verweisen.
-    activeJournal = null;
-    const host = document.getElementById("journal-page-host");
-    if (host) { host.innerHTML = ""; host.dataset.journalRef = ""; }
-    state.journalRefKey = null;
-  }
+  if (keys.includes(state.journalRefKey)) state.journalRefKey = null;
   state.journalSelectedKeys.clear();
   await renderJournalList();
 }
 
 async function selectJournalEntry(refKey) {
   state.journalRefKey = refKey;
-  document.querySelectorAll("#journal-list .journal-item").forEach(el => el.classList.remove("active"));
-  const host = document.getElementById("journal-page-host");
-  if (!host) return;
-  host.dataset.journalRef = "";
-  await mountJournalEditor(host, refKey, { onSaved: () => renderJournalList() });
-  renderJournalList();
+  await renderJournalList();
+  await openDayModal(refKey);
 }
 
 async function renderJournalTagFilter() {
@@ -689,6 +729,21 @@ export async function openJournal() {
     modeRow.appendChild(chip);
   }
 
+  const groupModeRow = document.getElementById("journal-group-mode-chips");
+  for (const gm of JOURNAL_GROUP_MODES) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "newsbar-chip" + (journalMonthGroupMode === gm.key ? " active" : "");
+    chip.textContent = gm.label;
+    chip.addEventListener("click", () => {
+      journalMonthGroupMode = gm.key;
+      writeStored("journalMonthGroupMode", gm.key);
+      groupModeRow.querySelectorAll(".newsbar-chip").forEach(c => c.classList.toggle("active", c === chip));
+      renderJournalMonths();
+    });
+    groupModeRow.appendChild(chip);
+  }
+
   const search = document.getElementById("journal-search");
   search.value = state.journalQuery;
   let searchTimer = null;
@@ -727,14 +782,12 @@ export async function openJournal() {
     if (!dateInput.value) return;
     state.journalMonth = dateInput.value.slice(0, 7);
     updateJournalViewMode();
-    renderJournalList();
     selectJournalEntry(dateInput.value);
   });
 
   updateJournalViewMode();
   await renderJournalMonths();
   await renderJournalList();
-  if (state.journalRefKey) await selectJournalEntry(state.journalRefKey);
 
   document.querySelectorAll(".journal-view-tab").forEach(tab => {
     tab.addEventListener("click", () => switchJournalTab(tab.dataset.journalTab));

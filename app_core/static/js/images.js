@@ -120,6 +120,36 @@ function openLightbox(img) {
 export function closeLightbox() {
   document.getElementById("lightbox-overlay").classList.remove("visible");
   lightboxCurrentImage = null;
+  if (lightboxFullscreen) setLightboxFullscreen(false);
+}
+
+/* Vollbild: Doppelklick aufs Bild oder eigener Toolbar-Button, siehe unten.
+   Escape verlaesst (siehe calendar.js) zuerst nur das Vollbild, bevor ein
+   zweites Escape die Lightbox ganz schliesst. */
+let lightboxFullscreen = false;
+
+function setLightboxFullscreen(on) {
+  lightboxFullscreen = on;
+  const box = document.getElementById("lightbox-box");
+  box.classList.toggle("lightbox-fullscreen", on);
+  document.getElementById("lightbox-fullscreen").textContent = on ? "Vollbild verlassen" : "Vollbild";
+  if (on) {
+    // Von positionLightboxBox() gesetzte Inline-Werte haben Vorrang vor jeder
+    // Klassen-Regel (siehe .lightbox-fullscreen in style.css) - erst raeumen,
+    // sonst bleibt die Box in ihrer zuletzt gezogenen Groesse haengen.
+    box.style.left = box.style.top = box.style.width = box.style.height = "";
+  } else {
+    positionLightboxBox(getLightboxSize());
+  }
+}
+
+function toggleLightboxFullscreen() {
+  setLightboxFullscreen(!lightboxFullscreen);
+}
+
+export function isLightboxFullscreen() { return lightboxFullscreen; }
+export function exitLightboxFullscreen() {
+  if (lightboxFullscreen) setLightboxFullscreen(false);
 }
 
 /* Eigener Resize-Griff statt natives CSS resize: waechst symmetrisch um den
@@ -165,6 +195,8 @@ export function closeLightbox() {
 
 document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
 attachOutsideClose(document.getElementById("lightbox-overlay"), closeLightbox);
+document.getElementById("lightbox-fullscreen").addEventListener("click", toggleLightboxFullscreen);
+document.getElementById("lightbox-img").addEventListener("dblclick", toggleLightboxFullscreen);
 document.getElementById("lightbox-reset").addEventListener("click", () => {
   positionLightboxBox(LIGHTBOX_DEFAULT_SIZE);
   saveLightboxSize({ ...LIGHTBOX_DEFAULT_SIZE });
