@@ -666,7 +666,13 @@ def _run_account_sync(account: dict, full: bool = False) -> dict:
     else:
         from_date = to_date - timedelta(days=365)
 
-    result = sync_account(account, from_date, to_date)
+    # Abfragefenster nach oben einen Tag offen lassen: MT5-Deal-Zeiten sind
+    # Broker-Zeit (FTMO: UTC+3), das MetaTrader5-Paket rechnet ein naives
+    # datetime zudem ueber die lokale Zeitzone um - mit to_date als Obergrenze
+    # fielen frisch geschlossene Trades der letzten Stunden aus dem Fenster und
+    # tauchten erst bei einem spaeteren Sync auf. Zukuenftige Deals gibt es
+    # nicht, der Puffer kostet also nichts. last_sync bleibt to_date.
+    result = sync_account(account, from_date, to_date + timedelta(days=1))
     trades = result["trades"]
 
     inserted = db.insert_trades(trades, source=account["platform"], account_id=account["id"], skip_deleted=not full)
