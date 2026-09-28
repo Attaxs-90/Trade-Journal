@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.14.0
+- MetaTrader 5: Der Sync schließt kein offenes MT5-Terminal mehr und schaltet
+  es auch nicht auf ein anderes Konto um. Ist MT5 mit einem anderen Konto
+  geöffnet, wird dieses Konto übersprungen, mit Hinweis. Weniger Einzelabfragen
+  beim Sync, dadurch schneller vor allem beim vollständigen Neu-Sync.
+- Tägliche Datensicherung von Datenbank und Screenshots (die letzten 14
+  Stände), wahlweise in einen eigenen Ordner, z. B. eine externe Platte. Neue
+  Karte „Datensicherung“ in den Einstellungen mit „Jetzt sichern“.
+- Die App öffnet sofort. Der Konten-Sync läuft im Hintergrund, die Sidebar
+  zeigt „Konten werden synchronisiert …“ und die Ansicht aktualisiert sich,
+  sobald neue Trades da sind.
+- Prop-Firm-Limits je Konto (Tagesverlust, Gesamtverlust) mit Auslastungs-
+  balken in der Übersicht, Warnung ab 80 %.
+- Auswertungen: R-Multiple (Ø R als Kennzahl und für Balkendiagramme),
+  neue R-Multiple-Verteilung und „Was kosten Regelbrüche?“ auf Basis der
+  Regel-Bewertungen je Trade.
+- Equity-Kurve der Auswertungen startet bei gewähltem Zeitraum beim
+  tatsächlichen Kontostand statt beim Startkapital.
+- Gelöschte Trades zählen nicht mehr in der Regel-Statistik ihrer Strategie.
+- Zwei MT5-Konten bei verschiedenen Brokern können sich keine Trades mehr
+  gegenseitig verdrängen.
+- Schutz gegen Zugriffe fremder Webseiten auf den lokalen Server.
+- Konten-Seite: Umbenennen- und Sync-Formulare stehen nicht mehr dauerhaft offen.
+- Einheitliche Bestätigungsdialoge statt Browser-Popups.
+- Bilder werden als WebP mit sprechenden Dateinamen (Tag/Trade/Notiz)
+  gespeichert, die Bildansicht hat einen Vollbildmodus (Button oder
+  Doppelklick).
+- Sidebar mit aus- und einklappbaren Unterpunkten für Journal, To-Do-Listen,
+  Konten & Sync und Einstellungen.
+- NinjaTrader: CSV-Import und Auto-Sync legen keine doppelten Trades mehr an.
+- MT5: frisch geschlossene Trades fallen nicht mehr aus dem Abfragefenster.
+
 ## 1.13.0
 - Neuer Earnings-Ticker: Laufband oben auf jeder Seite mit den nächsten
   Quartalszahlen der zehn am stärksten gewichteten Nasdaq-100-Unternehmen

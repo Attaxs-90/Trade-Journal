@@ -49,7 +49,7 @@ def _fetch_deals_stable(from_date: datetime, to_date: datetime, retries: int = 4
     return deals
 
 
-def _entry_risk_usd(entry, points: float, gross_usd: float) -> float | None:
+def _entry_risk_usd(entry, points: float, gross_usd: float, orders: dict) -> float | None:
     """Naeherung des Risikos in $ aus dem Stop-Loss des Eroeffnungs-Orders -
     Basis fuer die R-Multiple auf der Trade-Detailseite/Share-Karte. Nutzt
     das $-pro-Punkt-Verhaeltnis dieses Trades (gross_usd/points) statt
@@ -57,13 +57,16 @@ def _entry_risk_usd(entry, points: float, gross_usd: float) -> float | None:
     vorhandenen "points"-Naeherung. None wenn kein SL gesetzt war oder
     points 0 ist (Breakeven-Exit) - dann muss der Nutzer das Risiko manuell
     eintragen (siehe update_trade_risk in db.py)."""
-    try:
-        orders = mt5.history_orders_get(ticket=entry.order)
-    except Exception:
-        return None
-    if not orders:
-        return None
-    sl = orders[0].sl
+    order = orders.get(entry.order)
+    if order is None:
+        try:
+            found = mt5.history_orders_get(ticket=entry.order)
+        except Exception:
+            found = None
+        if not found:
+            return None
+        order = orders[entry.order] = found[0]
+    sl = order.sl
     if not sl or not points:
         return None
     risk_points = abs(entry.price - sl)
@@ -72,19 +75,36 @@ def _entry_risk_usd(entry, points: float, gross_usd: float) -> float | None:
     return round(risk_points * abs(gross_usd / points), 2)
 
 
-def _close_terminal():
-    """mt5.shutdown() unten trennt nur die IPC-Verbindung zum Terminal, laesst
-    das Terminal-Fenster aber offen (startet es sogar automatisch, falls es
-    noch nicht lief). Der Nutzer moechte es nach dem Sync nicht dauerhaft
-    offen haben, deshalb den Terminal-Prozess gezielt per Name beenden -
-    Fehler (z. B. Terminal laeuft gar nicht) werden stillschweigend ignoriert."""
+def _terminal_pids() -> set[int]:
+    """PIDs aller laufenden MT5-Terminals (terminal64.exe). Leere Menge, wenn
+    keins laeuft oder tasklist nicht verfuegbar ist."""
     try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "terminal64.exe"],
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq terminal64.exe", "/FO", "CSV", "/NH"],
             capture_output=True, timeout=5,
-        )
+        ).stdout.decode("ascii", errors="replace")  # deutsche Meldung "keine Aufgaben" ist OEM-kodiert
     except Exception:
-        pass
+        return set()
+    pids = set()
+    for line in out.splitlines():
+        parts = [p.strip('"') for p in line.split('","')]
+        if len(parts) > 1 and parts[0].lower() == "terminal64.exe" and parts[1].isdigit():
+            pids.add(int(parts[1]))
+    return pids
+
+
+def _close_started_terminals(pids_before: set[int]):
+    """mt5.shutdown() trennt nur die IPC-Verbindung, laesst ein von
+    initialize() gestartetes Terminal aber offen. Der Nutzer moechte es nach
+    dem Sync nicht dauerhaft offen haben - beendet werden aber nur Terminals,
+    die WAEHREND des Syncs neu gestartet wurden. Frueher lief hier
+    taskkill /IM terminal64.exe und schoss damit auch ein Terminal ab, in dem
+    der Nutzer gerade handelte (EAs, vom Terminal verwaltete Stops)."""
+    for pid in _terminal_pids() - pids_before:
+        try:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=5)
+        except Exception:
+            pass
 
 
 def _fill_incomplete_positions(deals: list) -> list:
@@ -93,21 +113,62 @@ def _fill_incomplete_positions(deals: list) -> list:
     Nachfragen in _fetch_deals_stable (beobachtet: Exit-Deal ueber 1,5 Stunden
     lang nicht im Zeitfenster-Ergebnis, obwohl das Zeitfenster ihn abdeckt).
     Eine gezielte Abfrage per position liefert dieselbe Position dagegen sofort
-    vollstaendig. Deshalb jede in der Zeitfenster-Abfrage gefundene Position
-    einzeln nachladen und per Ticket dedupliziert mergen."""
-    position_ids = {d.position_id for d in deals if d.type in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL)}
+    vollstaendig. Deshalb Positionen einzeln nachladen und per Ticket
+    dedupliziert mergen - aber nur die unvollstaendigen (Entry fehlt, weil er
+    vor dem Fenster lag, oder das Exit-Volumen deckt das Entry-Volumen nicht):
+    eine Einzelabfrage je Position machte einen 365-Tage-Resync zu Hunderten
+    IPC-Aufrufen, obwohl fast alle Positionen schon vollstaendig vorlagen."""
+    volumes: dict[int, list[float]] = {}  # position_id -> [entry_volume, exit_volume]
+    for d in deals:
+        if d.type not in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL):
+            continue
+        v = volumes.setdefault(d.position_id, [0.0, 0.0])
+        if d.entry == mt5.DEAL_ENTRY_IN:
+            v[0] += d.volume
+        else:
+            v[1] += d.volume
+    incomplete = [pid for pid, (vin, vout) in volumes.items() if not vin or vout + 1e-9 < vin]
     by_ticket = {d.ticket: d for d in deals}
-    for position_id in position_ids:
+    for position_id in incomplete:
         for d in mt5.history_deals_get(position=position_id) or []:
             by_ticket[d.ticket] = d
     return list(by_ticket.values())
 
 
+def _orders_by_ticket(from_date: datetime, to_date: datetime) -> dict:
+    """Alle Orders des Zeitfensters in einem Aufruf statt einer Abfrage je Trade
+    (siehe _entry_risk_usd) - aeltere Entry-Orders ausserhalb des Fensters
+    fragt _entry_risk_usd einzeln nach."""
+    try:
+        return {o.ticket: o for o in (mt5.history_orders_get(from_date, to_date) or [])}
+    except Exception:
+        return {}
+
+
 def fetch_closed_trades(login: int, password: str, server: str, from_date: datetime, to_date: datetime) -> dict:
     _ensure_available()
 
-    if not mt5.initialize(login=login, password=password, server=server):
+    # Laeuft schon ein Terminal, haengt sich initialize() daran an - mit
+    # Zugangsdaten wuerde es das offene Terminal auf dieses Konto umschalten,
+    # mitten in der Handelssitzung des Nutzers. Deshalb dann ohne Login
+    # anhaengen und nur synchronisieren, wenn dort ohnehin dieses Konto offen ist.
+    pids_before = _terminal_pids()
+    if pids_before:
+        if not mt5.initialize():
+            code, desc = mt5.last_error()
+            raise MT5Error(f"Verbindung zum offenen MT5-Terminal fehlgeschlagen ({code}): {desc}")
+        info = mt5.account_info()
+        if not info or info.login != login:
+            mt5.shutdown()
+            current = info.login if info else "unbekannt"
+            raise MT5Error(
+                f"MetaTrader 5 ist gerade mit Konto {current} geöffnet. Der Sync von Konto {login} "
+                f"wurde übersprungen, damit dein offenes Terminal nicht umgeschaltet wird. "
+                f"MT5 schließen oder dort zu Konto {login} wechseln und erneut synchronisieren."
+            )
+    elif not mt5.initialize(login=login, password=password, server=server):
         code, desc = mt5.last_error()
+        _close_started_terminals(pids_before)
         raise MT5Error(f"MT5-Login fehlgeschlagen ({code}): {desc}")
 
     try:
@@ -116,6 +177,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
 
         deals = _fetch_deals_stable(from_date, to_date)
         deals = _fill_incomplete_positions(deals)
+        orders = _orders_by_ticket(from_date, to_date)
 
         by_position: dict[int, list] = {}
         for d in deals:
@@ -142,7 +204,7 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                 net = exit_deal.profit + costs
                 direction = "Long" if entry.type == mt5.DEAL_TYPE_BUY else "Short"
                 points = (exit_deal.price - entry.price) if direction == "Long" else (entry.price - exit_deal.price)
-                risk_usd = _entry_risk_usd(entry, points, exit_deal.profit)
+                risk_usd = _entry_risk_usd(entry, points, exit_deal.profit, orders)
 
                 # _broker_time, NICHT fromtimestamp() ohne Zeitzone: MT5 liefert
                 # bereits Broker-Zeit. Eine zusaetzliche Umrechnung in die lokale
@@ -161,12 +223,16 @@ def fetch_closed_trades(login: int, password: str, server: str, from_date: datet
                     gross_usd=round(exit_deal.profit, 2),
                     commission_usd=round(-costs, 2),
                     net_usd=round(net, 2),
-                    entry_order_id=f"mt5:{position_id}:{entry.ticket}",
-                    exit_order_id=f"mt5:{position_id}:{exit_deal.ticket}",
+                    # Login im Schluessel: Positions-IDs sind nur je Broker-Server
+                    # eindeutig, zwei MT5-Konten bei verschiedenen Brokern koennten
+                    # sonst kollidieren und einer der Trades fiele still weg
+                    # (Bestandstrades stellt Migration 40 in db.py auf dieses Format um).
+                    entry_order_id=f"mt5:{login}:{position_id}:{entry.ticket}",
+                    exit_order_id=f"mt5:{login}:{position_id}:{exit_deal.ticket}",
                     source="mt5",
                     risk_usd=risk_usd,
                 ))
         return {"trades": trades, "balance": balance}
     finally:
         mt5.shutdown()
-        _close_terminal()
+        _close_started_terminals(pids_before)

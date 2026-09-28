@@ -49,11 +49,10 @@ def _open_browser():
 
 
 def _wait_and_open_browser():
-    # Der Server nimmt den Port erst an, sobald der automatische Start-Sync
-    # aller MT5-Konten durchgelaufen ist (siehe app.main._startup_sync_mt5_accounts,
-    # laeuft in der FastAPI-Lifespan vor dem eigentlichen Serving) - deshalb ein
-    # Poll auf denselben Verbindungstest statt eines festen Timers, sonst zeigt
-    # der Browser beim Oeffnen noch die Daten vom letzten Sync.
+    # Poll auf denselben Verbindungstest statt eines festen Timers: der Browser
+    # oeffnet, sobald der Server Anfragen annimmt. Der Start-Sync laeuft danach
+    # im Hintergrund weiter (siehe app.main._startup_tasks), das Frontend
+    # aktualisiert sich selbst, sobald er fertig ist.
     while not _already_running():
         time.sleep(0.3)
     _open_browser()

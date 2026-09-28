@@ -1272,7 +1272,9 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 }
 .account-name-edit-btn svg, .account-sync-edit-btn svg { width: 13px; height: 13px; }
 .account-name-edit-btn:hover, .account-sync-edit-btn:hover { color: var(--text); background: var(--bg-hover); }
-.account-name-edit-form, .account-sync-edit-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+/* :not([hidden]) am display-Setzer (Hausstil), sonst schlaegt die Klasse die Browser-Regel [hidden] und die Formulare stehen dauerhaft offen */
+.account-name-edit-form:not([hidden]), .account-sync-edit-form:not([hidden]) { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.account-name-edit-form[hidden], .account-sync-edit-form[hidden] { display: none; }
 .account-name-edit-form input, .account-sync-edit-form input {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -2688,3 +2690,50 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .export-format-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .export-format-option { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
 .export-format-option input { accent-color: var(--accent); cursor: pointer; }
+
+/* Prop-Firm-Limits je Konto (Konten-Seite) */
+.account-limits-form { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.account-limits-form input {
+  width: 90px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+}
+.account-limits-form .btn { padding: 4px 8px; font-size: 11px; }
+
+/* Hinweis in der Sidebar, solange der Start-Sync im Hintergrund laeuft */
+.sidebar-sync-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 12px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.sidebar-sync-indicator[hidden] { display: none; }
+.sidebar-sync-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: sidebar-sync-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sidebar-sync-pulse { 50% { opacity: 0.25; } }
+
+/* Prop-Firm-Limits (Uebersicht) */
+.prop-limit-list { display: flex; flex-direction: column; gap: 14px; margin-bottom: 8px; }
+.prop-limit-name { font-weight: 600; font-size: 13px; margin-bottom: 6px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.prop-limit-meta { font-weight: 400; font-size: 11.5px; color: var(--text-faint); }
+.prop-limit-bar-row { margin-top: 6px; }
+.prop-limit-bar-label { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); margin-bottom: 3px; gap: 8px; }
+.prop-limit-bar-value.warn { color: var(--impact-medium); }
+.prop-limit-bar-value.breached { color: var(--red); font-weight: 600; }
+.prop-limit-track { height: 6px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+.prop-limit-fill { height: 100%; border-radius: 3px; background: var(--green); }
+.prop-limit-fill.warn { background: var(--impact-medium); }
+.prop-limit-fill.breached { background: var(--red); }

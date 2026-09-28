@@ -64,6 +64,9 @@
       </button>
       <div class="inline-filter-panel sidebar-account-status-panel" id="sidebar-account-status-panel" hidden></div>
     </div>
+    <div class="sidebar-sync-indicator" id="sidebar-sync-indicator" role="status" hidden>
+      <span class="sidebar-sync-dot" aria-hidden="true"></span><span class="sidebar-sync-text">Konten werden synchronisiert …</span>
+    </div>
 
     <nav class="nav">
       <div class="nav-item active" data-view="overview" title="Übersicht" aria-label="Übersicht" role="button" tabindex="0" draggable="true">
@@ -138,6 +141,7 @@
         <div class="nav-subnav" data-subnav-for="settings" hidden>
           <span class="nav-subitem" data-settings-card="font" role="button" tabindex="0">Schriftart</span>
           <span class="nav-subitem" data-settings-card="earnings-ticker" role="button" tabindex="0">Earnings-Ticker</span>
+          <span class="nav-subitem" data-settings-card="backup" role="button" tabindex="0">Datensicherung</span>
           <span class="nav-subitem" data-settings-card="account-delete" role="button" tabindex="0">Konto löschen</span>
           <span class="nav-subitem" data-settings-card="tags" role="button" tabindex="0">Tags</span>
           <span class="nav-subitem" data-settings-card="journal-templates" role="button" tabindex="0">Journal-Vorlagen</span>
@@ -316,6 +320,14 @@
     </header>
 
     <div class="stat-grid stat-grid-fancy" id="ov-stats"></div>
+
+    <div class="card" id="ov-prop-limits" hidden>
+      <div class="card-title-row">
+        <div class="card-title">Prop-Firm-Limits</div>
+      </div>
+      <div class="prop-limit-list" id="ov-prop-limit-list"></div>
+      <div class="account-hint">Auf Basis geschlossener Trades – offene Positionen kennt das Journal nicht. Limits pflegst du unter „Konten &amp; Sync“.</div>
+    </div>
 
     <div class="card">
       <div class="card-title-row">
@@ -915,6 +927,26 @@
           </div>
           <div class="weight-table" id="earnings-companies-list"></div>
         </div>
+      </div>
+    </div>
+
+    <div class="card settings-card" data-settings-card="backup">
+      <button type="button" class="settings-card-header">
+        <span class="card-title settings-card-title">Datensicherung</span>
+        <span class="settings-card-toggle"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </button>
+      <div class="settings-card-body">
+        <div class="account-hint">
+          Einmal täglich beim Start wird die Datenbank samt Screenshots gesichert (die letzten 14 Stände bleiben).
+          Leer lassen für den Standardordner, oder einen eigenen Ordner angeben, z. B. eine externe Platte.
+          In einem eigenen Ordner werden die Broker-Passwörter in der Kopie geleert.
+        </div>
+        <form class="account-form" id="backup-form">
+          <input type="text" id="backup-dir-input" placeholder="Zielordner (leer = Standard)">
+          <button type="submit" class="btn btn-secondary">Ordner speichern</button>
+          <button type="button" class="btn btn-primary" id="backup-run-btn">Jetzt sichern</button>
+        </form>
+        <div class="account-hint" id="backup-status"></div>
       </div>
     </div>
 

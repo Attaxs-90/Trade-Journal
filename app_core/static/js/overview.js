@@ -184,6 +184,7 @@ export async function openOverview() {
   const sq = strategiesQS();
   const data = await api(sq ? overviewUrl + (overviewUrl.includes("?") ? "&" : "?") + sq : overviewUrl);
   renderOverviewStats(data);
+  renderPropLimits(data.prop_limits || []);
 
   const toggle = document.getElementById("ov-stats-toggle");
   const panel = document.getElementById("ov-stats-panel");
@@ -203,6 +204,35 @@ export async function openOverview() {
     chartWrap.innerHTML = `<div class="empty-state">Mindestens 2 Tage nötig für eine Kurve.</div>`;
   }
 
+}
+
+/* Prop-Firm-Limits je Konto: Balken fuellt sich mit dem verbrauchten Anteil,
+   ab 80 % gelb (Warnung), ab 100 % rot (Limit erreicht). */
+function propLimitBar(label, usage) {
+  if (!usage) return "";
+  const level = usage.pct >= 100 ? "breached" : usage.pct >= 80 ? "warn" : "ok";
+  return `
+    <div class="prop-limit-bar-row">
+      <div class="prop-limit-bar-label">
+        <span>${label}</span>
+        <span class="prop-limit-bar-value ${level}">${fmtNum(usage.used)} / ${fmtNum(usage.limit)} $ · noch ${fmtNum(Math.max(usage.remaining, 0))} $</span>
+      </div>
+      <div class="prop-limit-track"><div class="prop-limit-fill ${level}" style="width:${Math.min(usage.pct, 100)}%"></div></div>
+    </div>`;
+}
+
+function renderPropLimits(limits) {
+  const card = document.getElementById("ov-prop-limits");
+  if (!card) return;
+  card.hidden = !limits.length;
+  document.getElementById("ov-prop-limit-list").innerHTML = limits.map(l => `
+    <div class="prop-limit-account">
+      <div class="prop-limit-name">${escapeHtml(l.name)}
+        <span class="prop-limit-meta">heute <span class="${cls(l.today_net)}">${fmtSigned(l.today_net)} $</span> · Kontostand ${fmtNum(l.balance)} $</span>
+      </div>
+      ${propLimitBar("Tagesverlust", l.daily)}
+      ${propLimitBar("Gesamtverlust", l.max)}
+    </div>`).join("");
 }
 
 const TRADES_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];

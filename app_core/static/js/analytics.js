@@ -4,7 +4,7 @@ import { getPlatforms, renderImportAccountSelect } from './accounts.js';
 import { closeModal } from './calendar.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
 import { accountsQS, api, cls, escapeHtml, expandCollapsibleCard, fmtDate, fmtNum, fmtSigned, initCollapsibleCards, makeSortable, readStoredArray, scrollAndHighlight, setAllCollapsibleCards, showAppError, state, tagsQS, tile, withFilter, writeStored } from './core.js';
-import { deleteAccountFlow } from './dialogs.js';
+import { confirmContinue, deleteAccountFlow } from './dialogs.js';
 import { refreshCurrentView, renderAccountFilter, renderTagFilter } from './filters.js';
 import { mountView, setActiveNav } from './overview.js';
 import { fmtDuration } from './settings.js';
@@ -28,6 +28,8 @@ const ANALYTICS_METRICS = [
   { key: "trade_count", field: "trade_count", label: "Anzahl Trades", unit: "", signed: false, decimals: 0 },
   { key: "avg_win", field: "avg_win", label: "Ø Gewinn", unit: "$", signed: false, decimals: 1 },
   { key: "avg_loss", field: "avg_loss", label: "Ø Verlust", unit: "$", signed: false, decimals: 1 },
+  { key: "avg_r", field: "avg_r", label: "Ø R (Erwartungswert)", unit: "R", signed: true, decimals: 2, nullLabel: "–" },
+  { key: "total_r", field: "total_r", label: "Summe R", unit: "R", signed: true, decimals: 1, nullLabel: "–" },
 ];
 
 const ANALYTICS_DEFAULT_WIDGETS = [
@@ -43,15 +45,34 @@ const ANALYTICS_DEFAULT_WIDGETS = [
   { id: "bd-rating", type: "breakdown", title: "Netto-P&L nach Tagesbewertung", dimension: "rating", metric: "net" },
   { id: "bd-plan", type: "breakdown", title: "Trefferquote: Plan befolgt?", dimension: "followed_plan", metric: "win_rate" },
   { id: "bd-account", type: "breakdown", title: "Performance nach Konto", dimension: "account", metric: "net" },
+  { id: "bd-rules", type: "breakdown", title: "Was kosten Regelbrüche?", dimension: "rules", metric: "net" },
+  { id: "dist-r", type: "r_distribution", title: "R-Multiple-Verteilung" },
 ];
+
+/* Standard-Widgets, die erst nach der ersten Version dazukamen. Wer schon eine
+   gespeicherte Konfiguration hat, bekaeme sie sonst nie zu sehen (gleiches
+   Problem wie bei overviewHiddenColumns, siehe CLAUDE.md) - sie werden deshalb
+   einmalig angehaengt und in analyticsWidgetsAdded vermerkt, damit ein
+   bewusst entferntes Widget nicht wiederkommt. */
+const ANALYTICS_ADDED_WIDGET_IDS = ["bd-rules", "dist-r"];
 
 let analyticsWidgets = [];
 
 function loadAnalyticsWidgets() {
   try {
     const saved = JSON.parse(localStorage.getItem("analyticsWidgets") || "null");
-    if (Array.isArray(saved) && saved.length) return saved;
+    if (Array.isArray(saved) && saved.length) {
+      const added = new Set(readStoredArray("analyticsWidgetsAdded") || []);
+      const missing = ANALYTICS_ADDED_WIDGET_IDS.filter(id => !added.has(id) && !saved.some(w => w.id === id));
+      if (missing.length) {
+        saved.push(...ANALYTICS_DEFAULT_WIDGETS.filter(w => missing.includes(w.id)).map(w => ({ ...w })));
+        localStorage.setItem("analyticsWidgets", JSON.stringify(saved));
+      }
+      writeStored("analyticsWidgetsAdded", ANALYTICS_ADDED_WIDGET_IDS);
+      return saved;
+    }
   } catch (e) { /* ignore */ }
+  writeStored("analyticsWidgetsAdded", ANALYTICS_ADDED_WIDGET_IDS);
   return ANALYTICS_DEFAULT_WIDGETS.map(w => ({ ...w }));
 }
 function saveAnalyticsWidgets() {
@@ -162,7 +183,7 @@ function barChartSvg(rows, metric, w = 1000, h = 260) {
     const barBottom = y(Math.min(v, 0));
     const barH = Math.max(1.5, barBottom - barTop);
     const color = metric.signed ? (v >= 0 ? green : red) : accent;
-    const valueLabel = raw == null ? "∞" : `${fmtNum(v, metric.decimals ?? 0)}${metric.unit ? " " + metric.unit : ""}`;
+    const valueLabel = raw == null ? (metric.nullLabel ?? "∞") : `${fmtNum(v, metric.decimals ?? 0)}${metric.unit ? " " + metric.unit : ""}`;
     const labelY = v >= 0 ? barTop - 6 : barBottom + 14;
     barsSvg += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${barTop.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="4" fill="${color}" opacity="0.85" />`;
     // Wertelabel nur zeichnen, wenn es grob in die eigene Bandbreite passt -
@@ -212,7 +233,7 @@ function mountBarChart(wrap, rows, metric, tooltipRenderer) {
 function barTooltipRenderer(metric) {
   return (hit) => {
     const raw = hit.dataset.value;
-    const valueText = raw === "" ? "∞" : `${fmtNum(parseFloat(raw), metric.decimals ?? 2)}${metric.unit ? " " + metric.unit : ""}`;
+    const valueText = raw === "" ? (metric.nullLabel ?? "∞") : `${fmtNum(parseFloat(raw), metric.decimals ?? 2)}${metric.unit ? " " + metric.unit : ""}`;
     return `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)}</div>`
       + `<div class="chart-tooltip-value">${valueText}</div>`
       + `<div class="chart-tooltip-date">${hit.dataset.count} Trade${hit.dataset.count === "1" ? "" : "s"}</div>`;
@@ -233,6 +254,8 @@ async function renderKpiWidget(body) {
     + tile("Ø Gewinn", fmtNum(data.avg_win, 1) + " $", "pos")
     + tile("Ø Verlust", fmtNum(Math.abs(data.avg_loss), 1) + " $", "neg")
     + tile("Ø Haltedauer", fmtDuration(data.avg_duration_sec))
+    + tile(`Ø R (${data.r_trade_count} von ${data.trade_count} Trades)`,
+      data.avg_r === null ? "–" : fmtSigned(data.avg_r, 2) + " R", data.avg_r === null ? "" : cls(data.avg_r))
     + tile("Bester Trade", fmtSigned(data.best_trade) + " $", "pos")
     + tile("Schwächster Trade", fmtSigned(data.worst_trade) + " $", "neg");
 }
@@ -288,6 +311,29 @@ async function renderDistributionWidget(body) {
     `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)} $</div><div class="chart-tooltip-value">${hit.dataset.count} Trades</div>`);
 }
 
+/* Wie die P&L-Verteilung, aber in R-Multiples - vergleichbar ueber
+   unterschiedliche Positionsgroessen hinweg. Zaehlt nur Trades mit
+   hinterlegtem Risiko (Trade-Seite, "Risiko & R-Multiple"). */
+async function renderRDistributionWidget(body) {
+  const data = await api(withAnalyticsFilter("/api/analytics/distribution?bins=10&metric=r"));
+  if (!data.trade_count) {
+    body.innerHTML = `<div class="empty-state">Keine Trades mit hinterlegtem Risiko im gewählten Zeitraum/Filter.</div>`;
+    return;
+  }
+  const rows = data.bins.map(b => ({ label: b.label, total_net: b.count, trade_count: b.count }));
+  const metric = { field: "total_net", unit: "", decimals: 0, signed: false };
+  body.innerHTML = `<div class="analytics-equity-meta">
+      <span>Trades mit Risiko: <strong>${data.trade_count}</strong></span>
+      <span>Ø Gewinn: <strong class="pos">${fmtNum(data.avg_win, 2)} R</strong></span>
+      <span>Ø Verlust: <strong class="neg">${fmtNum(data.avg_loss, 2)} R</strong></span>
+      <span>Größter Gewinn: <strong class="pos">${fmtNum(data.largest_win, 2)} R</strong></span>
+      <span>Größter Verlust: <strong class="neg">${fmtNum(data.largest_loss, 2)} R</strong></span>
+    </div>
+    <div class="chart-wrap analytics-bar-chart"></div>`;
+  mountBarChart(body.querySelector(".analytics-bar-chart"), rows, metric, (hit) =>
+    `<div class="chart-tooltip-date">${escapeHtml(hit.dataset.day)} R</div><div class="chart-tooltip-value">${hit.dataset.count} Trades</div>`);
+}
+
 async function renderBreakdownWidget(body, widget) {
   const metric = ANALYTICS_METRICS.find(m => m.key === widget.metric) || ANALYTICS_METRICS[0];
   const data = await api(withAnalyticsFilter(`/api/analytics/breakdown?dimension=${encodeURIComponent(widget.dimension)}`));
@@ -305,11 +351,12 @@ function analyticsWidgetRenderer(widget) {
   if (widget.type === "equity") return renderEquityWidget;
   if (widget.type === "streaks") return renderStreaksWidget;
   if (widget.type === "distribution") return renderDistributionWidget;
+  if (widget.type === "r_distribution") return renderRDistributionWidget;
   if (widget.type === "breakdown") return (body) => renderBreakdownWidget(body, widget);
   return async (body) => { body.innerHTML = `<div class="empty-state">Unbekannter Auswertungstyp.</div>`; };
 }
 
-const ANALYTICS_WIDE_TYPES = new Set(["equity", "distribution"]);
+const ANALYTICS_WIDE_TYPES = new Set(["equity", "distribution", "r_distribution"]);
 
 function analyticsWidgetCardHtml(widget) {
   const wideClass = ANALYTICS_WIDE_TYPES.has(widget.type) ? " analytics-widget-wide" : "";
@@ -403,6 +450,7 @@ async function openAnalyticsWidgetEditor(existingWidget) {
             <option value="streaks">Serien &amp; Konsistenz</option>
             <option value="breakdown">Balkendiagramm nach Kategorie</option>
             <option value="distribution">P&amp;L-Verteilung</option>
+            <option value="r_distribution">R-Multiple-Verteilung</option>
           </select>
         </label>
         <label class="widget-form-label" id="widget-dim-row">Gruppieren nach
@@ -691,6 +739,11 @@ function buildAccountRow(acc, platforms, isFavorite, isCollapsed) {
                Startkapital: <input type="number" step="0.01" class="acc-starting-balance" value="${acc.starting_balance || 0}">
                <button type="button" class="btn btn-secondary acc-balance-save">Speichern</button>
              </div>`}
+        <form class="account-meta account-limits-form" title="Prop-Firm-Limits in $ - leer lassen für kein Limit. Beispiel FTMO 100k: Tagesverlust 5000, Gesamtverlust 10000.">
+          Limits: Tagesverlust <input type="number" step="0.01" min="0" class="acc-daily-limit" placeholder="–" value="${acc.daily_loss_limit ?? ""}">
+          Gesamtverlust <input type="number" step="0.01" min="0" class="acc-max-limit" placeholder="–" value="${acc.max_loss_limit ?? ""}">
+          <button type="submit" class="btn btn-secondary">Speichern</button>
+        </form>
       </div>
       <div class="account-actions">
         ${isManual ? `<button class="btn btn-secondary acc-reassign">Bisherige nicht zugeordnete Trades zuweisen</button>` : ""}
@@ -815,6 +868,26 @@ function buildAccountRow(acc, platforms, isFavorite, isCollapsed) {
       }
     });
 
+    row.querySelector(".account-limits-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const read = (sel) => {
+        const v = parseFloat(row.querySelector(sel).value);
+        return Number.isFinite(v) && v > 0 ? v : null;
+      };
+      try {
+        await api(`/api/accounts/${acc.id}/limits`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ daily_loss_limit: read(".acc-daily-limit"), max_loss_limit: read(".acc-max-limit") }),
+        });
+        statusEl.className = "account-status ok";
+        statusEl.textContent = "Limits gespeichert.";
+        if (state.view === "overview") refreshCurrentView();
+      } catch (err) {
+        statusEl.className = "account-status err";
+        statusEl.textContent = err.message;
+      }
+    });
+
     async function runSync(full) {
       statusEl.textContent = full ? "Synchronisiere vollstaendig (kann etwas dauern)…" : "Synchronisiere…";
       statusEl.className = "account-status";
@@ -834,8 +907,8 @@ function buildAccountRow(acc, platforms, isFavorite, isCollapsed) {
 
     const syncFullBtn = row.querySelector(".acc-sync-full");
     if (syncFullBtn) {
-      syncFullBtn.addEventListener("click", () => {
-        if (!confirm(`Die letzten 365 Tage komplett neu von ${platformName} abfragen? Geloeschte Trades aus diesem Zeitraum werden dabei wieder importiert.`)) return;
+      syncFullBtn.addEventListener("click", async () => {
+        if (!await confirmContinue(`Die letzten 365 Tage komplett neu von ${platformName} abfragen? Gelöschte Trades aus diesem Zeitraum werden dabei wieder importiert.`)) return;
         runSync(true);
       });
     }
@@ -843,7 +916,7 @@ function buildAccountRow(acc, platforms, isFavorite, isCollapsed) {
     const reassignBtn = row.querySelector(".acc-reassign");
     if (reassignBtn) {
       reassignBtn.addEventListener("click", async () => {
-        if (!confirm(`Alle bisher nicht zugeordneten "${platformName}"-Trades dem Konto "${acc.name}" zuweisen?`)) return;
+        if (!await confirmContinue(`Alle bisher nicht zugeordneten "${platformName}"-Trades dem Konto "${acc.name}" zuweisen?`)) return;
         statusEl.textContent = "Ordne zu…";
         statusEl.className = "account-status";
         try {

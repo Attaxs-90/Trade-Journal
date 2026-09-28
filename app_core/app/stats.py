@@ -83,6 +83,13 @@ def day_stats(trades: list[dict]) -> dict:
     )
 
 
+def _account_start_balance(account: dict, net_totals: dict[int, float]) -> float:
+    """Startkapital eines Kontos - siehe compute_start_balance()."""
+    if account["synced_balance"] is not None:
+        return account["synced_balance"] - (net_totals.get(account["id"]) or 0)
+    return account["starting_balance"] or 0
+
+
 def compute_start_balance(account_keys: list[str] | None) -> float:
     """Startkapital fuer eine Konten-Auswahl: bevorzugt der zuletzt von MT5
     gemeldete Kontostand (synced_balance), zurueckgerechnet um die Netto-Summe
@@ -97,13 +104,52 @@ def compute_start_balance(account_keys: list[str] | None) -> float:
     else:
         account_ids = {k for k in account_keys if k != "csv"}
         included = [a for a in all_accounts if str(a["id"]) in account_ids]
-    start_balance = 0.0
-    for a in included:
-        if a["synced_balance"] is not None:
-            start_balance += a["synced_balance"] - (net_totals.get(a["id"]) or 0)
-        else:
-            start_balance += a["starting_balance"] or 0
-    return start_balance
+    return sum(_account_start_balance(a, net_totals) for a in included)
+
+
+def _limit_usage(limit: float | None, used: float) -> dict | None:
+    if not limit:
+        return None
+    used = max(used, 0.0)
+    return {
+        "limit": round(limit, 2),
+        "used": round(used, 2),
+        "remaining": round(limit - used, 2),
+        "pct": round(100 * used / limit, 1),
+    }
+
+
+def prop_limit_status(account_keys: list[str] | None) -> list[dict]:
+    """Auslastung der Prop-Firm-Limits je Konto (nur Konten mit hinterlegtem
+    Limit, gefiltert wie die Uebersicht). Nach FTMO-Muster:
+    - Tagesverlust: heutiger Netto-Verlust gegen das Tageslimit.
+    - Gesamtverlust: Abstand des Kontostands unter das Startkapital (statisch,
+      kein Trailing-Drawdown).
+    Beides auf Basis geschlossener Trades - offene Positionen kennt das Journal
+    nicht, der echte Stand beim Broker kann deshalb schlechter sein."""
+    with db.get_conn():
+        accounts = [a for a in db.list_accounts() if a["daily_loss_limit"] or a["max_loss_limit"]]
+        if not accounts:
+            return []
+        net_totals = db.account_net_totals()
+        today_totals = db.account_day_totals(date.today().isoformat())
+    if account_keys is not None:
+        wanted = set(account_keys)
+        accounts = [a for a in accounts if str(a["id"]) in wanted]
+    result = []
+    for a in accounts:
+        start = _account_start_balance(a, net_totals)
+        balance = start + (net_totals.get(a["id"]) or 0)
+        today = today_totals.get(a["id"]) or 0.0
+        result.append({
+            "account_id": a["id"],
+            "name": a["name"],
+            "today_net": round(today, 2),
+            "balance": round(balance, 2),
+            "daily": _limit_usage(a["daily_loss_limit"], -today),
+            "max": _limit_usage(a["max_loss_limit"], start - balance),
+        })
+    return result
 
 
 def _fmt_num(n: float) -> str:

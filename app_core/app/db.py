@@ -64,7 +64,9 @@ CREATE TABLE IF NOT EXISTS broker_accounts (
     starting_balance REAL DEFAULT 0,
     synced_balance REAL,
     sync_path TEXT DEFAULT '',
-    archived INTEGER NOT NULL DEFAULT 0
+    archived INTEGER NOT NULL DEFAULT 0,
+    daily_loss_limit REAL,
+    max_loss_limit REAL
 );
 
 -- Dauerhafter Verlauf wichtiger Wirtschaftskalender-Termine (High-Impact,
@@ -433,6 +435,22 @@ MIGRATIONS: list[str] = [
         value TEXT NOT NULL
     )""",                                                                # -> Version 37
     "ALTER TABLE broker_accounts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",  # -> Version 38
+    # Regel-Bewertungen geloeschter Trades - delete_trade() liess sie frueher
+    # stehen, strategy_rule_stats() zaehlte sie weiter mit.
+    "DELETE FROM trade_rule_status WHERE trade_id NOT IN (SELECT id FROM trades)",  # -> Version 39
+    # MT5-Schluessel um den Login erweitern (mt5:<pos>:<ticket> ->
+    # mt5:<login>:<pos>:<ticket>), passend zum neuen Format in mt5_adapter.py -
+    # sonst legte der naechste Sync jeden Bestandstrade doppelt an.
+    """UPDATE trades SET
+         entry_order_id = 'mt5:' || (SELECT login FROM broker_accounts b WHERE b.id = trades.account_id)
+                          || substr(entry_order_id, 4),
+         exit_order_id = 'mt5:' || (SELECT login FROM broker_accounts b WHERE b.id = trades.account_id)
+                          || substr(exit_order_id, 4)
+       WHERE source = 'mt5' AND entry_order_id LIKE 'mt5:%'
+         AND length(entry_order_id) - length(replace(entry_order_id, ':', '')) = 2
+         AND (SELECT login FROM broker_accounts b WHERE b.id = trades.account_id) IS NOT NULL""",  # -> Version 40
+    "ALTER TABLE broker_accounts ADD COLUMN daily_loss_limit REAL",  # -> Version 41
+    "ALTER TABLE broker_accounts ADD COLUMN max_loss_limit REAL",    # -> Version 42
 ]
 
 
@@ -530,6 +548,17 @@ def init_db():
             conn.execute(f"PRAGMA user_version = {target_version}")
 
 
+def _legacy_mt5_key(key: str) -> str:
+    """mt5:<login>:<pos>:<ticket> -> mt5:<pos>:<ticket>. deleted_trade_keys
+    enthaelt Fingerprints aus der Zeit vor dem Login im Schluessel (Migration
+    40 konnte sie nicht umschreiben, ihnen fehlt die Kontozuordnung) - ohne
+    diesen Abgleich kaemen vor dem Umstieg geloeschte MT5-Trades zurueck."""
+    parts = key.split(":")
+    if len(parts) == 4 and parts[0] == "mt5":
+        return f"mt5:{parts[2]}:{parts[3]}"
+    return key
+
+
 def insert_trades(trades: list[dict], source: str = "import", account_id: int | None = None,
                    skip_deleted: bool = False) -> int:
     """INSERT OR IGNORE ueber (entry_order_id, exit_order_id) - bereits vorhandene
@@ -553,7 +582,11 @@ def insert_trades(trades: list[dict], source: str = "import", account_id: int | 
                 for r in conn.execute("SELECT entry_order_id, exit_order_id FROM deleted_trade_keys").fetchall()
             }
         if deleted_keys:
-            trades = [t for t in trades if (t["entry_order_id"], t["exit_order_id"]) not in deleted_keys]
+            trades = [
+                t for t in trades
+                if (t["entry_order_id"], t["exit_order_id"]) not in deleted_keys
+                and (_legacy_mt5_key(t["entry_order_id"]), _legacy_mt5_key(t["exit_order_id"])) not in deleted_keys
+            ]
 
     inserted = 0
     with get_conn() as conn:
@@ -597,7 +630,8 @@ def list_accounts(include_archived: bool = False) -> list[dict]:
     where = "" if include_archived else "WHERE archived = 0"
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance, sync_path, archived "
+            "SELECT id, name, platform, login, server, last_sync, starting_balance, synced_balance, sync_path, archived, "
+            "daily_loss_limit, max_loss_limit "
             f"FROM broker_accounts {where} ORDER BY name"
         ).fetchall()
     return [dict(r) for r in rows]
@@ -641,6 +675,16 @@ def update_account_connection(account_id: int, login: str, sync_path: str):
         )
 
 
+def set_account_limits(account_id: int, daily_loss_limit: float | None, max_loss_limit: float | None):
+    """Prop-Firm-Limits in $ (z. B. FTMO: Tagesverlust 5 %, Gesamtverlust 10 %
+    vom Startkapital). None = kein Limit."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE broker_accounts SET daily_loss_limit = ?, max_loss_limit = ? WHERE id = ?",
+            (daily_loss_limit, max_loss_limit, account_id),
+        )
+
+
 def set_synced_balance(account_id: int, balance: float):
     with get_conn() as conn:
         conn.execute("UPDATE broker_accounts SET synced_balance = ? WHERE id = ?", (balance, account_id))
@@ -662,7 +706,7 @@ def delete_account(account_id: int):
 
 def delete_trade(trade_id: int) -> list[dict]:
     """Loescht einen Trade samt allem, was ausschliesslich an ihm haengt:
-    Tag-Zuordnungen, seine Trade-Bewertung im Journal (entry_type 'trade',
+    Tag-Zuordnungen, Regel-Bewertungen, seine Trade-Bewertung im Journal (entry_type 'trade',
     ref_key = Trade-Id als String) und seine Bild-Zeilen. Ohne das blieben
     verwaiste Journal-Eintraege und Bilder zurueck, die in keiner Ansicht mehr
     erreichbar sind, aber weiter im Tagesview auftauchen bzw. Plattenplatz
@@ -689,6 +733,7 @@ def delete_trade(trade_id: int) -> list[dict]:
             )
         conn.execute("DELETE FROM images WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trade_tags WHERE trade_id = ?", (trade_id,))
+        conn.execute("DELETE FROM trade_rule_status WHERE trade_id = ?", (trade_id,))
         conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
     delete_journal_entry("trade", str(trade_id))
     return images
@@ -885,6 +930,17 @@ def account_net_totals() -> dict[int, float]:
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT account_id, SUM(net_usd) as total FROM trades WHERE account_id IS NOT NULL GROUP BY account_id"
+        ).fetchall()
+    return {r["account_id"]: r["total"] for r in rows}
+
+
+def account_day_totals(day: str) -> dict[int, float]:
+    """Netto-Summe je Konto fuer einen einzelnen Tag (Prop-Firm-Tageslimit)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT account_id, SUM(net_usd) as total FROM trades "
+            "WHERE day = ? AND account_id IS NOT NULL GROUP BY account_id",
+            (day,),
         ).fetchall()
     return {r["account_id"]: r["total"] for r in rows}
 
@@ -2144,6 +2200,23 @@ def strategy_rule_stats(strategy_id: int, include_archived: bool = True) -> list
             "net_broken": round(d["net_broken"], 2),
         })
     return result
+
+
+def trade_rule_compliance() -> dict[int, bool]:
+    """Je bewertetem Trade: wurden alle beantworteten Regeln eingehalten?
+    Gleiche Ableitung wie main._derive_followed_plan (nur aktive Regeln der
+    Strategie des Trades zaehlen), aber fuer alle Trades in einer Query -
+    Basis der Auswertungs-Dimension "rules". Trades ohne Bewertung fehlen."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT s.trade_id, MIN(s.followed) as all_followed
+               FROM trade_rule_status s
+               JOIN strategy_rules r ON r.id = s.rule_id
+               JOIN trades t ON t.id = s.trade_id
+               WHERE r.archived = 0 AND r.strategy_id = t.strategy_id
+               GROUP BY s.trade_id"""
+        ).fetchall()
+    return {r["trade_id"]: bool(r["all_followed"]) for r in rows}
 
 
 def strategy_summary(strategy_id: int) -> dict:

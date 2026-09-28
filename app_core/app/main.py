@@ -9,18 +9,20 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import db, earnings, news, weights
+from . import backup, db, earnings, news, weights
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
 from .config import IMAGES_DIR
 from .images import save_image, delete_image_files
 from .parser import parse_csv, pair_trades
-from .stats import day_stats, build_week_payload, build_month_payload, compute_start_balance
+from .stats import day_stats, build_week_payload, build_month_payload, compute_start_balance, prop_limit_status
 from . import analytics as an
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,7 +46,7 @@ async def _earnings_scan_loop():
     Aufruf nach einem bereits vollstaendigen Scan praktisch nichts."""
     while True:
         await asyncio.sleep(6 * 60 * 60)
-        _maybe_scan_earnings()
+        await asyncio.to_thread(_maybe_scan_earnings)
 
 
 async def _weights_sync_loop():
@@ -55,7 +57,7 @@ async def _weights_sync_loop():
     durchlaeuft statt neu zu starten."""
     while True:
         await asyncio.sleep(12 * 60 * 60)
-        _maybe_sync_weights()
+        await asyncio.to_thread(_maybe_sync_weights)
 
 
 async def _news_calendar_loop():
@@ -72,18 +74,49 @@ async def _news_calendar_loop():
     while True:
         await asyncio.sleep(news._CACHE_TTL.total_seconds())
         try:
-            news.fetch_calendar()
+            # im Thread: blockierende HTTP-Abfragen, die sonst den Event-Loop
+            # (und damit jede Anfrage an die App) fuer ihre Dauer anhielten
+            await asyncio.to_thread(news.fetch_calendar)
         except Exception:
             logger.exception("Hintergrund-Refresh des Newskalenders fehlgeschlagen")
 
 
+# Zustand der Start-Aufgaben fuer /api/startup-status - das Frontend zeigt
+# waehrenddessen "Sync laeuft" und laedt die Ansicht neu, sobald neue Trades da
+# sind. Nur von _startup_tasks geschrieben.
+STARTUP_STATE = {"running": False, "finished_at": None, "inserted": 0}
+
+
+def _startup_tasks():
+    """Backup, Konten-Sync und die externen Abgleiche. Laeuft in einem eigenen
+    Thread statt in der Lifespan: frueher nahm der Server erst Verbindungen an,
+    wenn alles durch war - bei mehreren Konten (bis zu STARTUP_SYNC_TIMEOUT je
+    Konto) und dem monatlichen News-Abgleich (bis zu NEWS_SCRAPE_STARTUP_TIMEOUT)
+    wartete der Nutzer so teils ueber eine Minute auf das Browserfenster.
+    Jetzt oeffnet die App sofort mit dem letzten Stand und aktualisiert sich,
+    sobald der Sync fertig ist (siehe startup-Polling in main.js)."""
+    STARTUP_STATE["running"] = True
+    try:
+        try:
+            backup.maybe_run_daily()  # vor dem Sync: sichert den Stand vor neuen Daten
+        except Exception as e:
+            logger.warning("Taegliches Backup fehlgeschlagen: %s", e)
+        STARTUP_STATE["inserted"] = _startup_sync_accounts()
+        _maybe_scrape_news_history()
+        _maybe_sync_weights()
+        _maybe_scan_earnings()
+    except Exception:
+        logger.exception("Start-Aufgaben abgebrochen")
+    finally:
+        STARTUP_STATE["running"] = False
+        STARTUP_STATE["finished_at"] = datetime.now().isoformat(timespec="seconds")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _startup_sync_accounts()
-    _seed_news_history_from_bundle()
-    _maybe_scrape_news_history()
-    _maybe_sync_weights()
-    _maybe_scan_earnings()
+    _seed_news_history_from_bundle()  # rein lokal und schnell, darf vor dem Serving laufen
+    STARTUP_STATE["running"] = True   # schon hier, damit der erste Seitenaufruf den Sync sieht
+    threading.Thread(target=_startup_tasks, name="startup-tasks", daemon=True).start()
     # Im Hintergrund-Thread, nicht direkt aufgerufen: fetch_calendar() macht
     # zwei blockierende HTTP-Requests (Feed + Scrape), die den Start sonst um
     # mehrere Sekunden verzoegern wuerden (siehe STARTUP_SYNC_TIMEOUT-Kommentar
@@ -122,6 +155,46 @@ class NoCacheStaticMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(NoCacheStaticMiddleware)
+
+
+_LOCAL_HOSTNAMES = {"127.0.0.1", "localhost"}
+
+
+def _is_local_host(host_header: str) -> bool:
+    return urlsplit(f"//{host_header}").hostname in _LOCAL_HOSTNAMES
+
+
+def _is_local_origin(origin: str) -> bool:
+    parts = urlsplit(origin)
+    return parts.scheme == "http" and parts.hostname in _LOCAL_HOSTNAMES
+
+
+class LocalOnlyMiddleware(BaseHTTPMiddleware):
+    """Der Server lauscht nur auf 127.0.0.1, war aber trotzdem von jeder im
+    Browser geoeffneten Webseite aus erreichbar:
+    - DNS-Rebinding: eine fremde Domain, die auf 127.0.0.1 umgebogen wird,
+      koennte Trades und Journal auslesen. Dagegen hilft nur der Host-Header -
+      bei so einem Angriff steht dort die fremde Domain.
+    - CSRF: ein Formular einer fremden Seite koennte per multipart-POST CSVs
+      oder Bilder importieren (die JSON-Endpunkte schuetzt FastAPI bereits,
+      es parst JSON nur bei passendem Content-Type). Schreibende Anfragen
+      muessen deshalb von der App selbst kommen (Origin bzw. Sec-Fetch-Site)."""
+
+    async def dispatch(self, request, call_next):
+        if not _is_local_host(request.headers.get("host", "")):
+            return PlainTextResponse("Nur lokaler Zugriff erlaubt.", status_code=403)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin is not None:
+                if not _is_local_origin(origin):
+                    return PlainTextResponse("Anfrage von fremder Seite abgelehnt.", status_code=403)
+            elif request.headers.get("sec-fetch-site") == "cross-site":
+                return PlainTextResponse("Anfrage von fremder Seite abgelehnt.", status_code=403)
+        return await call_next(request)
+
+
+# Zuletzt hinzugefuegt = aeusserste Middleware: abgelehnte Anfragen erreichen nichts anderes.
+app.add_middleware(LocalOnlyMiddleware)
 
 MAX_CSV_BYTES = 25 * 1024 * 1024   # 25 MB - grosszuegig fuer Tages-/Wochenexporte
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB - deckt auch hochaufgeloeste Screenshots ab
@@ -183,6 +256,15 @@ class StartingBalanceUpdate(BaseModel):
 
 class AccountRename(BaseModel):
     name: str
+
+
+class AccountLimitsUpdate(BaseModel):
+    daily_loss_limit: float | None = Field(default=None, gt=0)
+    max_loss_limit: float | None = Field(default=None, gt=0)
+
+
+class BackupSettingsUpdate(BaseModel):
+    backup_dir: str = ""
 
 
 class AccountConnectionUpdate(BaseModel):
@@ -517,6 +599,7 @@ def api_overview(accounts: str | None = None, tags: str | None = None, tag_logic
         "expectancy": summary["expectancy"],
         "start_balance": round(start_balance, 2),
         "current_balance": round(start_balance + total_net, 2),
+        "prop_limits": prop_limit_status(keys),
     }
 
 
@@ -540,11 +623,17 @@ def api_analytics_equity(accounts: str | None = None, tags: str | None = None, t
                           strategies: str | None = None):
     keys = _parse_keys(accounts)
     days = db.list_days(keys, _parse_keys(tags), tag_logic, _parse_keys(strategies))
-    if start:
-        days = [d for d in days if d["day"] >= start]
-    if end:
-        days = [d for d in days if d["day"] <= end]
-    return an.equity_and_drawdown(days, compute_start_balance(keys))
+    # Tage vor dem Zeitraum fliessen in den Startwert ein, statt wegzufallen -
+    # sonst begann die Kurve eines Zeitraums beim Startkapital und zeigte nicht
+    # den tatsaechlichen Kontostand (der Drawdown stimmte trotzdem, er ist relativ).
+    before = 0.0
+    in_range = []
+    for d in days:
+        if start and d["day"] < start:
+            before += d["net_usd"]
+        elif not end or d["day"] <= end:
+            in_range.append(d)
+    return an.equity_and_drawdown(in_range, compute_start_balance(keys) + before)
 
 
 @app.get("/api/analytics/breakdown")
@@ -555,17 +644,19 @@ def api_analytics_breakdown(dimension: str, accounts: str | None = None, tags: s
         raise HTTPException(400, f"Unbekannte Dimension '{dimension}'.")
     trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end,
                                           _parse_keys(strategies))
-    ctx = an.build_context(trades)
+    ctx = an.build_context(trades, dimension)
     return {"dimension": dimension, "label": an.DIMENSIONS[dimension]["label"], "rows": an.breakdown(trades, dimension, ctx)}
 
 
 @app.get("/api/analytics/distribution")
 def api_analytics_distribution(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
                                 start: str | None = None, end: str | None = None, bins: int = 10,
-                                strategies: str | None = None):
+                                strategies: str | None = None, metric: str = "net"):
+    if metric not in ("net", "r"):
+        raise HTTPException(400, "metric muss 'net' oder 'r' sein.")
     trades = db.list_trades_for_analytics(_parse_keys(accounts), _parse_keys(tags), tag_logic, start, end,
                                           _parse_keys(strategies))
-    return an.pnl_distribution(trades, min(max(bins, 4), 24))
+    return an.pnl_distribution(trades, min(max(bins, 4), 24), metric)
 
 
 @app.get("/api/week/{iso_year}/{iso_week}")
@@ -635,6 +726,14 @@ def api_rename_account(account_id: int, payload: AccountRename):
     return {"ok": True}
 
 
+@app.put("/api/accounts/{account_id}/limits")
+def api_update_account_limits(account_id: int, payload: AccountLimitsUpdate):
+    if not db.get_account(account_id):
+        raise HTTPException(404, "Konto nicht gefunden.")
+    db.set_account_limits(account_id, payload.daily_loss_limit, payload.max_loss_limit)
+    return {"ok": True}
+
+
 @app.post("/api/trades/reassign")
 def api_reassign_trades(payload: ReassignTrades):
     if not db.get_account(payload.account_id):
@@ -649,7 +748,28 @@ def api_delete_account(account_id: int):
     return {"ok": True}
 
 
+class SyncBusy(Exception):
+    pass
+
+
+# Das MetaTrader5-Paket haelt eine einzige globale Terminal-Verbindung und ist
+# nicht threadsicher. Seit der Start-Sync im Hintergrund laeuft (siehe
+# _startup_tasks), koennte ein Klick auf "Jetzt synchronisieren" sonst
+# gleichzeitig ein zweites initialize() absetzen.
+_SYNC_LOCK = threading.Lock()
+_SYNC_LOCK_WAIT = 30
+
+
 def _run_account_sync(account: dict, full: bool = False) -> dict:
+    if not _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_WAIT):
+        raise SyncBusy("Es läuft bereits ein Sync – bitte kurz warten und erneut versuchen.")
+    try:
+        return _run_account_sync_locked(account, full)
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _run_account_sync_locked(account: dict, full: bool = False) -> dict:
     """Fuehrt den Sync fuer ein einzelnes Konto aus und schreibt Trades, last_sync und
     Kontostand in die DB. Gemeinsam genutzt vom manuellen Sync-Button (api_sync_account)
     und vom automatischen Start-Sync (_startup_sync_mt5_accounts) - Fehlerbehandlung ist
@@ -692,7 +812,9 @@ def _startup_sync_accounts():
     haengender Broker-Login, fehlende Sync-Datei) wird nur geloggt statt dem Nutzer
     angezeigt: ein Fehlerstreifen direkt beim Oeffnen der App wirkt eher wie ein Bug
     in der App als wie ein Sync-Problem, und der manuelle Sync-Button zeigt denselben
-    Fehler ohnehin sofort wieder an, falls er anhaelt."""
+    Fehler ohnehin sofort wieder an, falls er anhaelt. Gibt die Zahl neu
+    eingefuegter Trades zurueck (Frontend laedt nur dann neu)."""
+    inserted = 0
     for account in db.list_accounts():
         if account["platform"] not in ("mt5", "ninjatrader"):
             continue
@@ -701,7 +823,7 @@ def _startup_sync_accounts():
         full_account = db.get_account(account["id"])  # list_accounts() liefert bewusst kein Passwort
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            pool.submit(_run_account_sync, full_account).result(timeout=STARTUP_SYNC_TIMEOUT)
+            inserted += pool.submit(_run_account_sync, full_account).result(timeout=STARTUP_SYNC_TIMEOUT)["inserted"]
         except concurrent.futures.TimeoutError:
             logger.warning(
                 "Start-Sync '%s': nach %ss abgebrochen (haengender Broker-Login?).",
@@ -714,6 +836,35 @@ def _startup_sync_accounts():
             # einem blockierenden MT5-Aufruf - darauf warten wuerde den Start-Sync genau
             # der Situation aussetzen, vor der der Timeout eigentlich schuetzen soll.
             pool.shutdown(wait=False)
+    return inserted
+
+
+@app.get("/api/startup-status")
+def api_startup_status():
+    return STARTUP_STATE
+
+
+@app.get("/api/backup")
+def api_backup_status():
+    return backup.status()
+
+
+@app.put("/api/backup")
+def api_backup_settings(payload: BackupSettingsUpdate):
+    path = payload.backup_dir.strip()
+    if path and not Path(path).is_absolute():
+        raise HTTPException(400, "Bitte einen vollständigen Pfad angeben (z. B. D:\\Backups\\Trade-Journal).")
+    db.set_app_setting("backup_dir", path)
+    return backup.status()
+
+
+@app.post("/api/backup/run")
+def api_backup_run():
+    try:
+        result = backup.run_backup()
+    except Exception as e:
+        raise HTTPException(500, f"Backup fehlgeschlagen: {e}")
+    return {**backup.status(), **result}
 
 
 @app.post("/api/accounts/{account_id}/sync")
@@ -724,6 +875,8 @@ def api_sync_account(account_id: int, full: bool = False):
     error_cls = BROKER_ERRORS.get(account["platform"], Exception)
     try:
         return _run_account_sync(account, full=full)
+    except SyncBusy as e:
+        raise HTTPException(409, str(e))
     except error_cls as e:
         raise HTTPException(400, str(e))
 

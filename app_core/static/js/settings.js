@@ -60,6 +60,7 @@ export async function openSettings() {
     () => setAllCollapsibleCards(content, SETTINGS_COLLAPSE_KEY, true));
   renderFontSettings();
   renderEarningsTickerSettings();
+  await renderBackupSettings();
   await renderSettingsAccountDelete();
   await renderTagsSettings();
   await renderJournalTemplatesSettings();
@@ -322,7 +323,7 @@ async function renderTagsList() {
         const msg = s.trade_count
           ? `Tag "${t.name}" wirklich löschen? Er ist ${s.trade_count} Trade(s) zugewiesen - die Zuordnung geht dabei verloren.`
           : `Tag "${t.name}" wirklich löschen?`;
-        if (!confirm(msg)) return;
+        if (!await confirmDelete(msg, false)) return;
         await api(`/api/tags/${t.id}`, { method: "DELETE" });
         invalidateTagsCache();
         await renderTagsList();
@@ -333,6 +334,54 @@ async function renderTagsList() {
     }
     list.appendChild(block);
   }
+}
+
+function backupStatusText(b) {
+  const parts = [`Ziel: ${b.target}`];
+  parts.push(b.last_at ? `Letzte Sicherung: ${new Date(b.last_at).toLocaleString("de-DE")}` : "Noch keine Sicherung.");
+  if (b.last_error) parts.push(`Letzter Fehler: ${b.last_error}`);
+  return parts.join(" · ");
+}
+
+async function renderBackupSettings() {
+  const input = document.getElementById("backup-dir-input");
+  const statusEl = document.getElementById("backup-status");
+  const runBtn = document.getElementById("backup-run-btn");
+  const show = (b) => {
+    statusEl.textContent = backupStatusText(b);
+    statusEl.classList.toggle("neg", !!b.last_error);
+  };
+  const b = await api("/api/backup");
+  input.value = b.backup_dir;
+  input.placeholder = `Zielordner (leer = ${b.default_dir})`;
+  show(b);
+
+  document.getElementById("backup-form").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      show(await api("/api/backup", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backup_dir: input.value.trim() }),
+      }));
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.classList.add("neg");
+    }
+  };
+  runBtn.onclick = async () => {
+    runBtn.disabled = true;
+    statusEl.textContent = "Sichere …";
+    try {
+      const res = await api("/api/backup/run", { method: "POST" });
+      show(res);
+      statusEl.textContent += ` · ${res.images_copied} neue Bilder kopiert`;
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.classList.add("neg");
+    } finally {
+      runBtn.disabled = false;
+    }
+  };
 }
 
 async function renderSettingsAccountDelete() {

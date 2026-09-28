@@ -134,6 +134,16 @@ def _bucket_followed_plan(t: dict, ctx: dict) -> list[tuple[str, str, object]]:
     return [("yes", "Ja", 0)] if fp else [("no", "Nein", 1)]
 
 
+def _bucket_rules(t: dict, ctx: dict) -> list[tuple[str, str, object]]:
+    """Regel-Einhaltung am Trade selbst (trade_rule_status), nicht das
+    Tagesjournal wie followed_plan - gleiche Ableitung wie "Plan befolgt" auf
+    der Trade-Seite: eingehalten, wenn jede beantwortete Regel auf Ja steht."""
+    v = ctx["rules"].get(t["id"])
+    if v is None:
+        return [("none", "Nicht bewertet", 9999)]
+    return [("yes", "Alle eingehalten", 0)] if v else [("no", "Regel gebrochen", 1)]
+
+
 # sort: "sort_key" ordnet nach dem dritten Tupel-Element (natuerliche Ordnung,
 # z.B. Wochentag/Uhrzeit/Bewertung), "net_desc" nach bestem Netto-Ergebnis
 # zuerst (z.B. Instrument/Konto/Tag, wo es keine natuerliche Reihenfolge gibt).
@@ -150,7 +160,8 @@ DIMENSIONS: dict[str, dict] = {
     "volume": {"label": "Positionsgroesse", "bucket": _bucket_volume, "sort": "sort_key"},
     "rating": {"label": "Tagesbewertung", "bucket": _bucket_rating, "sort": "sort_key"},
     "mood": {"label": "Verfassung", "bucket": _bucket_mood, "sort": "sort_key"},
-    "followed_plan": {"label": "Plan befolgt", "bucket": _bucket_followed_plan, "sort": "sort_key"},
+    "followed_plan": {"label": "Plan befolgt (Tagesjournal)", "bucket": _bucket_followed_plan, "sort": "sort_key"},
+    "rules": {"label": "Regeln eingehalten (Trade)", "bucket": _bucket_rules, "sort": "sort_key"},
 }
 
 # Kennzeichnet Dimensionen, die Journal-Tagesdaten brauchen - baut build_context()
@@ -158,18 +169,31 @@ DIMENSIONS: dict[str, dict] = {
 JOURNAL_DIMENSIONS = {"rating", "mood", "followed_plan"}
 
 
-def build_context(trades: list[dict]) -> dict:
-    """Gemeinsamer Kontext fuer breakdown(): Konto-Namen + Journal-Tagesdaten,
-    je einmal geladen statt pro Dimension/Trade neu."""
-    with db.get_conn():  # beide Abfragen ueber eine Verbindung
-        accounts = {a["id"]: a["name"] for a in db.list_accounts()}
-        # Auch archivierte Strategien, sonst stuenden deren Trades ohne Namen da.
+def build_context(trades: list[dict], dimension: str | None = None) -> dict:
+    """Gemeinsamer Kontext fuer breakdown(): Konto-Namen, Journal-Tagesdaten und
+    Regel-Einhaltung, je einmal geladen statt pro Dimension/Trade neu. Journal
+    und Regeln nur, wenn die Dimension sie braucht (dimension=None laedt alles)."""
+    with db.get_conn():  # alle Abfragen ueber eine Verbindung
+        # Auch archivierte Konten/Strategien, sonst stuenden deren Trades ohne Namen da.
+        accounts = {a["id"]: a["name"] for a in db.list_accounts(include_archived=True)}
         strategies = {s["id"]: s["name"] for s in db.list_strategies(include_archived=True)}
-        if not trades:
-            return {"accounts": accounts, "strategies": strategies, "journal": {}}
-        days = [t["day"] for t in trades]
-        journal = db.journal_day_details(min(days), max(days))
-        return {"accounts": accounts, "strategies": strategies, "journal": journal}
+        journal: dict = {}
+        rules: dict = {}
+        if trades and (dimension is None or dimension in JOURNAL_DIMENSIONS):
+            days = [t["day"] for t in trades]
+            journal = db.journal_day_details(min(days), max(days))
+        if trades and dimension in (None, "rules"):
+            rules = db.trade_rule_compliance()
+        return {"accounts": accounts, "strategies": strategies, "journal": journal, "rules": rules}
+
+
+def r_multiple(t: dict) -> float | None:
+    """Netto-Ergebnis in Vielfachen des Risikos - wie auf der Trade-Seite
+    (siehe trades.js). None ohne hinterlegtes Risiko."""
+    risk = t.get("risk_usd")
+    if not risk or risk <= 0:
+        return None
+    return t["net_usd"] / risk
 
 
 def trade_summary(trades: list[dict]) -> dict:
@@ -182,6 +206,7 @@ def trade_summary(trades: list[dict]) -> dict:
             profit_factor=None, avg_win=0.0, avg_loss=0.0, expectancy=0.0,
             best_trade=0.0, worst_trade=0.0, gross_profit=0.0, gross_loss=0.0,
             avg_duration_sec=0.0, long_count=0, short_count=0,
+            r_trade_count=0, avg_r=None, total_r=None,
         )
     nets = [t["net_usd"] for t in trades]
     wins = [v for v in nets if v > 0]
@@ -191,6 +216,7 @@ def trade_summary(trades: list[dict]) -> dict:
     gross_loss = -sum(losses)
     profit_factor = (gross_profit / gross_loss) if gross_loss else None
     durations = [_duration_minutes(t) * 60 for t in trades]
+    r_values = [r for r in (r_multiple(t) for t in trades) if r is not None]
     return dict(
         trade_count=n,
         total_net=round(total_net, 2),
@@ -207,6 +233,11 @@ def trade_summary(trades: list[dict]) -> dict:
         avg_duration_sec=round(sum(durations) / n, 1),
         long_count=sum(1 for t in trades if t["direction"] == "Long"),
         short_count=sum(1 for t in trades if t["direction"] == "Short"),
+        # R nur ueber Trades mit hinterlegtem Risiko - r_trade_count zeigt,
+        # auf wie vielen Trades der Wert steht (Rest fehlt, nicht 0 R)
+        r_trade_count=len(r_values),
+        avg_r=round(sum(r_values) / len(r_values), 2) if r_values else None,
+        total_r=round(sum(r_values), 2) if r_values else None,
     )
 
 
@@ -234,12 +265,18 @@ def breakdown(trades: list[dict], dimension: str, ctx: dict) -> list[dict]:
     return rows
 
 
-def pnl_distribution(trades: list[dict], bins: int = 10) -> dict:
+def pnl_distribution(trades: list[dict], bins: int = 10, metric: str = "net") -> dict:
     """Histogramm der Netto-Ergebnisse je Trade - macht sichtbar, ob Gewinne/
-    Verluste eher gleichmaessig oder von wenigen Ausreissern getragen sind."""
-    nets = [t["net_usd"] for t in trades]
+    Verluste eher gleichmaessig oder von wenigen Ausreissern getragen sind.
+    metric="r" rechnet in R-Multiples (nur Trades mit hinterlegtem Risiko)."""
+    if metric == "r":
+        nets = [r for r in (r_multiple(t) for t in trades) if r is not None]
+        label_fmt = "{:.1f}"
+    else:
+        nets = [t["net_usd"] for t in trades]
+        label_fmt = "{:,.0f}"
     if not nets:
-        return {"bins": [], "avg_win": 0.0, "avg_loss": 0.0, "largest_win": 0.0, "largest_loss": 0.0, "trade_count": 0}
+        return {"metric": metric, "bins": [], "avg_win": 0.0, "avg_loss": 0.0, "largest_win": 0.0, "largest_loss": 0.0, "trade_count": 0}
     lo, hi = min(nets), max(nets)
     if lo == hi:
         lo, hi = lo - 1, hi + 1
@@ -253,12 +290,14 @@ def pnl_distribution(trades: list[dict], bins: int = 10) -> dict:
         b_lo = lo + i * width
         b_hi = b_lo + width
         bucket_rows.append({
-            "label": f"{b_lo:,.0f} … {b_hi:,.0f}".replace(",", "."),
+            "label": f"{label_fmt.format(b_lo)} … {label_fmt.format(b_hi)}".replace(",", "X").replace(".", ",").replace("X", ".")
+                     if metric == "r" else f"{b_lo:,.0f} … {b_hi:,.0f}".replace(",", "."),
             "range_lo": round(b_lo, 2), "range_hi": round(b_hi, 2), "count": counts[i],
         })
     wins = [v for v in nets if v > 0]
     losses = [v for v in nets if v < 0]
     return {
+        "metric": metric,
         "bins": bucket_rows,
         "trade_count": len(nets),
         "avg_win": round(sum(wins) / len(wins), 2) if wins else 0.0,

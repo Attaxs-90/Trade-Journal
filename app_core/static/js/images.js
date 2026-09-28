@@ -1,6 +1,7 @@
 /* Bild-Upload, Miniaturen und Lightbox. */
 
 import { api, attachOutsideClose, state } from './core.js';
+import { confirmDelete } from './dialogs.js';
 import { populateDay } from './share.js';
 import { populateTrade } from './trades.js';
 
@@ -22,7 +23,7 @@ export function imageThumbEl(img, sizeClass, onDeleted) {
     delBtn.textContent = "×";
     delBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm("Bild wirklich löschen?")) return;
+      if (!await confirmDelete("Bild wirklich löschen?", false)) return;
       await api(`/api/images/${img.id}`, { method: "DELETE" });
       await onDeleted();
     });
@@ -212,7 +213,7 @@ document.getElementById("lightbox-save").addEventListener("click", (e) => {
 });
 document.getElementById("lightbox-delete").addEventListener("click", async () => {
   if (!lightboxCurrentImage) return;
-  if (!confirm("Bild wirklich löschen?")) return;
+  if (!await confirmDelete("Bild wirklich löschen?", false)) return;
   await api(`/api/images/${lightboxCurrentImage.id}`, { method: "DELETE" });
   closeLightbox();
   if (document.getElementById("modal-overlay").classList.contains("visible")) {
