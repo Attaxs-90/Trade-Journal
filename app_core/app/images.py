@@ -34,6 +34,12 @@ def _flatten(img: Image.Image) -> Image.Image:
     return img.convert("RGB")
 
 
+def thumb_name_for(filename: str) -> str:
+    """<name>.<ext> -> <name>_thumb.<ext> - Namensschema der Thumbnails."""
+    stem, dot, ext = filename.rpartition(".")
+    return f"{stem}_thumb.{ext}" if dot else f"{filename}_thumb"
+
+
 def save_image(raw_bytes: bytes, name_hint: str) -> tuple[str, str]:
     """Verarbeitet Bild-Bytes, speichert Voll- und Thumbnail-Version als WebP
     (kleinere Dateien bei gleicher bzw. besserer Qualitaet als JPEG).
@@ -51,7 +57,7 @@ def save_image(raw_bytes: bytes, name_hint: str) -> tuple[str, str]:
 
     uid = uuid.uuid4().hex[:8]
     filename = f"{name_hint}_{uid}.webp"
-    thumb_filename = f"{name_hint}_{uid}_thumb.webp"
+    thumb_filename = thumb_name_for(filename)
     try:
         _resized(img, MAX_WIDTH).save(IMAGES_DIR / filename, "WEBP", quality=WEBP_QUALITY)
         _resized(img, MAX_THUMB_WIDTH).save(IMAGES_DIR / thumb_filename, "WEBP", quality=THUMB_QUALITY)

@@ -14,7 +14,10 @@ import { renderTradeTagCell } from './tags.js';
 let activeTradeNote = null;
 
 async function saveActiveTradeNote() {
-  const n = activeTradeNote;
+  await saveTradeNote(activeTradeNote);
+}
+
+async function saveTradeNote(n) {
   if (!n || !n.dirty) return;
   n.dirty = false;
   await api(`/api/trades/${n.tradeId}/notes`, {
@@ -81,9 +84,12 @@ export async function populateTrade(container, tradeId) {
 
   const noteInput = container.querySelector(".trade-note-input");
   noteInput.value = trade.notes || "";
-  activeTradeNote = { tradeId: trade.id, input: noteInput, dirty: false };
-  noteInput.oninput = () => { activeTradeNote.dirty = true; };
-  noteInput.onblur = () => saveActiveTradeNote();
+  // Lokale Referenz statt activeTradeNote in den Handlern - siehe gleiche
+  // Begruendung in journal.js (verspaetet fertiges populateTrade beim Blaettern).
+  const note = { tradeId: trade.id, input: noteInput, dirty: false };
+  activeTradeNote = note;
+  noteInput.oninput = () => { note.dirty = true; activeTradeNote = note; };
+  noteInput.onblur = () => saveTradeNote(note);
 
   const imgStrip = container.querySelector(".trade-images");
   imgStrip.innerHTML = "";
@@ -108,9 +114,13 @@ export async function populateTrade(container, tradeId) {
 
   const prevBtn = container.querySelector(".trade-prev");
   const nextBtn = container.querySelector(".trade-next");
+  // Dieselbe Sortierung wie die Trades-Liste (overview.js), damit die Pfeile
+  // der Reihenfolge folgen, aus der der Trade geoeffnet wurde.
+  const sort = state.tradesSort || { key: "day", dir: "desc" };
+  const sortQS = `sort=${sort.key}&dir=${sort.dir}`;
   const [prevRes, nextRes] = await Promise.all([
-    api(withFilter(`/api/trades/${tradeId}/neighbor?to=prev&sort=day&dir=desc`)),
-    api(withFilter(`/api/trades/${tradeId}/neighbor?to=next&sort=day&dir=desc`)),
+    api(withFilter(`/api/trades/${tradeId}/neighbor?to=prev&${sortQS}`)),
+    api(withFilter(`/api/trades/${tradeId}/neighbor?to=next&${sortQS}`)),
   ]);
   prevBtn.disabled = !prevRes.id;
   nextBtn.disabled = !nextRes.id;

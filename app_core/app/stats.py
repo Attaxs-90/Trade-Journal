@@ -96,8 +96,11 @@ def compute_start_balance(account_keys: list[str] | None) -> float:
     der Trades, damit Kurve/Kontostand deckungsgleich mit dem echten Broker-
     Konto bleiben. Nur ohne Sync zaehlt das manuell eingetragene starting_balance.
     Gemeinsam genutzt von der Uebersicht und den Auswertungen (kein Duplikat)."""
+    # Archivierte Konten zaehlen mit: ihre Trades stecken weiter in jeder
+    # Netto-Summe, und die Filter bieten sie als "(geloescht)" an - ohne ihr
+    # Startkapital lagen Kontostand und Equity-Kurve um genau diesen Betrag daneben.
     with db.get_conn():  # beide Abfragen ueber eine Verbindung
-        all_accounts = db.list_accounts()
+        all_accounts = db.list_accounts(include_archived=True)
         net_totals = db.account_net_totals()
     if account_keys is None:
         included = all_accounts
@@ -127,8 +130,11 @@ def prop_limit_status(account_keys: list[str] | None) -> list[dict]:
       kein Trailing-Drawdown).
     Beides auf Basis geschlossener Trades - offene Positionen kennt das Journal
     nicht, der echte Stand beim Broker kann deshalb schlechter sein."""
+    # Archivierte Konten nur bei ausdruecklicher Auswahl - ungefiltert soll ein
+    # geloeschtes Konto keine Limit-Warnung mehr ausloesen.
     with db.get_conn():
-        accounts = [a for a in db.list_accounts() if a["daily_loss_limit"] or a["max_loss_limit"]]
+        accounts = [a for a in db.list_accounts(include_archived=account_keys is not None)
+                    if a["daily_loss_limit"] or a["max_loss_limit"]]
         if not accounts:
             return []
         net_totals = db.account_net_totals()

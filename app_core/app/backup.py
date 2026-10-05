@@ -11,8 +11,10 @@ die Broker-Passwoerter in der Kopie geleert, weil trades.db sie im Klartext
 enthaelt und ein Cloud-Ordner sie sonst mit hochladen wuerde - nach einer
 Wiederherstellung aus so einer Sicherung muessen sie neu eingetragen werden.
 """
+import os
 import shutil
 import sqlite3
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -48,20 +50,36 @@ def status() -> dict:
 
 def _copy_db(dest: Path, scrub_passwords: bool):
     """sqlite3-Backup-API statt Dateikopie: liefert auch bei laufendem Server
-    und offener WAL-Datei einen in sich konsistenten Stand."""
-    tmp = dest.with_suffix(".tmp")
-    src = sqlite3.connect(DB_PATH, timeout=10)
-    out = sqlite3.connect(tmp)
+    und offener WAL-Datei einen in sich konsistenten Stand.
+
+    Mit scrub_passwords entsteht die Zwischenkopie im lokalen Temp-Ordner,
+    nicht im Ziel: dort laege sie sonst mit Klartext-Passwoertern, bis UPDATE
+    und VACUUM durch sind - ein Cloud-Client (OneDrive) koennte sie in dem
+    Moment hochladen, und bei einem Fehler bliebe sie dauerhaft liegen. Ins
+    Ziel kommt nur die fertig geleerte Datei."""
+    if scrub_passwords:
+        fd, name = tempfile.mkstemp(suffix=".db", prefix="trade_journal_backup_")
+        os.close(fd)
+        tmp = Path(name)
+    else:
+        tmp = dest.with_suffix(".tmp")
     try:
-        src.backup(out)
-        if scrub_passwords:
-            out.execute("UPDATE broker_accounts SET password = ''")
-            out.commit()
-            out.execute("VACUUM")  # geleerte Passwoerter nicht in freien Seiten stehen lassen
+        src = sqlite3.connect(DB_PATH, timeout=10)
+        out = sqlite3.connect(tmp)
+        try:
+            src.backup(out)
+            if scrub_passwords:
+                out.execute("UPDATE broker_accounts SET password = ''")
+                out.commit()
+                out.execute("VACUUM")  # geleerte Passwoerter nicht in freien Seiten stehen lassen
+        finally:
+            out.close()
+            src.close()
+        # move statt replace: Temp-Ordner und Ziel liegen oft auf
+        # verschiedenen Laufwerken, replace() kann das nicht
+        shutil.move(str(tmp), str(dest))
     finally:
-        out.close()
-        src.close()
-    tmp.replace(dest)
+        tmp.unlink(missing_ok=True)
 
 
 def _sync_images(dest_dir: Path) -> int:

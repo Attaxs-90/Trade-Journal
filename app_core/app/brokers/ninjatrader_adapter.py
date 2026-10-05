@@ -37,7 +37,18 @@ def fetch_closed_trades(login: str, sync_path: str, from_date: datetime, to_date
         )
 
     content = path.read_text(encoding="utf-8-sig", errors="replace")
-    fills = [f for f in parse_csv(content) if not login or f["account"] == login]
+    all_fills = parse_csv(content)
+    if not login:
+        # Ohne Kontonamen nur, wenn die Datei eindeutig ist - teilen sich
+        # mehrere NinjaTrader-Konten die Datei, landeten sonst die Trades aller
+        # Konten in diesem einen.
+        names = sorted({f["account"] for f in all_fills})
+        if len(names) > 1:
+            raise NinjaTraderError(
+                "Die Sync-Datei enthält mehrere NinjaTrader-Konten (" + ", ".join(names) + ") - "
+                "bitte in den Kontoeinstellungen den Kontonamen eintragen."
+            )
+    fills = [f for f in all_fills if not login or f["account"] == login]
 
     # Komplette Datei paaren, from_date/to_date bewusst NICHT zum Filtern nutzen:
     # TradeJournalSync.cs schreibt NinjaTraders lokale Zeit ohne Zeitzone, waehrend

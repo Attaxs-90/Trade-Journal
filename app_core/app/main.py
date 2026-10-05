@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import sqlite3
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import backup, db, earnings, news, weights
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
 from .config import IMAGES_DIR
-from .images import save_image, delete_image_files
+from .images import save_image, delete_image_files, thumb_name_for
 from .parser import parse_csv, pair_trades
 from .stats import day_stats, build_week_payload, build_month_payload, compute_start_balance, prop_limit_status
 from . import analytics as an
@@ -669,6 +670,10 @@ def api_analytics_distribution(accounts: str | None = None, tags: str | None = N
 @app.get("/api/week/{iso_year}/{iso_week}")
 def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: str | None = None,
               tag_logic: str = "or", strategies: str | None = None):
+    try:
+        date.fromisocalendar(iso_year, iso_week, 1)
+    except ValueError:
+        raise HTTPException(400, "Ungültige Kalenderwoche.")
     return build_week_payload(iso_year, iso_week, _parse_keys(accounts), _parse_keys(tags), tag_logic,
                               _parse_keys(strategies))
 
@@ -676,6 +681,8 @@ def api_week(iso_year: int, iso_week: int, accounts: str | None = None, tags: st
 @app.get("/api/month/{year}/{month}")
 def api_month(year: int, month: int, accounts: str | None = None, tags: str | None = None,
                tag_logic: str = "or", strategies: str | None = None):
+    if not (1 <= month <= 12 and 1 <= year <= 9999):
+        raise HTTPException(400, "Ungültiger Monat.")
     return build_month_payload(year, month, _parse_keys(accounts), _parse_keys(tags), tag_logic,
                                _parse_keys(strategies))
 
@@ -941,7 +948,10 @@ def api_add_tag(payload: TagCreate):
 
 @app.put("/api/tags/{tag_id}")
 def api_update_tag(tag_id: int, payload: TagCreate):
-    db.update_tag(tag_id, payload.name, payload.color, payload.tag_group)
+    try:
+        db.update_tag(tag_id, payload.name, payload.color, payload.tag_group)
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, f"Tag '{payload.name}' existiert bereits.")
     return {"ok": True}
 
 
@@ -1125,7 +1135,9 @@ def api_move_notebook(node_id: int, payload: NotebookNodeMove):
 
 @app.delete("/api/notebooks/{node_id}")
 def api_delete_notebook(node_id: int):
-    db.delete_notebook_node(node_id)
+    _, orphan_files = db.delete_notebook_node(node_id)
+    for filename in orphan_files:
+        delete_image_files(filename, thumb_name_for(filename))
     return {"ok": True}
 
 

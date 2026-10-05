@@ -53,22 +53,28 @@ export const JOURNAL_TOOLBAR = [
    rausgeschrieben werden koennen. */
 export let activeJournal = null;
 
-function journalStatus(text, tone = "") {
-  if (!activeJournal || !activeJournal.statusEl) return;
-  activeJournal.statusEl.textContent = text;
-  activeJournal.statusEl.className = "journal-status " + tone;
+/* Alle Funktionen hier bekommen den Editor (j) explizit, statt das globale
+   activeJournal zu lesen: das kann zwischendurch auf einen anderen Editor
+   zeigen (null nach clearActiveJournal(), oder ein verspaetet fertig
+   gewordener Mount beim schnellen Blaettern) - Eingaben landeten dann beim
+   falschen Eintrag. */
+function journalStatus(j, text, tone = "") {
+  if (!j || !j.statusEl) return;
+  j.statusEl.textContent = text;
+  j.statusEl.className = "journal-status " + tone;
 }
 
-function journalMarkDirty() {
-  if (!activeJournal) return;
-  activeJournal.dirty = true;
-  journalStatus("Änderungen…", "pending");
-  clearTimeout(activeJournal.timer);
-  activeJournal.timer = setTimeout(() => saveJournal(), JOURNAL_AUTOSAVE_MS);
+function journalMarkDirty(j) {
+  // Der Editor, in dem gerade getippt wird, ist der, den Ansichtswechsel und
+  // beforeunload rausschreiben muessen.
+  activeJournal = j;
+  j.dirty = true;
+  journalStatus(j, "Änderungen…", "pending");
+  clearTimeout(j.timer);
+  j.timer = setTimeout(() => saveJournal(false, j), JOURNAL_AUTOSAVE_MS);
 }
 
-export async function saveJournal(force = false) {
-  const j = activeJournal;
+export async function saveJournal(force = false, j = activeJournal) {
   if (!j || (!j.dirty && !force)) return;
   clearTimeout(j.timer);
   j.dirty = false;
@@ -87,20 +93,18 @@ export async function saveJournal(force = false) {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    journalStatus("Gespeichert", "saved");
+    journalStatus(j, "Gespeichert", "saved");
     if (j.onSaved) j.onSaved(res.entry);
   } catch (e) {
     j.dirty = true;
-    journalStatus("Nicht gespeichert: " + e.message, "error");
+    journalStatus(j, "Nicht gespeichert: " + e.message, "error");
   }
 }
 
 /* Loescht den Eintrag nach Bestaetigung (Loeschen-Button + Ja/Nein-Dialog =
    zwei Klicks, wie gewuenscht). Setzt den Editor danach leer statt ihn
    zu schliessen, damit sofort weitergeschrieben werden kann. */
-async function deleteJournalEntry() {
-  const j = activeJournal;
-  if (!j) return;
+async function deleteJournalEntry(j) {
   const label = j.entryType === "trade" ? `zu Trade #${j.refKey}` : `vom ${fmtDate(j.refKey)}`;
   if (!await confirmDelete(`Journal-Eintrag ${label} wirklich löschen?`, false)) return;
   clearTimeout(j.timer);
@@ -113,7 +117,7 @@ async function deleteJournalEntry() {
   j.tagIds.clear();
   j.host.querySelectorAll(".journal-score-btn.active, .journal-plan-btn.active").forEach(b => b.classList.remove("active"));
   j.host.querySelectorAll(".tag-chip-filter.active").forEach(c => c.classList.remove("active"));
-  journalStatus("Gelöscht", "saved");
+  journalStatus(j, "Gelöscht", "saved");
   if (j.onSaved) j.onSaved(null);
 }
 
@@ -161,6 +165,10 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
     getJournalTemplates(),
   ]);
   const entry = res.entry;
+  // Waehrend der Abfragen kann die Ansicht schon weiter sein (schnelles
+  // Blaettern mit den Pfeilen): dann gehoert dieser Mount zu einem Host, der
+  // nicht mehr angezeigt wird bzw. inzwischen einen anderen Eintrag zeigt.
+  if (!host.isConnected || host.dataset.journalRef !== refKey) return;
 
   const isTrade = entryType === "trade";
   host.innerHTML = `
@@ -197,7 +205,7 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
   });
   if (entry && entry.content_html) quill.clipboard.dangerouslyPasteHTML(entry.content_html);
 
-  activeJournal = {
+  const j = {
     refKey, quill, host, entryType, imageDay,
     dirty: false, timer: null,
     rating: entry ? entry.rating : null,
@@ -207,9 +215,10 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
     statusEl: host.querySelector(".journal-status"),
     onSaved: opts.onSaved || null,
   };
+  activeJournal = j;
 
   quill.on("text-change", (delta, old, source) => {
-    if (source === "user") journalMarkDirty();
+    if (source === "user") journalMarkDirty(j);
   });
 
   // Bilder nicht als base64 einbetten (das blaeht die Datenbank auf), sondern
@@ -235,29 +244,29 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
     const field = metric.dataset.metric;
     metric.querySelectorAll(".journal-score-btn").forEach(btn => {
       btn.addEventListener("click", () => {
-        activeJournal[field] = parseInt(btn.dataset.score, 10);
+        j[field] = parseInt(btn.dataset.score, 10);
         metric.querySelectorAll(".journal-score-btn").forEach(b => b.classList.toggle("active", b === btn));
-        journalMarkDirty();
+        journalMarkDirty(j);
       });
     });
     metric.querySelector(".journal-score-clear").addEventListener("click", () => {
-      activeJournal[field] = null;
+      j[field] = null;
       metric.querySelectorAll(".journal-score-btn").forEach(b => b.classList.remove("active"));
-      journalMarkDirty();
+      journalMarkDirty(j);
     });
   });
 
   const planButtons = host.querySelectorAll(".journal-plan-btn");
   const paintPlan = () => planButtons.forEach(b =>
-    b.classList.toggle("active", activeJournal.followedPlan !== null
-      && parseInt(b.dataset.plan, 10) === activeJournal.followedPlan));
+    b.classList.toggle("active", j.followedPlan !== null
+      && parseInt(b.dataset.plan, 10) === j.followedPlan));
   paintPlan();
   planButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const value = parseInt(btn.dataset.plan, 10);
-      activeJournal.followedPlan = activeJournal.followedPlan === value ? null : value;
+      j.followedPlan = j.followedPlan === value ? null : value;
       paintPlan();
-      journalMarkDirty();
+      journalMarkDirty(j);
     });
   });
 
@@ -267,12 +276,12 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
   } else {
     chipWrap.appendChild(buildTagChipGroups(
       tags,
-      (tag) => activeJournal.tagIds.has(tag.id),
+      (tag) => j.tagIds.has(tag.id),
       (tag, chip) => {
-        if (activeJournal.tagIds.has(tag.id)) activeJournal.tagIds.delete(tag.id);
-        else activeJournal.tagIds.add(tag.id);
+        if (j.tagIds.has(tag.id)) j.tagIds.delete(tag.id);
+        else j.tagIds.add(tag.id);
         chip.classList.toggle("active");
-        journalMarkDirty();
+        journalMarkDirty(j);
       },
     ));
   }
@@ -295,7 +304,7 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
         // erste Ueberschrift der Vorlage mit dem letzten vorhandenen Absatz.
         if (quill.getLength() > 1) quill.insertText(quill.getLength() - 1, "\n", "user");
         quill.clipboard.dangerouslyPasteHTML(quill.getLength() - 1, tpl.content_html, "user");
-        journalMarkDirty();
+        journalMarkDirty(j);
       });
       tplWrap.appendChild(btn);
     }
@@ -312,9 +321,9 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
   manageLink.addEventListener("click", () => goToJournalTemplateSettings());
   tplWrap.appendChild(manageLink);
 
-  host.querySelector(".journal-save-btn").addEventListener("click", () => saveJournal(true));
-  host.querySelector(".journal-delete-btn").addEventListener("click", () => deleteJournalEntry());
-  quill.root.addEventListener("blur", () => { if (activeJournal && activeJournal.dirty) saveJournal(); });
+  host.querySelector(".journal-save-btn").addEventListener("click", () => saveJournal(true, j));
+  host.querySelector(".journal-delete-btn").addEventListener("click", () => deleteJournalEntry(j));
+  quill.root.addEventListener("blur", () => { if (j.dirty) saveJournal(false, j); });
 }
 
 let cachedJournalTemplates = null;

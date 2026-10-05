@@ -44,8 +44,14 @@ def sync_account(account: dict, from_date, to_date) -> dict:
             from_date=from_date,
             to_date=to_date,
         )
+    try:
+        login = int(str(account["login"]).strip())
+    except ValueError:
+        raise MT5Error(
+            f"MT5-Login „{account['login']}“ ist keine Kontonummer - bitte in den Kontoeinstellungen korrigieren."
+        )
     return ADAPTERS[platform](
-        login=int(account["login"]),
+        login=login,
         password=account["password"],
         server=account["server"],
         from_date=from_date,

@@ -1,3 +1,4 @@
+import re
 import shutil
 import sqlite3
 import threading
@@ -1028,9 +1029,15 @@ def list_days(account_keys: list[str] | None = None, tag_keys: list[str] | None 
         return result
 
 
+# Sortier-Ausdruecke statt nackter Spalten: Zahlenspalten koennen NULL sein
+# (volume bei alten CSV-Importen) - ein Tupel-Vergleich mit NULL ist in SQLite
+# selbst NULL, adjacent_trade_id() faende solche Trades nie. COALESCE auf einen
+# sehr kleinen Wert behaelt die SQLite-Reihenfolge (NULL zuerst bei ASC) bei.
 TRADE_SORT_COLUMNS = {
-    "day": "day", "entry_time": "entry_time", "points": "points", "net_usd": "net_usd",
-    "direction": "direction", "volume": "volume", "entry_price": "entry_price", "exit_price": "exit_price",
+    "day": "day", "entry_time": "entry_time", "direction": "direction",
+    "points": "COALESCE(points, -1e308)", "net_usd": "COALESCE(net_usd, -1e308)",
+    "volume": "COALESCE(volume, -1e308)", "entry_price": "COALESCE(entry_price, -1e308)",
+    "exit_price": "COALESCE(exit_price, -1e308)",
 }
 
 
@@ -1080,7 +1087,7 @@ def list_trades(account_keys: list[str] | None = None, tag_keys: list[str] | Non
         total = conn.execute(f"SELECT COUNT(*) as n FROM trades {where}", params).fetchone()["n"]
         rows = conn.execute(
             f"""SELECT * FROM trades {where}
-               ORDER BY {sort_col} {sort_dir}, entry_time {sort_dir} LIMIT ? OFFSET ?""",
+               ORDER BY {sort_col} {sort_dir}, entry_time {sort_dir}, id {sort_dir} LIMIT ? OFFSET ?""",
             params + [limit, offset],
         ).fetchall()
         trades = _attach_tags([dict(r) for r in rows])
@@ -1119,6 +1126,8 @@ def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = N
     # Umkehrung - beides zusammen mit dem passenden Tupel-Vergleich, damit
     # Eintraege mit gleichem Sortierwert (z.B. gleicher Tag) ueber entry_time
     # als Tie-Breaker korrekt und ohne Dopplung/Ueberspringen durchlaufen werden.
+    # id als letzter Tie-Breaker: Copy-Trades auf mehreren Konten haben oft
+    # dieselbe entry_time und wurden vom strikten Vergleich sonst uebersprungen.
     forward = (to == "next") == (sort_dir == "ASC")
     op = ">" if forward else "<"
     query_dir = "ASC" if forward else "DESC"
@@ -1126,15 +1135,15 @@ def adjacent_trade_id(trade_id: int, to: str, account_keys: list[str] | None = N
         # Nur die beiden Sortierwerte des aktuellen Trades noetig - kein
         # get_trade(), das zusaetzlich Tags und Bild-Flags nachladen wuerde.
         current = conn.execute(
-            f"SELECT {sort_col} as sort_value, entry_time FROM trades WHERE id = ?", (trade_id,)
+            f"SELECT {sort_col} as sort_value, entry_time, id FROM trades WHERE id = ?", (trade_id,)
         ).fetchone()
         if not current:
             return None
         row = conn.execute(
             f"""SELECT id FROM trades
-               WHERE ({sort_col}, entry_time) {op} (?, ?) {where}
-               ORDER BY {sort_col} {query_dir}, entry_time {query_dir} LIMIT 1""",
-            [current["sort_value"], current["entry_time"]] + params,
+               WHERE ({sort_col}, entry_time, id) {op} (?, ?, ?) {where}
+               ORDER BY {sort_col} {query_dir}, entry_time {query_dir}, id {query_dir} LIMIT 1""",
+            [current["sort_value"], current["entry_time"], current["id"]] + params,
         ).fetchone()
         return row["id"] if row else None
 
@@ -1753,15 +1762,42 @@ def move_notebook_node(node_id: int, parent_id: int | None) -> dict:
         return get_notebook_node(node_id)
 
 
-def delete_notebook_node(node_id: int) -> int:
+# Erstes Zeichen kein Punkt: "/media/.." darf nie zu einem Loeschpfad werden.
+_MEDIA_REF = re.compile(r"/media/([^\"'?#\s/<>.][^\"'?#\s/<>]*)")
+
+
+def _media_still_referenced(conn, filename: str) -> bool:
+    """Steht die Datei noch irgendwo? Ein Bild kann per Kopieren/Einfuegen
+    in mehreren Notizen, Journal-Eintraegen oder Vorlagen stecken - und
+    Tages-/Trade-Bilder haben ihre eigene images-Zeile."""
+    like = f"%/media/{filename}%"
+    return conn.execute(
+        """SELECT 1 WHERE EXISTS (SELECT 1 FROM notebook_nodes WHERE content_html LIKE ?)
+              OR EXISTS (SELECT 1 FROM journal_entries WHERE content_html LIKE ?)
+              OR EXISTS (SELECT 1 FROM journal_templates WHERE content_html LIKE ?)
+              OR EXISTS (SELECT 1 FROM images WHERE filename = ? OR thumb_filename = ?)""",
+        (like, like, like, filename, filename),
+    ).fetchone() is not None
+
+
+def delete_notebook_node(node_id: int) -> tuple[int, list[str]]:
     """Loescht einen Knoten samt aller Nachfahren - manueller Kaskaden-Delete
     statt FK-Constraint, gleiches Vorgehen wie delete_trade()/delete_account()
-    in dieser Datei."""
+    in dieser Datei. Gibt (Anzahl, Bilddateien) zurueck: Notizbuch-Bilder
+    haben keine images-Zeile, ihre Dateien wuerden sonst nie mehr geloescht.
+    Nur Dateien, auf die nach dem Loeschen nichts mehr verweist - die
+    Dateiverwaltung selbst bleibt beim Aufrufer (images.py)."""
     with get_conn() as conn:
         ids = _notebook_descendant_ids(conn, node_id) | {node_id}
         placeholders = ",".join("?" for _ in ids)
+        filenames = set()
+        for r in conn.execute(
+            f"SELECT content_html FROM notebook_nodes WHERE id IN ({placeholders})", list(ids)
+        ).fetchall():
+            filenames.update(_MEDIA_REF.findall(r["content_html"] or ""))
         cur = conn.execute(f"DELETE FROM notebook_nodes WHERE id IN ({placeholders})", list(ids))
-        return cur.rowcount
+        orphans = sorted(f for f in filenames if not _media_still_referenced(conn, f))
+        return cur.rowcount, orphans
 
 
 # ---------- To-Do-Listen (verwaltet im Journal, angezeigt im rechten Menue) ----------
