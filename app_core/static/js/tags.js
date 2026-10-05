@@ -50,6 +50,10 @@ async function openTagPopover(button, trade, cell) {
       </label>`).join("");
     list.querySelectorAll("input").forEach(cb => {
       cb.addEventListener("change", async () => {
+        // Sicherheitsnetz: wurde die Zelle inzwischen neu gerendert (anderer
+        // Trade per Pfeil, Ansicht gewechselt), gehoert das Popover zu einem
+        // Trade, der nicht mehr angezeigt wird - nicht still dort speichern.
+        if (!cell.isConnected) { closeTagPopover(); return; }
         const tagIds = Array.from(list.querySelectorAll("input:checked")).map(i => parseInt(i.dataset.tagId));
         await api(`/api/trades/${trade.id}/tags`, {
           method: "PUT", headers: { "Content-Type": "application/json" },
@@ -73,11 +77,32 @@ async function openTagPopover(button, trade, cell) {
   });
 }
 
+/* Das Popover haengt am body, nicht an der Trade-Zelle - es ueberlebt also
+   jedes Neurendern darunter. Deshalb ueberall schliessen, wo der angezeigte
+   Trade wechselt (mountView, closeModal, renderCard der Tagesansicht). */
+export function closeTagPopover() {
+  document.getElementById("tag-popover").hidden = true;
+}
+
 function initTagPopover() {
   document.addEventListener("click", (e) => {
     const popover = document.getElementById("tag-popover");
     if (popover.hidden) return;
     if (!popover.contains(e.target) && !e.target.closest(".tag-add-btn")) popover.hidden = true;
   });
+  // Capture-Phase: laeuft vor dem Escape-Handler in calendar.js, damit
+  // Escape erst nur das Popover schliesst und nicht gleich das ganze Modal.
+  // Pfeiltasten schliessen es ebenfalls, weil sie auf der Trade-Seite den
+  // Trade wechseln.
+  document.addEventListener("keydown", (e) => {
+    const popover = document.getElementById("tag-popover");
+    if (popover.hidden) return;
+    if (e.key === "Escape") {
+      popover.hidden = true;
+      e.stopImmediatePropagation();
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      popover.hidden = true;
+    }
+  }, true);
 }
 initTagPopover();

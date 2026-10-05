@@ -1470,9 +1470,12 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
 }
 .tag-add-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
+/* z-index ueber .modal-overlay (100): die Tagesansicht laeuft auch im Modal
+   (Kalender-Klick), das Popover haengt aber am body - darunter war es
+   unsichtbar. Unter Lightbox (200) und Fehlerstreifen (1000). */
 .tag-popover {
   position: fixed;
-  z-index: 50;
+  z-index: 150;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;

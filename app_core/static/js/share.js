@@ -8,7 +8,7 @@ import { mountJournalEditor } from './journal.js';
 import { mountView, setActiveNav } from './overview.js';
 import { fmtDuration } from './settings.js';
 import { renderTradeStrategyPanel } from './strategies.js';
-import { renderTradeTagCell } from './tags.js';
+import { closeTagPopover, renderTradeTagCell } from './tags.js';
 import { tradeRMultiple } from './trades.js';
 
 /* ---------- Trade teilen (Canvas-Karte) ----------
@@ -434,6 +434,7 @@ export async function populateDay(container, day, opts = {}) {
     function renderCard() {
       const t = data.trades[activeIndex];
       const i = activeIndex;
+      closeTagPopover();  // gehoert sonst noch zum vorherigen Trade
       const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
       const hiLoBadge = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
       const ctx = { accountNames, cumVal: cumVals[i], cumClass, hiLoBadge };

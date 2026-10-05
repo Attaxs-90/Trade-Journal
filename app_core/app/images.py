@@ -20,6 +20,20 @@ def _resized(img: Image.Image, max_width: int) -> Image.Image:
     return img.resize((max_width, round(img.height * ratio)), Image.LANCZOS)
 
 
+def _flatten(img: Image.Image) -> Image.Image:
+    """Nach RGB wandeln. Ein reines convert("RGB") macht transparente Flaechen
+    schwarz (PNG mit Alpha, Paletten-PNG mit Transparenz) - deshalb vorher auf
+    weissen Hintergrund legen."""
+    if img.mode == "P" and "transparency" in img.info:
+        img = img.convert("RGBA")
+    if img.mode in ("RGBA", "LA", "PA"):
+        rgba = img.convert("RGBA")
+        bg = Image.new("RGB", rgba.size, (255, 255, 255))
+        bg.paste(rgba, mask=rgba.getchannel("A"))
+        return bg
+    return img.convert("RGB")
+
+
 def save_image(raw_bytes: bytes, name_hint: str) -> tuple[str, str]:
     """Verarbeitet Bild-Bytes, speichert Voll- und Thumbnail-Version als WebP
     (kleinere Dateien bei gleicher bzw. besserer Qualitaet als JPEG).
@@ -33,16 +47,18 @@ def save_image(raw_bytes: bytes, name_hint: str) -> tuple[str, str]:
     Bilder liegen koennen. Gibt (filename, thumb_filename) zurueck."""
     img = Image.open(io.BytesIO(raw_bytes))
     img = ImageOps.exif_transpose(img)  # Rotation von Handy-/Screenshot-Fotos korrigieren
-    img = img.convert("RGB")  # kein Alpha-Kanal noetig, spart zusaetzlich Platz
+    img = _flatten(img)  # kein Alpha-Kanal noetig, spart zusaetzlich Platz
 
     uid = uuid.uuid4().hex[:8]
     filename = f"{name_hint}_{uid}.webp"
-    full = _resized(img, MAX_WIDTH)
-    full.save(IMAGES_DIR / filename, "WEBP", quality=WEBP_QUALITY)
-
     thumb_filename = f"{name_hint}_{uid}_thumb.webp"
-    thumb = _resized(img, MAX_THUMB_WIDTH)
-    thumb.save(IMAGES_DIR / thumb_filename, "WEBP", quality=THUMB_QUALITY)
+    try:
+        _resized(img, MAX_WIDTH).save(IMAGES_DIR / filename, "WEBP", quality=WEBP_QUALITY)
+        _resized(img, MAX_THUMB_WIDTH).save(IMAGES_DIR / thumb_filename, "WEBP", quality=THUMB_QUALITY)
+    except Exception:
+        # Scheitert das Thumbnail, laege sonst die Vollversion ohne DB-Eintrag herum
+        delete_image_files(filename, thumb_filename)
+        raise
 
     return filename, thumb_filename
 

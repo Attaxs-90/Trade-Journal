@@ -9,7 +9,7 @@ import { clearActiveNotebookNote, flushNotebookNote } from './notebooks.js';
 import { mountHelpButton } from './help.js';
 import { openShareModal } from './share.js';
 import { bulkAssignStrategy } from './strategies.js';
-import { renderTradeTagCell } from './tags.js';
+import { closeTagPopover, renderTradeTagCell } from './tags.js';
 import { openTrade } from './trades.js';
 
 /* ---------- Views ---------- */
@@ -27,6 +27,7 @@ export async function mountView(templateId) {
   await flushNotebookNote();
   clearActiveNotebookNote();
   clearAppError();  // neue Ansicht - eine Meldung der vorherigen ist erledigt
+  closeTagPopover();
   const content = document.getElementById("content");
   content.innerHTML = "";
   content.appendChild(document.getElementById(templateId).content.cloneNode(true));

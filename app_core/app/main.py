@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -405,6 +406,12 @@ class BulkStrategyAssign(BaseModel):
 @app.post("/api/import")
 async def import_csv(file: UploadFile = File(...), account_id: int | None = Form(None)):
     raw = await _read_upload(file, MAX_CSV_BYTES)
+    # Parsen und Einfuegen sind synchron - im Threadpool statt direkt in der
+    # async-Funktion, sonst steht waehrenddessen der ganze Server (Event-Loop).
+    return await run_in_threadpool(_import_csv_sync, raw, account_id)
+
+
+def _import_csv_sync(raw: bytes, account_id: int | None) -> dict:
     content = raw.decode("utf-8-sig", errors="replace")
     try:
         fills = parse_csv(content)
@@ -888,11 +895,18 @@ async def api_upload_image(day: str, file: UploadFile = File(...), trade_id: int
         raise HTTPException(404, "Trade nicht gefunden.")
     raw = await _read_upload(file, MAX_IMAGE_BYTES)
     name_hint = f"{day}_trade{trade_id}" if trade_id is not None else f"{day}_tag"
+    # WebP-Kodierung grosser Screenshots dauert spuerbar - im Threadpool, damit
+    # der Event-Loop solange weiter andere Anfragen beantwortet.
     try:
-        filename, thumb_filename = save_image(raw, name_hint)
+        filename, thumb_filename = await run_in_threadpool(save_image, raw, name_hint)
     except Exception:
         raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
-    image_id = db.add_image(day, trade_id, filename, thumb_filename)
+    try:
+        image_id = db.add_image(day, trade_id, filename, thumb_filename)
+    except Exception:
+        # Ohne images-Zeile verweist nichts auf die Dateien - nicht verwaist liegen lassen
+        delete_image_files(filename, thumb_filename)
+        raise
     return {"id": image_id, "filename": filename, "thumb_filename": thumb_filename, "trade_id": trade_id}
 
 
@@ -1125,7 +1139,7 @@ async def api_upload_notebook_image(node_id: int, file: UploadFile = File(...)):
         raise HTTPException(404, "Notiz nicht gefunden.")
     raw = await _read_upload(file, MAX_IMAGE_BYTES)
     try:
-        filename, thumb_filename = save_image(raw, f"notiz_{node_id}")
+        filename, thumb_filename = await run_in_threadpool(save_image, raw, f"notiz_{node_id}")
     except Exception:
         raise HTTPException(400, "Datei konnte nicht als Bild verarbeitet werden.")
     return {"filename": filename, "thumb_filename": thumb_filename}

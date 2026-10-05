@@ -8,6 +8,7 @@ import { impactColorVar, NEWS_CURRENCIES, NEWS_EVENT_TYPES, NEWS_IMPACT_LEVELS, 
 import { flushNotebookNote } from './notebooks.js';
 import { mountView, setActiveNav } from './overview.js';
 import { populateDay } from './share.js';
+import { closeTagPopover } from './tags.js';
 
 /* Filter fuer die News-Markierungen im Kalender - eigener Zustand/eigener
    localStorage-Key, unabhaengig vom Newsbar-Filter (newsCalendarFilter in
@@ -396,6 +397,7 @@ export async function closeModal() {
   await flushJournal();
   await flushNotebookNote();
   document.getElementById("modal-overlay").classList.remove("visible");
+  closeTagPopover();
   if (modalOnClose) {
     const cb = modalOnClose;
     modalOnClose = null;
