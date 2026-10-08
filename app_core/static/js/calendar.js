@@ -196,11 +196,16 @@ export async function renderMonth() {
   const content = document.getElementById("content");
   content.querySelector(".month-label").textContent = monthLabel(state.monthYear, state.monthNum);
 
-  content.querySelector(".month-stats").innerHTML =
-    tile("Netto gesamt", fmtSigned(data.total_net) + " $", cls(data.total_net))
-    + tile("Punkte gesamt", fmtSigned(data.total_points))
-    + tile("Trades gesamt", data.total_trades)
-    + tile("Handelstage", data.trading_days);
+  // Jede Kennzahl ist ein eigener Raster-Block (siehe board.js)
+  const monthTiles = {
+    "m-net": tile("Netto gesamt", fmtSigned(data.total_net) + " $", cls(data.total_net)),
+    "m-points": tile("Punkte gesamt", fmtSigned(data.total_points)),
+    "m-trades": tile("Trades gesamt", data.total_trades),
+    "m-days": tile("Handelstage", data.trading_days),
+  };
+  for (const [key, html] of Object.entries(monthTiles)) {
+    content.querySelector(`[data-block="${key}"] .month-tile, .month-tile[data-block="${key}"]`).innerHTML = html;
+  }
 
   const grid = content.querySelector(".month-grid");
   grid.innerHTML = "";

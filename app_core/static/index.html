@@ -310,7 +310,7 @@
 </div>
 
 <template id="tpl-overview">
-  <section class="view">
+  <section class="view view-overview">
     <header class="view-header">
       <h1>Übersicht</h1>
       <div class="inline-filter ov-stats-filter">
@@ -319,23 +319,23 @@
       </div>
     </header>
 
-    <div class="stat-grid stat-grid-fancy" id="ov-stats"></div>
-
-    <div class="card" id="ov-prop-limits" hidden>
-      <div class="card-title-row">
-        <div class="card-title">Prop-Firm-Limits</div>
+    <div class="board" id="ov-board">
+      <div class="card" id="ov-prop-limits" data-block="prop" hidden>
+        <div class="card-title-row">
+          <div class="card-title">Prop-Firm-Limits</div>
+        </div>
+        <div class="prop-limit-list" id="ov-prop-limit-list"></div>
+        <div class="account-hint">Auf Basis geschlossener Trades – offene Positionen kennt das Journal nicht. Limits pflegst du unter „Konten &amp; Sync“.</div>
       </div>
-      <div class="prop-limit-list" id="ov-prop-limit-list"></div>
-      <div class="account-hint">Auf Basis geschlossener Trades – offene Positionen kennt das Journal nicht. Limits pflegst du unter „Konten &amp; Sync“.</div>
-    </div>
 
-    <div class="card">
-      <div class="card-title-row">
-        <div class="card-title">Equity-Kurve (kumuliert, alle Tage)</div>
+      <div class="card" id="ov-equity-card" data-block="equity">
+        <div class="card-title-row">
+          <div class="card-title">Equity-Kurve (kumuliert, alle Tage)</div>
+        </div>
+        <div class="account-chip-row" id="ov-account-chip-row"></div>
+        <div class="account-chip-row" id="ov-strategy-chip-row" hidden></div>
+        <div class="chart-wrap" id="ov-chart"></div>
       </div>
-      <div class="account-chip-row" id="ov-account-chip-row"></div>
-      <div class="account-chip-row" id="ov-strategy-chip-row" hidden></div>
-      <div class="chart-wrap" id="ov-chart"></div>
     </div>
   </section>
 </template>
@@ -651,7 +651,10 @@
       </div>
     </header>
 
-    <div class="stat-grid month-stats"></div>
+    <div class="month-tile" data-block="m-net" data-w="6" data-min="2" data-h="5"></div>
+    <div class="month-tile" data-block="m-points" data-w="6" data-min="2" data-h="5"></div>
+    <div class="month-tile" data-block="m-trades" data-w="6" data-min="2" data-h="5"></div>
+    <div class="month-tile" data-block="m-days" data-w="6" data-min="2" data-h="5"></div>
 
     <div class="card">
       <div class="card-title-row">

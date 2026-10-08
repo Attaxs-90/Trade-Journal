@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Dauerregeln
 
@@ -24,7 +24,7 @@ trade-journal/
     └── README.md, README_DEV.md, build_release.ps1, dev_reset.*, update.bat
 ```
 
-`CLAUDE.md` und `.git`/`.gitignore` bleiben bewusst am Projekt-Root (Claude Code und Git suchen dort danach).
+`AGENTS.md` und `.git`/`.gitignore` bleiben bewusst am Projekt-Root (Codex und Git suchen dort danach).
 
 ## Betrieb
 
@@ -36,8 +36,7 @@ python run.py     # startet auf 127.0.0.1:8420 und oeffnet den Browser
 
 - **Kein Auto-Reload:** nach Änderungen an `app_core/app/*.py` Server neu starten. `app_core/static/`-Änderungen brauchen nur einen Browser-Reload.
 - Hängt ein alter Prozess auf dem Port: `netstat -ano | findstr :8420`, dann gezielt `taskkill /F /PID <pid>`. Nicht `taskkill /IM python.exe` — das killt jeden Python-Prozess auf dem Rechner.
-- **Tests:** `cd app_core && python -m unittest discover -s tests -t .` — nur Standardbibliothek, laufen gegen eine Temp-Datenbank (`tests/helpers.temp_db()`), nie gegen `data/trades.db`. Endpunkte ruft `helpers.call()` direkt per ASGI auf (Starlettes `TestClient` braeuchte `httpx`). `tests/` gehoert nicht ins `update.zip`. Oberflaeche weiterhin gegen den laufenden Server pruefen, z. B. `curl -s "http://127.0.0.1:8420/api/days" | python -m json.tool`.
-- **Nur lokale Anfragen:** `LocalOnlyMiddleware` in `main.py` lehnt fremde `Host`-Header (DNS-Rebinding) und schreibende Anfragen fremder Seiten (`Origin`/`Sec-Fetch-Site`, CSRF) mit 403 ab. `curl` gegen schreibende Endpunkte braucht deshalb nichts Besonderes (kein Origin), ein Browser-Aufruf von einer anderen Seite schon.
+- **Tests gibt es nicht.** Verifiziert wird gegen den laufenden Server, z. B. `curl -s "http://127.0.0.1:8420/api/days" | python -m json.tool`.
 
 ## Code vs. Nutzerdaten
 
@@ -66,14 +65,6 @@ Trades tragen beides: `source` (Herkunft der Daten) und `account_id` (Zuordnung)
 
 **NinjaTrader-Auto-Sync** ist optional und laeuft anders als MT5, weil NinjaTrader kein Broker-Login per API kennt: die NinjaScript-AddOn `ninjascript/TradeJournalSync.cs` haengt bei jedem Fill eine Zeile im Executions-Export-Format an eine feste Datei an; `brokers/ninjatrader_adapter.py` liest sie mit dem bestehenden `parser.py` ein, gefiltert auf den in `broker_accounts.login` hinterlegten NinjaTrader-Kontonamen. Ohne hinterlegten `sync_path` bleibt ein NinjaTrader-Konto wie bisher rein manuell (CSV-Import). `MANUAL_PLATFORMS` in `brokers/__init__.py` steuert nur die Formularfelder (kein Login/Passwort/Server-Feld), nicht mehr ob automatisch gesynct wird — das entscheidet `sync_account()` pro Konto anhand `sync_path`.
 
-**Start-Sync laeuft im Hintergrund** (`_startup_tasks` in `main.py`): taegliches Backup, Konten-Sync, News-/Gewichtungs-/Earnings-Abgleich. Der Server nimmt sofort Anfragen an; `GET /api/startup-status` meldet den Fortschritt, `watchStartupSync()` (accounts.js) zeigt ihn in der Sidebar und laedt die Ansicht neu, wenn neue Trades kamen. Weil Start-Sync und „Jetzt synchronisieren“ dadurch gleichzeitig laufen koennen, serialisiert `_SYNC_LOCK` alle Syncs (das MetaTrader5-Paket ist nicht threadsicher).
-
-**MT5-Sync fasst ein offenes Terminal nicht an:** Laeuft `terminal64.exe` schon, haengt sich der Sync ohne Zugangsdaten an und synct nur, wenn dort genau dieses Konto offen ist — `initialize(login=...)` wuerde das Handelsterminal des Nutzers umschalten. Beendet werden nur Terminals, die der Sync selbst gestartet hat (PID-Vergleich vorher/nachher), nie per `taskkill /IM`. MT5-Trade-Schluessel enthalten den Login (`mt5:<login>:<position>:<ticket>`), weil Positions-IDs nur je Broker-Server eindeutig sind; `db._legacy_mt5_key()` erkennt alte Fingerprints in `deleted_trade_keys` weiterhin.
-
-**Datensicherung** (`app/backup.py`): einmal pro Kalendertag beim Start plus Knopf in den Einstellungen; `trades.db` per SQLite-Backup-API und `data/images` inkrementell, die letzten 14 Staende. Standardziel `data/backups/daily`, ein eigener Ordner steht in `app_settings.backup_dir` — dort werden die Broker-Passwoerter in der Kopie geleert (Cloud-Ordner). `trades_pre_update_*` in `data/backups` bleiben die separaten Migrations-Backups.
-
-**Prop-Firm-Limits** (`daily_loss_limit`, `max_loss_limit` in `broker_accounts`, in $): `stats.prop_limit_status()` rechnet nach FTMO-Muster auf Basis geschlossener Trades — Tagesverlust gegen heute, Gesamtverlust als Abstand unter das Startkapital (statisch, kein Trailing Drawdown).
-
 **Konto löschen archiviert nur** (`db.delete_account()` setzt `archived = 1`, kein `DELETE`): Trades behalten ihre `account_id` unveraendert, damit sie weiter ihrem (ehemaligen) Konto zuordenbar bleiben, statt ununterscheidbar im "csv"/"Nicht zugeordnet"-Sammeltopf zu verschwinden (fruehere Version nullte `account_id` beim Loeschen - siehe Nutzer-Feedback, das ging verloren). `list_accounts()` filtert archivierte Konten standardmaessig raus (Verwaltung, Sync, Neuanlage-Dropdowns sehen sie nicht mehr), `list_account_options()` nimmt sie bewusst *mit* auf und haengt `" (gelöscht)"` an den Namen an, damit Filter/Übersicht/Share-Karte sie weiter anzeigen und danach filtern können.
 
 **Geloeschte Trades bleiben geloescht:** `db.delete_trade()` merkt sich den (entry_order_id, exit_order_id)-Fingerprint in `deleted_trade_keys`, weil die geloeschte Zeile die UNIQUE-Bremse gegen erneutes Einfuegen mitgeloescht hat. „Jetzt synchronisieren" (`insert_trades(..., skip_deleted=True)`) ueberspringt diese Fingerprints, „Vollstaendig neu synchronisieren" (`full=True`) bewusst nicht — nur dort soll ein versehentlich geloeschter Trade wiederkommen koennen.
@@ -85,7 +76,6 @@ Eine Strategie bündelt Regeln (optional in Gruppen); ein Trade hat **höchstens
 - **Keine Zeile = unbeantwortet**, und fällt aus *jeder* Quote heraus, statt als „nicht befolgt" zu zählen — das ist zugleich der Weg für „Regel hier nicht anwendbar". `0 %` (fünfmal beantwortet, nie befolgt) ist deshalb etwas völlig anderes als „noch nicht bewertet"; beides muss in der Oberfläche unterscheidbar bleiben.
 - **Regel ändern gibt es zweimal:** `update_rule()` für Tippfehler und Umgruppieren, `replace_rule()` für inhaltlichen Ersatz. Letzteres archiviert die alte Regel, damit ihre bisherigen Bewertungen nicht rückwirkend etwas Falsches behaupten. Diese Trennung nicht „vereinfachen".
 - **Löschen ist zweigleisig:** `archived = 1` ist der Normalfall (Trades und Auswertung bleiben). Eine Gruppe zu löschen löst sie nur auf — ihre Regeln samt Bewertungen bleiben und rutschen auf „ohne Gruppe".
-- **Auswertungs-Dimension `rules`** („Regeln eingehalten (Trade)“) nutzt dieselbe Ableitung fuer alle Trades in einer Query (`db.trade_rule_compliance()`); `followed_plan` ist das Feld aus dem **Tages**-Journal — beide nicht zusammenlegen.
 - **„Plan befolgt" wird am Trade abgeleitet**, nicht eingegeben: Ja, wenn jede beantwortete Regel auf Ja steht; `None` bei fehlender Strategie oder wenn noch nichts beantwortet ist. „Keine Aussage" ist nicht „Plan gebrochen". Im **Tages**-Journal bleibt das Feld eine normale Eingabe.
 - **`is_default` ordnet nichts automatisch zu**, sondern ist nur eine Vorauswahl im Auswahlfeld; Import und Sync setzen niemals eine Strategie, sonst bekämen Bestandstrades still eine falsche.
 
@@ -107,7 +97,6 @@ Nicht „aufräumen“, ohne den Grund zu kennen — jede ist Ergebnis eines kon
 - **Layout ist in festen px gebaut** und skaliert ab 2200/3200 px Fensterbreite über CSS `zoom`. Neue Komponenten müssen dazu passen.
 - **Journal-Einträge** hängen an `entry_type` + `ref_key`, nicht an einer `day`-Spalte — damit Wochen-/Monatsreviews (`'2026-W35'`, `'2026-08'`) ohne Schema-Migration dazukommen können. `day_notes` ist der abgelöste Vorgänger und bleibt nur stehen, weil Migrationen append-only sind und auf sie verweisen — nicht mehr benutzen.
 - **Ein einziger Journal-Editor** (`mountJournalEditor()`) wird an zwei Stellen eingehängt (Journal-Seite, Karte im Tagesview). `activeJournal` hält ihn fest, damit `mountView()`, `closeModal()` und `beforeunload` noch ungespeicherten Text rausschreiben können. `host.dataset.journalRef` verhindert, dass `populateDay()` (läuft nach jedem Bild-Upload erneut) ihn samt Eingaben neu aufbaut.
-- **Raster-Layout (`board.js`):** Übersicht, Monat, Konten & Sync, Export und Einstellungen liegen in einem 24-Spalten-Raster (Lücke 12 px) mit **fester Zeilenhöhe** (`ROW` = 20 px, muss zu `grid-auto-rows`/`padding-bottom` in `.board`/`.board-block` passen). Jeder Block hat eine absolute Position `{x, y, w, h}` und bleibt, wo er losgelassen wird — **kein** automatisches Nachrutschen; nur Kollisionen schieben den Überdeckten nach unten, die Vorschau rechnet dabei immer vom Stand bei Ziehbeginn (nichts „wandert“ mit). `h = null` = Höhe folgt dem Inhalt. Vorgängerversion mit Auto-Zeilen und Bruch-Zeilennummern war genau deshalb unbrauchbar (Blöcke sprangen) — nicht wieder einführen. `BOARD_VIEWS` mappt Template → Key/Standardbreiten, `mountView()` hängt es ein; Blöcke sind die direkten Kinder von `.board`, Key aus `data-block`/`data-settings-card`/`id`, sonst Position (`b0` …) — Template-Reihenfolge also nicht ändern. Layout in `localStorage` (`boardLayout3:<key>`), bedienbar nur im Layout-Modus (ganzer Block ziehen, Kanten = Größe, Pfeiltasten/Umschalt+Pfeile, WCAG 2.5.7). Übersichts-Kacheln sind einzelne Blöcke (`data-w="2" data-h="8"`). Nicht umgestellt: Auswertungen (eigenes Widget-System), Journal/Strategie, To-Do, Trades.
 - **Spalten-Auswahl der Übersicht speichert die _ausgeblendeten_ Spalten** (`overviewHiddenColumns`), nicht die sichtbaren — sonst bliebe jede neu hinzugefügte Spalte für Bestandsnutzer unsichtbar.
 - **News-Verlauf für die Monatsübersicht** (`marked_news`-Tabelle, Name historisch) wird nicht live vom ForexFactory-Feed befüllt (der deckt nur die aktuelle/nächste Woche ab), sondern per `news.scrape_month()` monatlich je Monat aus der öffentlichen Kalenderseite gescrapt (eingebettetes JSON `window.calendarComponentStates`, kein offizielles API) und dauerhaft gespeichert — nur High-Impact und Feiertage. Läuft automatisch einmal pro Kalendermonat beim App-Start (`_maybe_scrape_news_history`, Fenster ab `NEWS_HISTORY_START_YEAR/MONTH` bis zwölf Monate voraus, wandert mit jedem Monat weiter), der Button in der Monatsübersicht ist nur der manuelle Sofort-Anstoß. `app_core/app/news_history_seed.json` ist ein mitgelieferter Exportstand dieser Tabelle (`_seed_news_history_from_bundle`, läuft vor dem Scrape bei jedem Start) — damit ein frischer Nutzer die Termine sofort und offline hat und die Daten auch erhalten bleiben, falls ForexFactory die Seite irgendwann so ändert, dass der Scraper nicht mehr funktioniert. Diese Seed-Datei ist ein manueller Snapshot, kein automatischer Export — bei Bedarf erneut aus `data/trades.db` (Tabelle `marked_news`) exportieren und im Repo aktualisieren.
 

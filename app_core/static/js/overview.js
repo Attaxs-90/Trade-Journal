@@ -1,5 +1,6 @@
 /* Uebersichtsseite mit Kennzahlen-Kacheln und Equity-Kurve, plus mountView(). */
 
+import { BOARD_VIEWS, mountBoard, refreshBoard } from './board.js';
 import { attachChartTooltip, lineChartSvg } from './chart.js';
 import { api, clearAppError, cls, escapeHtml, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_DELETE, ICON_IMAGE, ICON_JOURNAL, ICON_NOTE, ICON_OPEN, ICON_SHARE, makeSortable, readStoredArray, state, strategiesQS, tile, withFilter, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
@@ -32,6 +33,8 @@ export async function mountView(templateId) {
   content.innerHTML = "";
   content.appendChild(document.getElementById(templateId).content.cloneNode(true));
   mountHelpButton(content, templateId);
+  const boardCfg = BOARD_VIEWS[templateId];
+  if (boardCfg) mountBoard(content.querySelector(".view"), boardCfg.key, { ...boardCfg, board: content.querySelector(".board") });
   return content;
 }
 
@@ -69,28 +72,6 @@ function saveOverviewHiddenStats(hiddenSet) {
   writeStored("overviewHiddenStats", [...hiddenSet]);
 }
 
-/* Reihenfolge der Kacheln - analog zu tradeFieldOrder/analyticsWidgets:
-   unbekannte/entfernte Keys rausfiltern, neu hinzugekommene hinten anhaengen. */
-function loadOverviewStatOrder() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("overviewStatOrder") || "null");
-    if (Array.isArray(saved)) {
-      const known = saved.filter(k => OVERVIEW_STAT_KEYS.includes(k));
-      for (const k of OVERVIEW_STAT_KEYS) if (!known.includes(k)) known.push(k);
-      return known;
-    }
-  } catch (e) { /* ignore */ }
-  return [...OVERVIEW_STAT_KEYS];
-}
-function saveOverviewStatOrder(order) {
-  writeStored("overviewStatOrder", order);
-}
-
-/* #ov-stats ist ein mehrspaltiges Grid, daher grid:true (siehe makeSortable). */
-function wireOverviewStatDrag(grid) {
-  makeSortable(grid, ".stat-tile", saveOverviewStatOrder, { grid: true, keyAttr: "statKey" });
-}
-
 function gaugeTile(label, pct, valueText) {
   const clamped = Math.max(0, Math.min(100, pct ?? 0));
   return `<div class="stat-tile">
@@ -122,30 +103,31 @@ let lastOverviewData = null;
 function renderOverviewStats(data) {
   lastOverviewData = data;
   const hidden = loadOverviewHiddenStats();
-  const grid = document.getElementById("ov-stats");
-  grid.innerHTML = loadOverviewStatOrder()
-    .filter(key => !hidden.has(key))
-    .map(key => {
-      const def = OVERVIEW_STAT_DEFS.find(d => d.key === key);
-      const html = def.render(data);
-      // draggable/data-Attribut hier statt in jeder render()-Funktion setzen -
-      // alle drei (tile/gaugeTile/ratioTile) beginnen mit demselben
-      // `<div class="stat-tile">`.
-      return html.replace('<div class="stat-tile">', `<div class="stat-tile" draggable="true" data-stat-key="${key}">`);
-    }).join("");
-  wireOverviewStatDrag(grid);
+  const board = document.getElementById("ov-board");
+  board.querySelectorAll('.board-block[data-block^="stat:"]').forEach(el => el.remove());
+  // Jede Kachel ist ein eigener Raster-Block (2 von 12 Spalten, siehe board.js)
+  // und steht vor Prop-Limits/Equity; die Position bestimmt das gespeicherte Layout.
+  const anchor = board.querySelector(':scope > :not(.board-ghost)');
+  OVERVIEW_STAT_KEYS.filter(key => !hidden.has(key)).forEach(key => {
+    const def = OVERVIEW_STAT_DEFS.find(d => d.key === key);
+    // alle drei (tile/gaugeTile/ratioTile) beginnen mit demselben `<div class="stat-tile">`
+    const html = def.render(data).replace('<div class="stat-tile">', `<div class="stat-tile" data-block="stat:${key}" data-w="2" data-min="1" data-h="8">`);
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html.trim();
+    board.insertBefore(tpl.content.firstElementChild, anchor);
+  });
+  refreshBoard(board);
 }
 
 function renderOverviewStatsPanel() {
   const panel = document.getElementById("ov-stats-panel");
   const hidden = loadOverviewHiddenStats();
-  const order = loadOverviewStatOrder();
-  panel.innerHTML = `<div class="newsbar-filter-group-title">Ziehen zum Umsortieren, Klick zum Ein-/Ausblenden</div>`
+  const order = OVERVIEW_STAT_KEYS;
+  panel.innerHTML = `<div class="newsbar-filter-group-title">Klick zum Ein-/Ausblenden – Position über „Layout anpassen“</div>`
     + order.map(key => {
       const def = OVERVIEW_STAT_DEFS.find(d => d.key === key);
       const isHidden = hidden.has(key);
-      return `<div class="trade-field-order-row" draggable="true" data-key="${key}">
-        <span class="trade-field-order-handle">⠿</span>
+      return `<div class="trade-field-order-row" data-key="${key}">
         <button type="button" class="trade-field-toggle-btn${isHidden ? "" : " active"}" data-key="${key}">${escapeHtml(def.label)}</button>
       </div>`;
     }).join("");
@@ -161,12 +143,8 @@ function renderOverviewStatsPanel() {
       renderOverviewStats(lastOverviewData);
     });
   });
-
-  makeSortable(panel, ".trade-field-order-row", (order) => {
-    saveOverviewStatOrder(order);
-    renderOverviewStats(lastOverviewData);
-  });
 }
+
 
 export async function openOverview() {
   state.view = "overview";
@@ -195,16 +173,28 @@ export async function openOverview() {
     panel.hidden = !panel.hidden;
   };
 
-  const chartWrap = document.getElementById("ov-chart");
-  if (data.curve.length > 1) {
-    const curveValues = data.curve.map(p => p.cum_net);
-    const curveLabels = data.curve.map(p => p.day);
-    chartWrap.innerHTML = lineChartSvg(curveValues, curveLabels, data.start_balance) + `<div class="chart-tooltip"></div>`;
-    attachChartTooltip(chartWrap);
-  } else {
-    chartWrap.innerHTML = `<div class="empty-state">Mindestens 2 Tage nötig für eine Kurve.</div>`;
-  }
+  ovCurve = data.curve.length > 1 ? data : null;
+  renderOverviewChart();
+  // Kurve in der gemessenen Blockgroesse neu zeichnen, sobald sich diese aendert
+  // (Layout-Wechsel, Fenstergroesse) - ein ResizeObserver deckt beides ab.
+  const chartEl = document.getElementById("ov-chart");
+  if (chartEl) new ResizeObserver(() => renderOverviewChart()).observe(chartEl);
+}
 
+/* Equity-Kurve in der gemessenen Containergroesse zeichnen (siehe lineChartSvg). */
+let ovCurve = null;
+function renderOverviewChart() {
+  const chartWrap = document.getElementById("ov-chart");
+  if (!chartWrap) return;
+  if (!ovCurve) {
+    chartWrap.innerHTML = `<div class="empty-state">Mindestens 2 Tage nötig für eine Kurve.</div>`;
+    return;
+  }
+  const w = Math.max(300, Math.round(chartWrap.clientWidth) || 1000);
+  const h = Math.max(120, Math.round(chartWrap.clientHeight) || 260);
+  chartWrap.innerHTML = lineChartSvg(ovCurve.curve.map(p => p.cum_net), ovCurve.curve.map(p => p.day), ovCurve.start_balance, w, h)
+    + `<div class="chart-tooltip"></div>`;
+  attachChartTooltip(chartWrap);
 }
 
 /* Prop-Firm-Limits je Konto: Balken fuellt sich mit dem verbrauchten Anteil,

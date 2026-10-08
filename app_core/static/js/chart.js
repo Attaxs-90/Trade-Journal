@@ -5,8 +5,10 @@ import { currentZoom } from './images.js';
 
 /* ---------- Chart (inline SVG, keine externe Lib) ---------- */
 
-export function lineChartSvg(values, labels, baseline = 0) {
-  const w = 1000, h = 260, padL = 62, padR = 16, padT = 14, padB = 28;
+/* w/h = tatsaechliche Pixelgroesse des Containers (sonst wuerde die feste
+   1000x260-viewBox auf breiten Karten nicht-uniform gestreckt). */
+export function lineChartSvg(values, labels, baseline = 0, w = 1000, h = 260) {
+  const padL = 62, padR = 16, padT = 14, padB = 28;
 
   // Wertebereich mit Puffer statt fest bei 0 zu starten - sonst quetscht ein
   // Kontostand (z.B. 9.800-10.500) sich auf ein paar Pixel am oberen Rand

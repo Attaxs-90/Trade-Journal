@@ -647,6 +647,59 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
    mehr) - so knapp bemessen, dass die Journal-Werkzeugleiste (Quill-Toolbar
    im Journal-Editor rechts) gerade noch in einer Zeile passt, nicht umbricht. */
 .view.view-day { max-width: 1320px; }
+/* Ansichten mit Raster (board.js): volle Fensterbreite, darin ein 24-Spalten-
+   Raster mit FESTER Zeilenhoehe (20 px - muss zu ROW in board.js passen).
+   Position/Groesse setzt board.js inline (grid-column/grid-row). Der Abstand
+   nach unten steckt als padding-bottom im Block (= eine Zeile). */
+.view.has-board { max-width: none; }
+.board { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); column-gap: 12px; row-gap: 0; grid-auto-rows: 20px; position: relative; width: 100%; }
+.board-block { position: relative; min-width: 0; padding-bottom: 20px; display: flex; flex-direction: column; align-self: start; }
+.board-block.board-fixed { align-self: stretch; }
+.board-block.board-fixed > .board-content { flex: 1; min-height: 0; overflow: auto; }
+.board-block > .board-content { margin: 0; }
+/* feste Hoehe: Equity-Kurve fuellt den Block, statt bei 260 px zu bleiben */
+.board-block.board-fixed .chart-wrap { flex: 1; height: auto; min-height: 140px; }
+.board-block.board-fixed > .card { display: flex; flex-direction: column; }
+
+.board-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.board-hint { font-size: 12px; color: var(--text-dim); }
+
+/* Layout-Modus: Spaltenraster sichtbar, jeder Block ist als Ganzes greifbar. */
+.board-editing { background:
+    repeating-linear-gradient(to right, rgba(127,127,127,0.09) 0, rgba(127,127,127,0.09) calc((100% - 276px) / 24), transparent calc((100% - 276px) / 24), transparent calc((100% - 276px) / 24 + 12px)),
+    repeating-linear-gradient(to bottom, rgba(127,127,127,0.07) 0, rgba(127,127,127,0.07) 1px, transparent 1px, transparent 20px);
+  border-radius: 8px; }
+.board-overlay, .board-resize { display: none; position: absolute; z-index: 6; }
+.board-editing .board-overlay, .board-editing .board-resize { display: block; }
+.board-overlay {
+  inset: 0 0 20px 0; border: 2px dashed var(--accent); border-radius: 12px; cursor: grab; touch-action: none;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.board-overlay:active { cursor: grabbing; }
+.board-overlay:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.board-chip {
+  position: absolute; top: 6px; left: 6px; max-width: calc(100% - 12px); padding: 2px 8px; border-radius: 6px;
+  background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.board-resize { touch-action: none; }
+.board-resize-e { top: 20px; bottom: 36px; right: -7px; width: 14px; cursor: ew-resize; }
+.board-resize-s { left: 20px; right: 36px; bottom: 13px; height: 14px; cursor: ns-resize; }
+.board-resize-se { right: -7px; bottom: 13px; width: 22px; height: 22px; cursor: nwse-resize; }
+.board-resize::after { content: ""; position: absolute; background: var(--accent); border-radius: 4px; }
+.board-resize-e::after { top: 50%; left: 4px; width: 6px; height: 36px; margin-top: -18px; }
+.board-resize-s::after { left: 50%; top: 4px; height: 6px; width: 36px; margin-left: -18px; }
+.board-resize-se::after { inset: 4px; border-radius: 4px; }
+.board-block.board-moving { z-index: 7; }
+.board-block.board-moving > .board-overlay { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 8px 28px rgba(0,0,0,0.35); }
+.board-dragging { user-select: none; cursor: grabbing; }
+/* Schmale Fenster: einspaltig stapeln, Raster-Bedienung entfaellt. */
+@media (max-width: 900px) {
+  .board { grid-auto-rows: auto; }
+  .board-block { grid-column: 1 / -1 !important; grid-row: auto !important; align-self: start !important; margin-bottom: 0; }
+  .board-block.board-fixed > .board-content { overflow: visible; }
+  .board-tools { display: none; }
+}
+/* Uebersichts-Kacheln im Raster behalten ihr zentriertes Aussehen. */
 
 .view-header {
   display: flex;
@@ -706,10 +759,17 @@ html[data-sidebar="collapsed"] .app .sidebar-account-status { display: none; }
    Prozent- bzw. Verhaeltnis-Kennzahlen (Trefferquote, Handelstage % Gewinn,
    Gewinn/Verlust-Verhaeltnis) - nur in #ov-stats, um die kompakteren
    .stat-tile in den Analytics-Widgets nicht mit zu beeinflussen. */
-.stat-grid-fancy .stat-tile { align-items: center; text-align: center; gap: 8px; padding: 18px 16px; }
-.stat-grid-fancy .stat-tile .value { font-size: 26px; }
-.stat-grid-fancy .stat-tile { cursor: grab; user-select: none; -webkit-user-drag: element; }
-.stat-grid-fancy .stat-tile.dragging { opacity: 0.4; }
+.view-overview .stat-tile { align-items: center; text-align: center; gap: 8px; padding: 18px 16px; }
+.view-overview .stat-tile .value { font-size: 26px; }
+/* Schmale Kacheln (1 Spalte): Zahl und Beschriftung schrumpfen mit dem Block statt zu ueberlaufen. */
+.board-block { container-type: inline-size; }
+.view-overview .stat-tile { overflow: hidden; }
+.view-overview .stat-tile .value { font-size: clamp(13px, 13cqw, 26px); overflow-wrap: anywhere; }
+.view-overview .stat-tile .label, .month-tile .stat-tile .label { overflow-wrap: anywhere; }
+.view-overview .stat-tile { padding-inline: clamp(6px, 4cqw, 16px); }
+.month-tile { display: flex; }
+.month-tile > .stat-tile { flex: 1; min-width: 0; overflow: hidden; }
+.month-tile .stat-tile .value { font-size: clamp(13px, 11cqw, 19px); overflow-wrap: anywhere; }
 .stat-gauge-track {
   position: relative;
   width: 100%;
