@@ -1070,6 +1070,29 @@ def api_diary_add_month():
     return {"month": diary.add_month()}
 
 
+@app.post("/api/diary/years")
+def api_diary_add_year():
+    return {"year": diary.add_year()}
+
+
+def _check_month_key(month: str) -> str:
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise HTTPException(400, "Monat braucht das Format JJJJ-MM.")
+    return month
+
+
+@app.delete("/api/diary/months/{month}")
+def api_diary_delete_month(month: str, dry_run: bool = False):
+    return {"entries": diary.delete_months([_check_month_key(month)], dry_run)}
+
+
+@app.delete("/api/diary/years/{year}")
+def api_diary_delete_year(year: int, dry_run: bool = False):
+    if not 1900 <= year <= 9999:
+        raise HTTPException(400, "Ungültiges Jahr.")
+    return {"entries": diary.delete_months([f"{year:04d}-{m:02d}" for m in range(1, 13)], dry_run)}
+
+
 @app.get("/api/diary/{year}/{month}")
 def api_diary_month(year: int, month: int, accounts: str | None = None, tags: str | None = None,
                     tag_logic: str = "or", strategies: str | None = None):

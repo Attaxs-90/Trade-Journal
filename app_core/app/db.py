@@ -1637,20 +1637,41 @@ def journal_map(entry_type: str = "day", start: str | None = None, end: str | No
     return {r["ref_key"]: {"rating": r["rating"]} for r in rows}
 
 
-def journal_meta(start_day: str, end_day: str, period_refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
-    """(entry_type, ref_key) -> Kopfdaten fuer den Seitenbaum des Tagebuchs:
-    alle Tages-Eintraege im Zeitraum plus die genannten KW-/Monats-/Review-
-    Eintraege in einer einzigen Query (kein Query je Seite)."""
+def _journal_period_clause(start_day: str, end_day: str, period_refs: list[tuple[str, str]]) -> tuple[str, list]:
+    """WHERE fuer alle Eintraege eines Tagebuch-Zeitraums: Tage im Bereich plus
+    die genannten KW-/Monats-/Review-Schluessel."""
     parts = ["(entry_type = 'day' AND ref_key BETWEEN ? AND ?)"]
     params: list = [start_day, end_day]
     for entry_type, ref_key in period_refs:
         parts.append("(entry_type = ? AND ref_key = ?)")
         params += [entry_type, ref_key]
+    return " OR ".join(parts), params
+
+
+def delete_journal_in(start_day: str, end_day: str, period_refs: list[tuple[str, str]],
+                      dry_run: bool = False) -> int:
+    """Loescht alle Journal-Eintraege eines Tagebuch-Zeitraums samt Tags (oder
+    zaehlt sie nur). Trades und Tagesbilder bleiben."""
+    where, params = _journal_period_clause(start_day, end_day, period_refs)
+    with get_conn() as conn:
+        ids = [r["id"] for r in conn.execute(f"SELECT id FROM journal_entries WHERE {where}", params)]
+        if ids and not dry_run:
+            marks = ",".join("?" * len(ids))
+            conn.execute(f"DELETE FROM journal_tags WHERE entry_id IN ({marks})", ids)
+            conn.execute(f"DELETE FROM journal_entries WHERE id IN ({marks})", ids)
+    return len(ids)
+
+
+def journal_meta(start_day: str, end_day: str, period_refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """(entry_type, ref_key) -> Kopfdaten fuer den Seitenbaum des Tagebuchs:
+    alle Tages-Eintraege im Zeitraum plus die genannten KW-/Monats-/Review-
+    Eintraege in einer einzigen Query (kein Query je Seite)."""
+    where, params = _journal_period_clause(start_day, end_day, period_refs)
     with get_conn() as conn:
         rows = conn.execute(
             f"""SELECT entry_type, ref_key, title, rating,
                        (length(trim(plain_text)) > 0 OR content_html LIKE '%<img%') AS has_content
-                FROM journal_entries WHERE {' OR '.join(parts)}""",
+                FROM journal_entries WHERE {where}""",
             params,
         ).fetchall()
     return {(r["entry_type"], r["ref_key"]): dict(title=r["title"] or "", rating=r["rating"],

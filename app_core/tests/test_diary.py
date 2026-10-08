@@ -53,6 +53,26 @@ class DiaryMonthTest(unittest.TestCase):
         self.assertGreater(new, before)
         self.assertEqual(diary.add_month() > new, True)   # weiter in die Zukunft, auch ueber den Jahreswechsel
 
+    def test_jahr_anlegen_hat_zwoelf_monate(self):
+        year = diary.add_year()
+        months = [m["month"] for m in diary.build_sections()["months"] if m["month"].startswith(str(year))]
+        self.assertEqual(months, [f"{year}-{m:02d}" for m in range(1, 13)])
+        jan = diary.build_month(year, 1)
+        self.assertTrue(jan["weeks"])                         # KWs samt Tagen stehen bereit
+
+    def test_monat_loeschen_entfernt_eintraege_nicht_trades(self):
+        db.upsert_journal_entry("day", "2026-09-28", content_html="<p>x</p>", plain_text="x")   # KW 40 -> Oktober
+        db.upsert_journal_entry("month", "2026-10", content_html="<p>Ziel</p>", plain_text="Ziel")
+        db.upsert_journal_entry("day", "2026-09-21", content_html="<p>y</p>", plain_text="y")   # September bleibt
+        self.assertEqual(diary.delete_months(["2026-10"], dry_run=True), 2)
+        self.assertEqual(diary.delete_months(["2026-10"]), 2)
+        self.assertNotIn("2026-10", [m["month"] for m in diary.build_sections()["months"]])
+        self.assertIsNone(db.get_journal_entry("month", "2026-10"))
+        self.assertIsNotNone(db.get_journal_entry("day", "2026-09-21"))
+        self.assertEqual(len(db.get_trades_in_range("2026-09-28", "2026-10-05")), 3)
+        diary.add_year(2026)                                  # wieder anlegen macht ihn sichtbar
+        self.assertIn("2026-10", [m["month"] for m in diary.build_sections()["months"]])
+
     def test_seitentitel_und_eintrag_in_der_liste(self):
         db.upsert_journal_entry("week", "2026-W40", title="RETRACEMENT", content_html="<p>Woche</p>", plain_text="Woche")
         m = diary.build_month(2026, 10)

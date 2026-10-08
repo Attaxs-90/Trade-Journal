@@ -7,6 +7,7 @@ genau einem Monat und kein Tag erscheint doppelt.
 
 Ergebnisse werden je Tag in einem Durchlauf in $, Punkten und R gerechnet; R nur
 aus Trades mit hinterlegtem Risiko (r_complete sagt, ob das fuer alle galt)."""
+import json
 from datetime import date, timedelta
 
 from . import db
@@ -78,38 +79,114 @@ def _final(stats: dict) -> dict:
     )
 
 
-# Bis zu welchem Monat das Tagebuch reicht, wenn der Nutzer Monate im Voraus
-# anlegt ("+ Monat") - wie ein neuer Abschnitt in OneNote. Ohne Eintrag endet
-# die Abschnittsleiste beim laufenden Monat.
-DIARY_UNTIL_KEY = "diary_until"
+# Abschnitte (Monate) der Sidebar: Grundbereich vom ersten Trade/Eintrag bis
+# zum laufenden Monat, dazu im Voraus angelegte Monate ("+ Monat"/"+ Jahr")
+# und abzueglich geloeschter. Beide Listen liegen als JSON in app_settings -
+# geloeschte Monate muessen gemerkt werden, weil der Grundbereich sie sonst
+# beim naechsten Laden wieder anzeigen wuerde (Trades bleiben ja erhalten).
+DIARY_UNTIL_KEY = "diary_until"          # Altbestand: "+ Monat" bis Version ecc2e68
+DIARY_EXTRA_KEY = "diary_months_extra"
+DIARY_HIDDEN_KEY = "diary_months_hidden"
+
+
+def _month_key(y: int, m: int) -> str:
+    return f"{y:04d}-{m:02d}"
+
+
+def _next_month(key: str) -> str:
+    y, m = int(key[:4]), int(key[5:7]) + 1
+    return _month_key(y + 1, 1) if m > 12 else _month_key(y, m)
+
+
+def _month_range(first: str, last: str) -> list[str]:
+    out, k = [], first
+    while k <= last:
+        out.append(k)
+        k = _next_month(k)
+    return out
+
+
+def _load_set(key: str) -> set[str]:
+    try:
+        return set(json.loads(db.get_app_setting(key) or "[]"))
+    except (ValueError, TypeError):
+        return set()
+
+
+def _save_set(key: str, values: set[str]):
+    db.set_app_setting(key, json.dumps(sorted(values)))
+
+
+def _visible_months(totals: dict) -> list[str]:
+    today = date.today()
+    current = _month_key(today.year, today.month)
+    keys = sorted(k for k in totals if k and len(k) == 7)
+    first = min(keys[0], current) if keys else current
+    base = set(_month_range(first, max([current] + keys[-1:])))
+    extra = _load_set(DIARY_EXTRA_KEY)
+    until = db.get_app_setting(DIARY_UNTIL_KEY)
+    if until and until > current:
+        extra |= set(_month_range(_next_month(current), until))
+    return sorted((base | extra) - _load_set(DIARY_HIDDEN_KEY))
+
+
+def _show(months: list[str]):
+    extra = _load_set(DIARY_EXTRA_KEY) | set(months)
+    hidden = _load_set(DIARY_HIDDEN_KEY) - set(months)
+    _save_set(DIARY_EXTRA_KEY, extra)
+    _save_set(DIARY_HIDDEN_KEY, hidden)
 
 
 def add_month() -> str:
     """Haengt den Monat nach dem letzten angezeigten an und gibt ihn zurueck."""
-    last = build_sections()["months"][-1]["month"]
-    y, m = int(last[:4]), int(last[5:7]) + 1
-    if m > 12:
-        y, m = y + 1, 1
-    new = f"{y:04d}-{m:02d}"
-    db.set_app_setting(DIARY_UNTIL_KEY, new)
+    visible = _visible_months(db.diary_month_totals())
+    new = _next_month(visible[-1])
+    _show([new])
     return new
 
 
+def add_year(year: int | None = None) -> int:
+    """Legt alle zwoelf Monate eines Jahres an (ohne Angabe: das Jahr nach dem
+    letzten angezeigten). KWs und Tage ergeben sich daraus von selbst."""
+    if year is None:
+        visible = _visible_months(db.diary_month_totals())
+        year = int(visible[-1][:4]) + 1
+    _show([_month_key(year, m) for m in range(1, 13)])
+    return year
+
+
+def _month_refs(month: str) -> tuple[str, str, list[tuple[str, str]]]:
+    """Tagesbereich und KW-/Monats-/Review-Schluessel, die zu einem Monat gehoeren."""
+    weeks = _month_weeks(int(month[:4]), int(month[5:7]))
+    start, end = weeks[0][2], weeks[-1][2] + timedelta(days=6)
+    refs = [("week", f"{iy:04d}-W{iw:02d}") for iy, iw, _ in weeks] + [("month", month), ("review", month)]
+    return str(start), str(end), refs
+
+
+def delete_months(months: list[str], dry_run: bool = False) -> int:
+    """Entfernt Monate aus dem Tagebuch samt ihren Journal-Eintraegen (Tage,
+    KWs, Monatsziel, Review). Trades bleiben unangetastet - sie kommen ohnehin
+    per Sync und sind unter Werkzeuge -> Trades weiter da. Liefert die Zahl der
+    (zu) loeschenden Eintraege."""
+    count = 0
+    for month in months:
+        start, end, refs = _month_refs(month)
+        count += db.delete_journal_in(start, end, refs, dry_run=dry_run)
+    if not dry_run:
+        extra = _load_set(DIARY_EXTRA_KEY) - set(months)
+        hidden = _load_set(DIARY_HIDDEN_KEY) | set(months)
+        _save_set(DIARY_EXTRA_KEY, extra)
+        _save_set(DIARY_HIDDEN_KEY, hidden)
+    return count
+
+
 def build_sections(account_keys=None, tag_keys=None, tag_logic="or", strategy_keys=None) -> dict:
-    """Alle Monate vom ersten Trade/Eintrag bis zum laufenden Monat - auch
-    Monate ohne Daten, damit die Abschnittsleiste lueckenlos wie in OneNote ist."""
+    """Alle sichtbaren Monate mit Kennzahlen - auch Monate ohne Daten, damit
+    die Abschnittsleiste wie in OneNote vollstaendig ist."""
     totals = db.diary_month_totals(account_keys, tag_keys, tag_logic, strategy_keys)
     today = date.today()
-    current = f"{today.year:04d}-{today.month:02d}"
-    keys = sorted(k for k in totals if k and len(k) == 7)
-    first = keys[0] if keys else current
-    if first > current:
-        first = current
-    last = max([current] + keys[-1:] + [db.get_app_setting(DIARY_UNTIL_KEY) or current])
     months = []
-    y, m = int(first[:4]), int(first[5:7])
-    while f"{y:04d}-{m:02d}" <= last:
-        key = f"{y:04d}-{m:02d}"
+    for key in _visible_months(totals):
         t = totals.get(key, {})
         r_sum = t.get("r_sum")
         months.append(dict(
@@ -119,10 +196,7 @@ def build_sections(account_keys=None, tag_keys=None, tag_logic="or", strategy_ke
             r_complete=bool(t.get("trades")) and t.get("r_trades") == t.get("trades"),
             entries=t.get("entries", 0),
         ))
-        m += 1
-        if m > 12:
-            y, m = y + 1, 1
-    return {"months": months, "current": current}
+    return {"months": months, "current": _month_key(today.year, today.month)}
 
 
 def build_month(year: int, month: int, account_keys=None, tag_keys=None, tag_logic="or",

@@ -14,6 +14,13 @@
 - Übersicht, Trades, Auswertungen, Kalender, Strategie, Konten & Sync,
   Export und Einstellungen bleiben unter „Werkzeuge“ erreichbar.
 - Strg+Bild auf/ab blättert durch die Seiten.
+- Tagebuch: „+“ legt den nächsten Monat oder ein ganzes Jahr (12 Monate mit
+  Monatsziel, Review, KWs und Tagen) an; Monate und Jahre lassen sich löschen
+  (Journal-Einträge gehen mit, Trades bleiben). „Seite leeren“ je Seite.
+- Beträge neben Jahren/Monaten in der Sidebar abschaltbar.
+- Trade-Zeilen der Tagesseite zeigen Punkte, Strategie und Tags.
+- Klick auf ein Bild im Text öffnet es groß (Fenster, Vollbild oder 100 %),
+  Esc schließt die Ansicht ganz.
 
 ## 1.14.0
 - MetaTrader 5: Der Sync schließt kein offenes MT5-Terminal mehr und schaltet

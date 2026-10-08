@@ -121,15 +121,17 @@ function openLightbox(img) {
 }
 
 /* Bild aus einem Editor (Journal/Notiz, z. B. importierte OneNote-Screenshots)
-   gross ansehen: direkt im Vollbild, ohne Loeschen-Knopf - das Bild gehoert
+   gross ansehen: im normalen Fenster in der gespeicherten Groesse (Vollbild
+   ueber den Knopf unten), ohne Loeschen-Knopf - das Bild gehoert
    zum Text und wird dort geloescht, nicht als Tagesbild. */
 export function openImageViewer(src) {
   lightboxCurrentImage = null;
   document.getElementById("lightbox-delete").hidden = true;
   document.getElementById("lightbox-img").src = src;
   setLightboxActualSize(false);
+  if (lightboxFullscreen) setLightboxFullscreen(false);
+  positionLightboxBox(getLightboxSize());
   document.getElementById("lightbox-overlay").classList.add("visible");
-  setLightboxFullscreen(true);
 }
 
 /* 100 %: Bild in echten Pixeln statt auf das Fenster eingepasst, die Box
@@ -148,8 +150,7 @@ export function closeLightbox() {
 }
 
 /* Vollbild: Doppelklick aufs Bild oder eigener Toolbar-Button, siehe unten.
-   Escape verlaesst (siehe calendar.js) zuerst nur das Vollbild, bevor ein
-   zweites Escape die Lightbox ganz schliesst. */
+   Escape schliesst die Lightbox ganz, auch aus dem Vollbild (siehe calendar.js). */
 let lightboxFullscreen = false;
 
 function setLightboxFullscreen(on) {
@@ -171,10 +172,6 @@ function toggleLightboxFullscreen() {
   setLightboxFullscreen(!lightboxFullscreen);
 }
 
-export function isLightboxFullscreen() { return lightboxFullscreen; }
-export function exitLightboxFullscreen() {
-  if (lightboxFullscreen) setLightboxFullscreen(false);
-}
 
 /* Eigener Resize-Griff statt natives CSS resize: waechst symmetrisch um den
    Mittelpunkt der Box, statt nur von der oben-links-Ecke aus - die gezogene
@@ -222,8 +219,8 @@ attachOutsideClose(document.getElementById("lightbox-overlay"), closeLightbox);
 document.getElementById("lightbox-fullscreen").addEventListener("click", toggleLightboxFullscreen);
 document.getElementById("lightbox-img").addEventListener("dblclick", toggleLightboxFullscreen);
 document.getElementById("lightbox-actual").addEventListener("click", () => setLightboxActualSize(!lightboxActual));
-// Doppelklick auf ein Bild im Text eines Editors oeffnet die grosse Ansicht.
-document.addEventListener("dblclick", (e) => {
+// Klick auf ein Bild im Text eines Editors oeffnet die grosse Ansicht.
+document.addEventListener("click", (e) => {
   const img = e.target.closest(".ql-editor img");
   if (!img || !img.src) return;
   e.preventDefault();

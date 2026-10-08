@@ -2,7 +2,7 @@
 
 import { api, attachOutsideClose, cls, escapeHtml, fmtDate, fmtNum, fmtSigned, fmtTime, fmtVolume, ICON_IMAGE, ICON_JOURNAL, state, tile, withFilter } from './core.js';
 import { getAccountOptions } from './filters.js';
-import { closeLightbox, exitLightboxFullscreen, isLightboxFullscreen } from './images.js';
+import { closeLightbox } from './images.js';
 import { clearActiveJournal, flushJournal, mountJournalEditor, renderJournalList } from './journal.js';
 import { impactColorVar, NEWS_CURRENCIES, NEWS_EVENT_TYPES, NEWS_IMPACT_LEVELS, renderImpactTypeCurrencyChips } from './news.js';
 import { flushNotebookNote } from './notebooks.js';
@@ -415,8 +415,9 @@ attachOutsideClose(document.getElementById("modal-overlay"), closeModal);
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (document.getElementById("lightbox-overlay").classList.contains("visible")) {
-    if (isLightboxFullscreen()) exitLightboxFullscreen();
-    else closeLightbox();
+    // Escape schliesst die Bildansicht ganz - auch aus dem Vollbild heraus
+    // (vorher kam erst das kleine Fenster wieder, Nutzerwunsch: nur eins).
+    closeLightbox();
   } else {
     closeModal();
   }

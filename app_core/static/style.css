@@ -2879,7 +2879,7 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .page-trades[hidden] { display: none; }
 .day-trade-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .day-trade-list:empty { display: none; }
-.day-trade-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 52px minmax(0, 1fr) 60px 110px 64px; gap: 12px; align-items: center; padding: 7px 12px; font-size: 13px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--border); }
+.day-trade-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 46px 70px 48px minmax(0, 1fr) 80px 96px 56px; gap: 12px; align-items: center; padding: 7px 12px; font-size: 13px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--border); }
 .day-trade-row:first-child { border-top: none; }
 .day-trade-row:hover { background: var(--bg-hover); }
 .day-trade-row.active { background: var(--accent-fill); }
@@ -2945,3 +2945,30 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .sections-head-btn[aria-pressed="false"] { color: var(--text-faint); }
 /* .btn setzt display - ohne das bliebe der Knopf trotz hidden sichtbar */
 .lightbox-toolbar .btn[hidden] { display: none; }
+
+/* Trade-Zeile: Strategie und Tags in einer Spalte, Punkte vor dem Betrag */
+.day-trade-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.day-trade-row-strat { font-size: 12px; color: var(--text-dim); margin-right: 4px; }
+.day-trade-row-strat.muted { color: var(--text-faint); font-style: italic; }
+.day-trade-row-pts { text-align: right; font-weight: 600; }
+.day-trade-row .tag-chip { font-size: 11px; }
+
+/* Sidebar: Loeschknopf je Jahr/Monat erscheint beim Darueberfahren */
+.sec-row { position: relative; display: flex; align-items: center; }
+.sec-row > .sec-item, .sec-row > .sec-group-head { flex: 1; min-width: 0; }
+.sec-del { all: unset; cursor: pointer; position: absolute; right: 2px; width: 18px; height: 18px; display: none; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; color: var(--text-faint); background: var(--bg-hover); }
+.sec-row:hover > .sec-del, .sec-del:focus-visible { display: inline-flex; }
+.sec-del:hover { color: var(--red); background: var(--red-fill); }
+.sec-del:focus-visible { outline: 2px solid var(--accent); }
+.sections-add-wrap { display: inline-flex; }
+.sections > .sections-head:first-child { position: relative; }
+/* An der ganzen Kopfzeile verankert - am "+" ausgerichtet ragte es links aus der Sidebar und wurde abgeschnitten */
+.sections-add-menu { position: absolute; top: 100%; left: 4px; right: 4px; z-index: 30; display: flex; flex-direction: column; padding: 4px; margin-top: 4px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); text-transform: none; letter-spacing: 0; }
+.sections-add-menu[hidden] { display: none; }
+.sections-add-menu button { all: unset; cursor: pointer; padding: 7px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--text); }
+.sections-add-menu button:hover, .sections-add-menu button:focus-visible { background: var(--bg-hover); }
+.page-title-row { display: flex; align-items: center; gap: 10px; }
+.page-title-row .page-title-input { flex: 1; min-width: 0; }
+.page-delete-btn { flex-shrink: 0; opacity: 0.6; }
+.page-head:hover .page-delete-btn, .page-delete-btn:focus-visible { opacity: 1; }
+

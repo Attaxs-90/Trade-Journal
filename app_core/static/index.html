@@ -471,7 +471,10 @@
 <template id="tpl-page-day">
   <section class="view view-day onenote-page">
     <header class="page-head">
-      <input type="text" class="page-title-input" placeholder="Seitentitel, z. B. Kein Trade – NFP" aria-label="Seitentitel">
+      <div class="page-title-row">
+        <input type="text" class="page-title-input" placeholder="Seitentitel, z. B. Kein Trade – NFP" aria-label="Seitentitel">
+        <button type="button" class="btn btn-secondary btn-sm page-delete-btn" title="Inhalt dieser Seite löschen">Seite leeren</button>
+      </div>
       <div class="page-meta"></div>
       <span class="day-title" hidden></span>
     </header>

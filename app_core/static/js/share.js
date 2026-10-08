@@ -7,8 +7,8 @@ import { renderDayImages } from './images.js';
 import { mountJournalEditor } from './journal.js';
 import { mountView, setActiveNav } from './overview.js';
 import { fmtDuration } from './settings.js';
-import { renderTradeStrategyPanel } from './strategies.js';
-import { closeTagPopover, renderTradeTagCell } from './tags.js';
+import { getStrategies, renderTradeStrategyPanel } from './strategies.js';
+import { closeTagPopover, renderTradeTagCell, tagChipHtml } from './tags.js';
 import { tradeRMultiple } from './trades.js';
 
 /* ---------- Trade teilen (Canvas-Karte) ----------
@@ -388,10 +388,12 @@ export async function openDay(day) {
 export async function populateDay(container, day, opts = {}) {
   container.querySelector(".day-title").textContent = fmtDate(day);
 
-  const [data, accountOptions] = await Promise.all([
+  const [data, accountOptions, strategies] = await Promise.all([
     api(withFilter(`/api/days/${day}`)),
     getAccountOptions(),
+    getStrategies(),
   ]);
+  const strategyNames = new Map(strategies.map(st => [st.id, st.name]));
   const s = data.stats;
   const accountNames = new Map(accountOptions.filter(o => o.key !== "csv").map(o => [String(o.key), o.name]));
 
@@ -441,6 +443,11 @@ export async function populateDay(container, day, opts = {}) {
             <span class="day-trade-row-time">${fmtTime(t.entry_time).slice(0, 5)}</span>
             <span class="day-trade-row-inst">${escapeHtml(t.instrument)}</span>
             <span class="day-trade-row-dir ${t.direction === "Long" ? "pos" : "neg"}">${escapeHtml(t.direction)}</span>
+            <span class="day-trade-row-meta">
+              ${t.strategy_id && strategyNames.has(t.strategy_id) ? `<span class="day-trade-row-strat">${escapeHtml(strategyNames.get(t.strategy_id))}</span>` : `<span class="day-trade-row-strat muted">ohne Strategie</span>`}
+              ${(t.tags || []).map(tagChipHtml).join("")}
+            </span>
+            <span class="day-trade-row-pts ${cls(t.points)}">${fmtSigned(t.points, 1)} Pkt</span>
             <span class="day-trade-row-net ${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>
             <span class="day-trade-row-r ${r === null ? "muted" : cls(r)}">${r === null ? "–" : fmtSigned(r, 1) + "R"}</span>
           </button>`;

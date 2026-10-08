@@ -137,7 +137,13 @@ export async function renderSections() {
       <span class="sections-head-actions">
         <button type="button" class="sections-head-btn" id="sections-toggle-results" aria-pressed="${showSectionResults}"
           title="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}" aria-label="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}">${showSectionResults ? "$ an" : "$ aus"}</button>
-        <button type="button" class="sections-head-btn" id="sections-add-month" title="Nächsten Monat anlegen" aria-label="Nächsten Monat anlegen">+ Monat</button>
+        <span class="sections-add-wrap">
+          <button type="button" class="sections-head-btn" id="sections-add" title="Monat oder Jahr anlegen" aria-label="Monat oder Jahr anlegen" aria-haspopup="menu" aria-expanded="false">+</button>
+          <span class="sections-add-menu" id="sections-add-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-add="month">Nächsten Monat anlegen</button>
+            <button type="button" role="menuitem" data-add="year">Nächstes Jahr anlegen (12 Monate)</button>
+          </span>
+        </span>
         <button type="button" class="sections-head-btn" id="sections-today" title="Heutige Seite öffnen">Heute</button>
       </span>
     </div>`;
@@ -146,15 +152,21 @@ export async function renderSections() {
     const color = YEAR_COLORS[allYears.indexOf(y) % YEAR_COLORS.length];
     const open = expanded.has(`y${y}`);
     html += `<div class="sec-group" style="--sec-color:${color}">
-        <button type="button" class="sec-group-head" data-toggle="y${y}" aria-expanded="${open}">
-          <span class="sec-chevron${open ? " open" : ""}" aria-hidden="true"></span>
-          <span class="sec-name">${y}</span>${secRes(sumStats(months))}
-        </button>
+        <div class="sec-row">
+          <button type="button" class="sec-group-head" data-toggle="y${y}" aria-expanded="${open}">
+            <span class="sec-chevron${open ? " open" : ""}" aria-hidden="true"></span>
+            <span class="sec-name">${y}</span>${secRes(sumStats(months))}
+          </button>
+          <button type="button" class="sec-del" data-del-year="${y}" title="Jahr ${y} löschen" aria-label="Jahr ${y} löschen">×</button>
+        </div>
         <div class="sec-items"${open ? "" : " hidden"}>
-          ${months.map(m => `<button type="button" class="sec-item" data-month="${m.month}">
-              <span class="sec-tab" aria-hidden="true"></span>
-              <span class="sec-name">${monthName(m.month)}</span>${secRes(m)}
-            </button>`).join("")}
+          ${months.map(m => `<div class="sec-row">
+              <button type="button" class="sec-item" data-month="${m.month}">
+                <span class="sec-tab" aria-hidden="true"></span>
+                <span class="sec-name">${monthName(m.month)}</span>${secRes(m)}
+              </button>
+              <button type="button" class="sec-del" data-del-month="${m.month}" title="${monthName(m.month)} ${y} löschen" aria-label="${monthName(m.month)} ${y} löschen">×</button>
+            </div>`).join("")}
         </div>
       </div>`;
   }
@@ -172,13 +184,33 @@ export async function renderSections() {
     try { localStorage.setItem("sectionsShowResults", String(showSectionResults)); } catch { /* nur diese Sitzung */ }
     renderSections();
   };
-  host.querySelector("#sections-add-month").onclick = async () => {
-    const { month } = await api("/api/diary/months", { method: "POST" });
-    expanded.add(`y${month.slice(0, 4)}`);
-    writeStored("sectionsExpanded", [...expanded]);
-    await renderSections();
-    await openPages({ type: "month", ref: month });
-  };
+  const addBtn = host.querySelector("#sections-add");
+  const addMenu = host.querySelector("#sections-add-menu");
+  const setMenu = (open) => { addMenu.hidden = !open; addBtn.setAttribute("aria-expanded", String(open)); };
+  addBtn.onclick = (e) => { e.stopPropagation(); setMenu(addMenu.hidden); };
+  addMenu.querySelectorAll("[data-add]").forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      setMenu(false);
+      if (btn.dataset.add === "month") {
+        const { month } = await api("/api/diary/months", { method: "POST" });
+        expandYear(month.slice(0, 4));
+        await renderSections();
+        await openPages({ type: "month", ref: month });
+      } else {
+        const { year } = await api("/api/diary/years", { method: "POST" });
+        expandYear(String(year));
+        await renderSections();
+        await openPages({ type: "month", ref: `${year}-01` });
+      }
+    };
+  });
+  host.querySelectorAll("[data-del-month]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); deleteDiaryPart("month", btn.dataset.delMonth); };
+  });
+  host.querySelectorAll("[data-del-year]").forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); deleteDiaryPart("year", btn.dataset.delYear); };
+  });
   host.querySelector("#sections-add-notebook").onclick = () => createFolder(null);
   host.querySelectorAll("[data-toggle]").forEach(btn => {
     btn.onclick = (e) => {
@@ -194,6 +226,32 @@ export async function renderSections() {
     btn.onclick = () => openPages({ type: "folder", ref: btn.dataset.folder });
   });
   markSectionsActive();
+}
+
+function expandYear(y) {
+  expanded.add(`y${y}`);
+  writeStored("sectionsExpanded", [...expanded]);
+}
+
+/* Monat oder Jahr aus dem Tagebuch entfernen. Die Rueckfrage nennt die Zahl
+   der Journal-Eintraege, die mitgehen (Server-Probelauf mit dry_run) - Trades
+   bleiben immer erhalten, sie kommen per Sync und stehen unter Werkzeuge. */
+async function deleteDiaryPart(kind, key) {
+  const url = kind === "month" ? `/api/diary/months/${key}` : `/api/diary/years/${key}`;
+  const label = kind === "month" ? `${monthName(key)} ${key.slice(0, 4)}` : `Jahr ${key}`;
+  const { entries } = await api(url + "?dry_run=true", { method: "DELETE" });
+  const what = entries
+    ? `Dabei ${entries === 1 ? "wird 1 Journal-Eintrag" : `werden ${entries} Journal-Einträge`} (Tage, KWs, Monatsziel, Review) gelöscht.`
+    : "Es gibt dort keine Journal-Einträge.";
+  if (!await confirmDelete(`${label} wirklich löschen? ${what} Trades bleiben erhalten. Über „+“ lässt sich der Abschnitt später wieder anlegen.`, entries > 0)) return;
+  await api(url, { method: "DELETE" });
+  const affected = P.kind === "diary" && P.month && (kind === "month" ? P.month === key : P.month.startsWith(key));
+  await renderSections();
+  if (affected || state.view !== "pages") {
+    const sec = await api(withFilter("/api/diary/sections"));
+    const last = sec.months[sec.months.length - 1];
+    await openPages(last ? { type: "month", ref: last.month } : { type: "day", ref: todayIso() }, { reload: true });
+  }
 }
 
 function folderTreeHtml(parentId, depth) {
@@ -439,9 +497,21 @@ async function renderCanvas(t, keepScroll = false) {
 
 function pageHeadHtml(placeholder, metaHtml) {
   return `<header class="page-head">
-      <input type="text" class="page-title-input" placeholder="${escapeHtml(placeholder)}" aria-label="Seitentitel">
+      <div class="page-title-row">
+        <input type="text" class="page-title-input" placeholder="${escapeHtml(placeholder)}" aria-label="Seitentitel">
+        <button type="button" class="btn btn-secondary btn-sm page-delete-btn" title="Inhalt dieser Seite löschen">Seite leeren</button>
+      </div>
       <div class="page-meta">${metaHtml}</div>
     </header>`;
+}
+
+/* "Seite leeren" loescht den Journal-Eintrag der Seite (Titel, Text,
+   Bewertung) ueber den Loeschablauf des Editors - mit dessen Rueckfrage. Die
+   Seite selbst bleibt im Baum stehen: Tage und KWs ergeben sich aus dem
+   Kalender, ganze Monate/Jahre werden in der Sidebar geloescht. */
+function wirePageDelete(canvas) {
+  const btn = canvas.querySelector(".page-delete-btn");
+  if (btn) btn.onclick = () => canvas.querySelector(".journal-delete-btn")?.click();
 }
 
 async function renderDayPage(canvas, day) {
@@ -459,6 +529,7 @@ async function renderDayPage(canvas, day) {
   const titleInput = canvas.querySelector(".page-title-input");
   const data = await populateDay(canvas, day, { journal: { defaultFor: "day", titleInput, onSaved: softRefreshList } });
   canvas.querySelector(".page-trades").hidden = !data.trades.length;
+  wirePageDelete(canvas);
 }
 
 function statTiles(st, extra = []) {
@@ -497,6 +568,7 @@ async function renderWeekPage(canvas, ref) {
     titleInput: canvas.querySelector(".page-title-input"), onSaved: softRefreshList,
     placeholder: "Wie lief die Woche?",
   });
+  wirePageDelete(canvas);
 }
 
 async function renderMonthPage(canvas, type, ref) {
@@ -522,6 +594,7 @@ async function renderMonthPage(canvas, type, ref) {
     titleInput: canvas.querySelector(".page-title-input"), onSaved: softRefreshList,
     placeholder: isReview ? "Was nimmst du aus diesem Monat mit?" : "Was ist dein Ziel für diesen Monat?",
   });
+  wirePageDelete(canvas);
 }
 
 async function renderNotePage(canvas, id) {
@@ -583,6 +656,14 @@ document.addEventListener("keydown", (e) => {
   if (!next) return;
   e.preventDefault();
   next.click();
+});
+
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("sections-add-menu");
+  if (menu && !menu.hidden && !e.target.closest(".sections-add-wrap")) {
+    menu.hidden = true;
+    document.getElementById("sections-add")?.setAttribute("aria-expanded", "false");
+  }
 });
 
 // Link oder Zurueck-Taste auf eine Seiten-Adresse (#tag/..., #notiz/...)
