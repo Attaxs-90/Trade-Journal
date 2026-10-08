@@ -2920,7 +2920,7 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .page-canvas .ql-toolbar.ql-snow { position: sticky; top: -28px; z-index: 2; background: var(--bg-elevated); border: none; border-bottom: 1px solid var(--border); padding: 6px 0; }
 .page-canvas .ql-container.ql-snow { border: none; font-size: 15px; font-family: var(--font-sans); }
 .page-canvas .ql-editor { min-height: 320px; padding: 14px 2px; line-height: 1.6; }
-.page-canvas .ql-editor h3 { font-size: 15px; margin-top: 14px; color: var(--accent); }
+.page-canvas .ql-editor h3 { font-size: 15px; margin-top: 14px; color: var(--text); }
 .page-canvas .ql-editor img { max-width: 100%; height: auto; border-radius: 4px; }
 .page-canvas .ql-editor.ql-blank::before { left: 2px; }
 .onenote-note .journal-footer { order: 2; justify-content: flex-start; }
