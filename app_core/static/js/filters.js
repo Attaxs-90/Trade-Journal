@@ -1,5 +1,6 @@
 /* Globaler Konten- und Tag-Filter (Sidebar, Uebersicht, Trades, Journal). */
 
+import { refreshPages } from './pages.js';
 import { renderAllAnalyticsWidgets } from './analytics.js';
 import { renderMonth } from './calendar.js';
 import { api, escapeHtml, state, tagTextColor } from './core.js';
@@ -398,4 +399,5 @@ export function refreshCurrentView() {
   else if (state.view === "month") renderMonth();
   else if (state.view === "day" && state.currentDay) populateDay(document.getElementById("content"), state.currentDay);
   else if (state.view === "analytics") renderAllAnalyticsWidgets();
+  else if (state.view === "pages") refreshPages();
 }

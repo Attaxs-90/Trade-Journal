@@ -452,6 +452,24 @@ MIGRATIONS: list[str] = [
          AND (SELECT login FROM broker_accounts b WHERE b.id = trades.account_id) IS NOT NULL""",  # -> Version 40
     "ALTER TABLE broker_accounts ADD COLUMN daily_loss_limit REAL",  # -> Version 41
     "ALTER TABLE broker_accounts ADD COLUMN max_loss_limit REAL",    # -> Version 42
+    # OneNote-Redesign: Vorlage, die eine leere Tages-/KW-/Monats-/Review-Seite
+    # automatisch vorbefuellt ('day', 'week', 'month', 'review' oder NULL).
+    "ALTER TABLE journal_templates ADD COLUMN default_for TEXT",     # -> Version 43
+    # Notizbuecher als OneNote-Abschnitte: feste Reihenfolge und Abschnittsfarbe.
+    "ALTER TABLE notebook_nodes ADD COLUMN position INTEGER NOT NULL DEFAULT 0",  # -> Version 44
+    "ALTER TABLE notebook_nodes ADD COLUMN color TEXT",              # -> Version 45
+    # Herkunft importierter Seiten (OneNote-Seiten-ID) - macht den Import
+    # wiederholbar, ohne doppelt anzulegen.
+    "ALTER TABLE notebook_nodes ADD COLUMN source_key TEXT",         # -> Version 46
+    "ALTER TABLE journal_entries ADD COLUMN source_key TEXT",        # -> Version 47
+    # Leitfragen aus dem OneNote-Tagebuch als Standardvorlagen.
+    """INSERT INTO journal_templates (name, content_html, position, default_for) VALUES
+         ('Tagesseite', '<h3>Mein Ziel:</h3><p><br></p><h3>Was mache ich, um mein Ziel zu erreichen?</h3><p><br></p><h3>Wie war der Tag bisher?</h3><p><br></p><h3>Was hätte ich besser machen können?</h3><p><br></p><h3>Was habe ich richtig gut gemacht?</h3><p><br></p>', -4, 'day'),
+         ('Wochenseite', '<h3>Was hätte ich besser machen können?</h3><p><br></p><h3>Was habe ich richtig gut gemacht?</h3><p><br></p><h3>Was möchte ich nächste Woche erreichen?</h3><p><br></p>', -3, 'week'),
+         ('Monatsziel', '<h3>Mein Ziel für diesen Monat:</h3><p><br></p><h3>Woran arbeite ich?</h3><p><br></p>', -2, 'month'),
+         ('Monatsreview', '<h3>Positiv:</h3><p><br></p><h3>Negativ:</h3><p><br></p><h3>Verbesserungen:</h3><p><br></p><h3>Dies waren meine besten Setups:</h3><p><br></p>', -1, 'review')""",  # -> Version 48
+    "CREATE INDEX IF NOT EXISTS idx_journal_source ON journal_entries(source_key)",   # -> Version 49
+    "CREATE INDEX IF NOT EXISTS idx_notebook_source ON notebook_nodes(source_key)",   # -> Version 50
 ]
 
 
@@ -1352,7 +1370,7 @@ def delete_image(image_id: int):
 # Eintraege haengen am Datum (bzw. spaeter an Woche/Monat), nicht am Trade:
 # ein Handelstag kann einen Eintrag haben, ein Eintrag braucht keinen Trade.
 
-JOURNAL_TYPES = {"day", "week", "month", "trade"}
+JOURNAL_TYPES = {"day", "week", "month", "review", "trade"}
 
 
 def _attach_journal_tags(entries: list[dict]) -> list[dict]:
@@ -1619,6 +1637,60 @@ def journal_map(entry_type: str = "day", start: str | None = None, end: str | No
     return {r["ref_key"]: {"rating": r["rating"]} for r in rows}
 
 
+def journal_meta(start_day: str, end_day: str, period_refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """(entry_type, ref_key) -> Kopfdaten fuer den Seitenbaum des Tagebuchs:
+    alle Tages-Eintraege im Zeitraum plus die genannten KW-/Monats-/Review-
+    Eintraege in einer einzigen Query (kein Query je Seite)."""
+    parts = ["(entry_type = 'day' AND ref_key BETWEEN ? AND ?)"]
+    params: list = [start_day, end_day]
+    for entry_type, ref_key in period_refs:
+        parts.append("(entry_type = ? AND ref_key = ?)")
+        params += [entry_type, ref_key]
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT entry_type, ref_key, title, rating,
+                       (length(trim(plain_text)) > 0 OR content_html LIKE '%<img%') AS has_content
+                FROM journal_entries WHERE {' OR '.join(parts)}""",
+            params,
+        ).fetchall()
+    return {(r["entry_type"], r["ref_key"]): dict(title=r["title"] or "", rating=r["rating"],
+                                                  has_content=bool(r["has_content"])) for r in rows}
+
+
+# Monat eines Tages im Tagebuch = Monat des Donnerstags seiner ISO-Woche (siehe
+# app/diary.py) - sonst zeigte die Abschnittsleiste fuer "September" eine
+# andere Summe als dessen Seitenliste (KW 40 mit 28.-30.09. gehoert zu Oktober).
+_DIARY_MONTH_SQL = "substr(date({col}, printf('%+d days', 3 - ((CAST(strftime('%w', {col}) AS INTEGER) + 6) % 7))), 1, 7)"
+
+
+def diary_month_totals(account_keys: list[str] | None = None, tag_keys: list[str] | None = None,
+                       tag_logic: str = "or", strategy_keys: list[str] | None = None) -> dict[str, dict]:
+    """Monat -> Kennzahlen fuer die Abschnittsleiste des Tagebuchs, ein Query
+    ueber alle Trades. r_sum zaehlt nur Trades mit hinterlegtem Risiko;
+    r_trades sagt, wie viele das waren (fuer "R unvollstaendig")."""
+    clause, params = _trade_filters(account_keys, tag_keys, tag_logic, strategy_keys)
+    where = f"WHERE {clause}" if clause else ""
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""SELECT {_DIARY_MONTH_SQL.format(col="day")} AS month, COUNT(*) AS trades,
+                       ROUND(SUM(net_usd), 2) AS net, ROUND(SUM(points), 2) AS points,
+                       SUM(CASE WHEN risk_usd > 0 THEN net_usd / risk_usd END) AS r_sum,
+                       SUM(CASE WHEN risk_usd > 0 THEN 1 ELSE 0 END) AS r_trades
+                FROM trades {where} GROUP BY month""",
+            params,
+        ).fetchall()
+        entry_rows = conn.execute(
+            f"""SELECT CASE WHEN entry_type = 'day' THEN {_DIARY_MONTH_SQL.format(col="ref_key")}
+                            ELSE substr(ref_key, 1, 7) END AS month, COUNT(*) AS entries
+               FROM journal_entries WHERE entry_type IN ('day', 'month', 'review') GROUP BY month"""
+        ).fetchall()
+    out = {r["month"]: dict(r) for r in rows}
+    for r in entry_rows:
+        out.setdefault(r["month"], dict(month=r["month"], trades=0, net=0.0, points=0.0, r_sum=None, r_trades=0))
+        out[r["month"]]["entries"] = r["entries"]
+    return out
+
+
 def list_journal_templates() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
@@ -1627,25 +1699,39 @@ def list_journal_templates() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def add_journal_template(name: str, content_html: str = "", position: int = 0) -> int:
+def add_journal_template(name: str, content_html: str = "", position: int = 0,
+                         default_for: str | None = None) -> int:
     """Ohne explizite Position landet die Vorlage hinten - sonst draengt sich
     jede neue Vorlage mit position 0 vor die vorhandenen."""
     with get_conn() as conn:
         if not position:
             row = conn.execute("SELECT COALESCE(MAX(position), 0) + 1 as next FROM journal_templates").fetchone()
             position = row["next"]
+        _clear_template_default(conn, default_for)
         cur = conn.execute(
-            "INSERT INTO journal_templates (name, content_html, position) VALUES (?, ?, ?)",
-            (name, content_html, position),
+            "INSERT INTO journal_templates (name, content_html, position, default_for) VALUES (?, ?, ?, ?)",
+            (name, content_html, position, default_for),
         )
         return cur.lastrowid
 
 
-def update_journal_template(template_id: int, name: str, content_html: str, position: int = 0):
+JOURNAL_TEMPLATE_DEFAULTS = {"day", "week", "month", "review"}
+
+
+def _clear_template_default(conn, default_for: str | None):
+    """Je Seitenart gibt es hoechstens eine Standardvorlage - eine neu gesetzte
+    loest die bisherige ab, statt dass zwei gleichzeitig vorbefuellen wollen."""
+    if default_for:
+        conn.execute("UPDATE journal_templates SET default_for = NULL WHERE default_for = ?", (default_for,))
+
+
+def update_journal_template(template_id: int, name: str, content_html: str, position: int = 0,
+                            default_for: str | None = None):
     with get_conn() as conn:
+        _clear_template_default(conn, default_for)
         conn.execute(
-            "UPDATE journal_templates SET name = ?, content_html = ?, position = ? WHERE id = ?",
-            (name, content_html, position, template_id),
+            "UPDATE journal_templates SET name = ?, content_html = ?, position = ?, default_for = ? WHERE id = ?",
+            (name, content_html, position, default_for, template_id),
         )
 
 
@@ -1662,8 +1748,8 @@ def list_notebook_nodes() -> list[dict]:
     Oeffnen einer einzelnen Notiz noetig, siehe get_notebook_node)."""
     with get_conn() as conn:
         rows = conn.execute(
-            """SELECT id, parent_id, node_type, name, plain_text, created_at, updated_at
-               FROM notebook_nodes ORDER BY node_type ASC, name COLLATE NOCASE"""
+            """SELECT id, parent_id, node_type, name, plain_text, position, color, created_at, updated_at
+               FROM notebook_nodes ORDER BY position, node_type ASC, name COLLATE NOCASE"""
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1714,8 +1800,11 @@ def create_notebook_node(parent_id: int | None, node_type: str, name: str) -> di
 
 
 def update_notebook_node(node_id: int, name: str | None = None, content_html: str | None = None,
-                          plain_text: str | None = None) -> dict | None:
+                          plain_text: str | None = None, color: str | None = None) -> dict | None:
     fields, params = [], []
+    if color is not None:
+        # Leerer String = Farbe entfernen
+        fields.append("color = ?"); params.append(color or None)
     if name is not None:
         fields.append("name = ?"); params.append(name)
     if content_html is not None:

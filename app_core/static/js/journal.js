@@ -1,7 +1,7 @@
 /* Journal: Editor (Quill), Journal-Seite, Jahr/Monat-Uebersicht, Suche. */
 
 import { monthLabel, openDayModal } from './calendar.js';
-import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, cls, escapeHtml, fmtDate, fmtSigned, readStoredArray, state, tile, writeStored } from './core.js';
+import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, cls, escapeHtml, fmtDate, fmtSigned, readStoredArray, showAppError, state, tile, writeStored } from './core.js';
 import { confirmDelete } from './dialogs.js';
 import { buildTagChipGroups, getTags } from './filters.js';
 import { activeNotebookNote, clearNbDrag, nbDrag, notebookCreateDirect, notebookMoveTo, renderNotebookSearchResults, saveNotebookNote, switchJournalTab } from './notebooks.js';
@@ -80,7 +80,7 @@ export async function saveJournal(force = false, j = activeJournal) {
   j.dirty = false;
   const html = j.quill.getLength() > 1 ? j.quill.root.innerHTML : "";
   const payload = {
-    title: "",
+    title: j.title || "",
     content_html: html,
     plain_text: j.quill.getText(),
     rating: j.rating,
@@ -111,6 +111,8 @@ async function deleteJournalEntry(j) {
   j.dirty = false;
   await api(`/api/journal/${j.entryType}/${j.refKey}`, { method: "DELETE" });
   j.quill.setContents([]);
+  j.title = "";
+  if (j.titleInput) j.titleInput.value = "";
   j.rating = null;
   j.mood = null;
   j.followedPlan = null;
@@ -144,7 +146,38 @@ function journalScoreRow(label, name, value, labels) {
 }
 
 const RATING_LABELS = ["Sehr schlecht", "Schlecht", "Durchschnitt", "Gut", "Sehr gut"];
+// "Plan befolgt" gibt es nur am Tag - Woche/Monat/Review bewerten sich als Ganzes.
+const JOURNAL_KIND_LABELS = {
+  day: { rating: "Tagesbewertung", tags: "Tags für diesen Tag" },
+  trade: { rating: "Trade-Bewertung", tags: "Tags für diesen Trade" },
+  week: { rating: "Wochenbewertung", tags: "Tags für diese Woche" },
+  month: { rating: "Monatsbewertung", tags: "Tags für diesen Monat" },
+  review: { rating: "Monatsbewertung", tags: "Tags für dieses Review" },
+};
 const MOOD_LABELS = ["Sehr schlecht", "Angeschlagen", "Neutral", "Gut", "Topfit"];
+
+/* Quill-Uploader fuer eingefuegte/gezogene Bilder (Strg+V eines Screenshots):
+   statt Quills Standard (base64 im HTML, blaeht die Datenbank auf) ueber den
+   jeweiligen Upload-Endpunkt hochladen und nur verlinken. uploadFn(file) liefert
+   die Antwort mit filename. onDone markiert den Editor als geaendert. */
+export function imageUploaderModule(uploadFn, onDone) {
+  return {
+    mimetypes: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"],
+    handler(range, files) {
+      const quill = this.quill;
+      (async () => {
+        let index = range.index;
+        for (const file of files) {
+          const img = await uploadFn(file);
+          quill.insertEmbed(index, "image", `/media/${img.filename}`, "user");
+          index += 1;
+        }
+        quill.setSelection(index);
+        if (onDone) onDone();
+      })().catch(e => showAppError("Bild konnte nicht hochgeladen werden: " + e.message));
+    },
+  };
+}
 
 /* Haengt den Editor in host ein. host.dataset.journalRef merkt sich den bereits
    gemounteten Tag: populateDay() laeuft mehrfach auf demselben Container (z.B.
@@ -171,12 +204,13 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
   if (!host.isConnected || host.dataset.journalRef !== refKey) return;
 
   const isTrade = entryType === "trade";
+  const kind = JOURNAL_KIND_LABELS[entryType] || JOURNAL_KIND_LABELS.day;
   host.innerHTML = `
     <div class="journal-editor">
       <div class="journal-metrics">
-        ${journalScoreRow(isTrade ? "Trade-Bewertung" : "Tagesbewertung", "rating", entry ? entry.rating : null, RATING_LABELS)}
+        ${journalScoreRow(kind.rating, "rating", entry ? entry.rating : null, RATING_LABELS)}
         ${journalScoreRow("Verfassung", "mood", entry ? entry.mood : null, MOOD_LABELS)}
-        ${isTrade ? "" : `
+        ${entryType !== "day" ? "" : `
         <div class="journal-metric" data-metric="plan">
           <span class="journal-metric-label">Plan befolgt</span>
           <div class="journal-score-row">
@@ -188,7 +222,7 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
       <div class="journal-templates"></div>
       <div class="journal-quill"></div>
       <div class="journal-tag-picker">
-        <div class="journal-section-label">${isTrade ? "Tags für diesen Trade" : "Tags für diesen Tag"}</div>
+        <div class="journal-section-label">${kind.tags}</div>
         <div class="journal-tag-chips"></div>
       </div>
       <div class="journal-footer">
@@ -198,14 +232,33 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
       </div>
     </div>`;
 
+  const uploadImage = (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (isTrade) fd.append("trade_id", refKey);
+    return api(`/api/days/${imageDay}/images`, { method: "POST", body: fd });
+  };
+  let jRef = null;
   const quill = new Quill(host.querySelector(".journal-quill"), {
     theme: "snow",
-    placeholder: isTrade ? "Wie ist dieser Trade gelaufen? Was hast du gelernt?" : "Was ist heute passiert? Was hast du gelernt?",
-    modules: { toolbar: { container: JOURNAL_TOOLBAR } },
+    placeholder: opts.placeholder || (isTrade ? "Wie ist dieser Trade gelaufen? Was hast du gelernt?" : "Was ist heute passiert? Was hast du gelernt?"),
+    modules: {
+      toolbar: { container: JOURNAL_TOOLBAR },
+      uploader: imageUploaderModule(uploadImage, () => jRef && journalMarkDirty(jRef)),
+    },
   });
-  if (entry && entry.content_html) quill.clipboard.dangerouslyPasteHTML(entry.content_html);
+  if (entry && entry.content_html) {
+    quill.clipboard.dangerouslyPasteHTML(entry.content_html);
+  } else if (opts.defaultFor) {
+    // Leere Seite: Leitfragen der Standardvorlage vorbefuellen, ohne den Editor
+    // als geaendert zu markieren - gespeichert wird erst, wenn wirklich getippt wird.
+    const tpl = templates.find(t => t.default_for === opts.defaultFor);
+    if (tpl && tpl.content_html) quill.clipboard.dangerouslyPasteHTML(tpl.content_html, "api");
+  }
 
   const j = {
+    title: entry ? (entry.title || "") : "",
+    titleInput: opts.titleInput || null,
     refKey, quill, host, entryType, imageDay,
     dirty: false, timer: null,
     rating: entry ? entry.rating : null,
@@ -216,6 +269,12 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
     onSaved: opts.onSaved || null,
   };
   activeJournal = j;
+  jRef = j;
+  if (j.titleInput) {
+    j.titleInput.value = j.title;
+    j.titleInput.oninput = () => { j.title = j.titleInput.value; journalMarkDirty(j); };
+    j.titleInput.onblur = () => { if (j.dirty) saveJournal(false, j); };
+  }
 
   quill.on("text-change", (delta, old, source) => {
     if (source === "user") journalMarkDirty(j);
@@ -229,10 +288,7 @@ export async function mountJournalEditor(host, refKey, opts = {}) {
     input.accept = "image/*";
     input.onchange = async () => {
       if (!input.files || !input.files[0]) return;
-      const fd = new FormData();
-      fd.append("file", input.files[0]);
-      if (isTrade) fd.append("trade_id", refKey);
-      const img = await api(`/api/days/${imageDay}/images`, { method: "POST", body: fd });
+      const img = await uploadImage(input.files[0]);
       const range = quill.getSelection(true);
       quill.insertEmbed(range.index, "image", `/media/${img.filename}`, "user");
       quill.setSelection(range.index + 1);

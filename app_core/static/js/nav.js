@@ -10,6 +10,7 @@ import { flushJournal, openJournal } from './journal.js';
 import { openOverview, openTrades } from './overview.js';
 import { goToSettingsCard, openSettings } from './settings.js';
 import { goToTodoList, openTodos } from './todos.js';
+import { clearSectionsActive } from './pages.js';
 
 /* ---------- Nav ---------- */
 
@@ -51,6 +52,7 @@ document.querySelectorAll(".nav-item").forEach(el => {
     // Erst den Journal-Editor leeren, dann wechseln - sonst geht der zuletzt
     // getippte, noch nicht automatisch gespeicherte Absatz verloren.
     await flushJournal();
+    clearSectionsActive();
     if (el.dataset.view === "overview") openOverview();
     if (el.dataset.view === "trades") openTrades();
     if (el.dataset.view === "journal") openJournal();

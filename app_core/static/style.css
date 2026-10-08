@@ -2800,3 +2800,137 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .prop-limit-fill { height: 100%; border-radius: 3px; background: var(--green); }
 .prop-limit-fill.warn { background: var(--impact-medium); }
 .prop-limit-fill.breached { background: var(--red); }
+
+/* ---------- OneNote-Aufbau (pages.js) ----------
+   Sidebar = Abschnitte, darin Tagebuch-Monate und Notizbuch-Ordner, darunter
+   die bisherigen Ansichten als "Werkzeuge". Die Seitenansicht hat zwei eigene
+   Scrollbereiche (Liste, Seite), deshalb kein Padding/Scroll am .content. */
+.sidebar { gap: 14px; padding-bottom: 12px; }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 0 -10px; padding: 0 10px 8px; scrollbar-width: thin; }
+.sidebar-scroll .nav { gap: 1px; }
+.sidebar-scroll .nav-item, .sidebar-scroll .nav-item-row { padding-top: 6px; padding-bottom: 6px; }
+.sidebar-scroll .nav-item-has-subnav { padding: 0; }
+.sections { display: flex; flex-direction: column; gap: 1px; }
+.sections-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+.sections > .sections-head:first-child { padding-top: 2px; }
+.sections-head-btn { all: unset; cursor: pointer; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 2px 8px; border-radius: 6px; color: var(--accent); }
+.sections-head-btn:hover, .sections-head-btn:focus-visible { background: var(--accent-fill); }
+.sections-empty { padding: 4px 8px; font-size: 12px; color: var(--text-faint); }
+.sec-group-head, .sec-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 6px; font-size: 13px; color: var(--text-dim); }
+.sec-group-head { font-weight: 600; color: var(--text); }
+.sec-group-head:hover, .sec-item:hover { background: var(--bg-hover); color: var(--text); }
+.sec-group-head:focus-visible, .sec-item:focus-visible, .page-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sec-items { display: flex; flex-direction: column; gap: 1px; padding-left: 10px; }
+.sec-items[hidden] { display: none; }
+.sec-item.active { background: var(--bg-hover); color: var(--text); font-weight: 600; }
+.sec-tab { width: 4px; height: 16px; border-radius: 2px; background: var(--sec-color); flex-shrink: 0; }
+.sec-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-chevron { width: 14px; height: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-faint); }
+.sec-chevron::before { content: ""; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s ease; }
+.sec-chevron.open::before { transform: rotate(45deg); }
+.sec-folder-row .sec-chevron { box-shadow: inset 3px 0 0 var(--sec-color); }
+.sec-res { font-size: 11px; font-weight: 500; }
+html[data-sidebar="collapsed"] .app .sections,
+html[data-sidebar="collapsed"] .app .sections-head { display: none; }
+
+.content:has(> .view-pages) { padding: 0; overflow: hidden; }
+.view.view-pages { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 0; max-width: none; height: 100%; min-height: 0; }
+.page-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg); }
+.page-list-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px; }
+.page-list-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 600; }
+.page-list-title > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-unit-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+.page-unit-toggle button { all: unset; cursor: pointer; padding: 3px 8px; font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.page-unit-toggle button.active { background: var(--accent-fill); color: var(--accent); }
+.page-unit-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.page-list-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px; }
+.page-list-actions:not(:empty) { padding-bottom: 8px; }
+.btn.btn-sm { padding: 4px 10px; font-size: 12px; }
+.pl-color input { width: 26px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
+.page-list-items { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 24px; scrollbar-width: thin; }
+.page-list-empty { padding: 16px 10px; color: var(--text-faint); font-size: 13px; }
+.page-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border-radius: 6px; border-left: 3px solid transparent; font-size: 13px; color: var(--text); }
+.page-item:hover { background: var(--bg-hover); }
+.page-item.active { background: var(--accent-fill); border-left-color: var(--accent); }
+.page-item.lvl-1 { margin-top: 6px; font-weight: 600; }
+.page-item.lvl-2 { padding-left: 26px; }
+.page-item.no-entry .pi-name { color: var(--text-dim); }
+.page-item.is-today .pi-name { color: var(--accent); font-weight: 600; }
+.page-item.is-future { opacity: 0.55; }
+.pi-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; white-space: nowrap; }
+.pi-name { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.pi-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); font-weight: 400; }
+.pi-news { flex-shrink: 0; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 4px; background: var(--red-fill); color: var(--red); line-height: 16px; }
+.pi-res { flex-shrink: 0; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pi-res.muted, .page-res.muted { color: var(--text-faint); }
+
+.page-canvas { min-height: 0; overflow-y: auto; padding: 28px 48px 96px; background: var(--bg-elevated); }
+.view.onenote-page { max-width: 1040px; gap: 16px; }
+.page-head { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.page-title-input, .onenote-note .notebook-note-title { all: unset; box-sizing: border-box; width: 100%; font-size: 26px; font-weight: 600; line-height: 1.25; color: var(--text); padding: 2px 0; border-bottom: 2px solid transparent; }
+.page-title-input::placeholder, .onenote-note .notebook-note-title::placeholder { color: var(--text-faint); font-weight: 400; }
+.page-title-input:focus, .onenote-note .notebook-note-title:focus { border-bottom-color: var(--accent); }
+.page-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); }
+.page-res { font-weight: 700; font-variant-numeric: tabular-nums; }
+.page-cum { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.page-section-label { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+
+.page-trades { display: flex; flex-direction: column; gap: 10px; }
+.page-trades[hidden] { display: none; }
+.day-trade-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.day-trade-list:empty { display: none; }
+.day-trade-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 52px minmax(0, 1fr) 60px 110px 64px; gap: 12px; align-items: center; padding: 7px 12px; font-size: 13px; font-variant-numeric: tabular-nums; border-top: 1px solid var(--border); }
+.day-trade-row:first-child { border-top: none; }
+.day-trade-row:hover { background: var(--bg-hover); }
+.day-trade-row.active { background: var(--accent-fill); }
+.day-trade-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.day-trade-row-time { color: var(--text-faint); }
+.day-trade-row-inst { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.day-trade-row-net, .day-trade-row-r { text-align: right; font-weight: 600; }
+.page-trades .day-stats { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.page-trades .day-stats .stat-tile { padding: 10px 12px; }
+.page-trades .day-stats .stat-tile .value { font-size: 16px; }
+.page-trade-details > summary, .page-obs > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-dim); padding: 4px 0; }
+.page-trade-details[open] > summary { margin-bottom: 8px; }
+.page-obs { padding: 12px 16px; }
+.page-obs[open] > summary { margin-bottom: 10px; }
+
+.page-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.page-tile { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.page-tile .label { font-size: 11px; color: var(--text-faint); }
+.page-tile .value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.page-day-rows { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.page-day-rows:empty { display: none; }
+.page-day-row { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 7px 12px; font-size: 13px; border-top: 1px solid var(--border); }
+.page-day-row:first-child { border-top: none; }
+.page-day-row:hover { background: var(--bg-hover); }
+.page-day-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pdr-day { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pdr-title { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-empty { padding: 60px 0; text-align: center; color: var(--text-dim); }
+
+/* Editor auf der Seite: ruhig wie ein Blatt Papier - Werkzeugleiste klebt oben,
+   Bewertung/Tags/Buttons klein darunter. */
+.page-journal .journal-editor, .onenote-note .notebook-editor-host { display: flex; flex-direction: column; gap: 10px; }
+.page-journal .journal-quill, .onenote-note .journal-quill { order: 1; }
+.page-journal .journal-metrics { order: 3; display: flex; flex-wrap: wrap; gap: 16px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.page-journal .journal-templates { order: 4; }
+.page-journal .journal-tag-picker { order: 5; }
+.page-journal .journal-footer { order: 6; }
+.page-canvas .ql-toolbar.ql-snow { position: sticky; top: -28px; z-index: 2; background: var(--bg-elevated); border: none; border-bottom: 1px solid var(--border); padding: 6px 0; }
+.page-canvas .ql-container.ql-snow { border: none; font-size: 15px; font-family: var(--font-sans); }
+.page-canvas .ql-editor { min-height: 320px; padding: 14px 2px; line-height: 1.6; }
+.page-canvas .ql-editor h3 { font-size: 15px; margin-top: 14px; color: var(--accent); }
+.page-canvas .ql-editor img { max-width: 100%; height: auto; border-radius: 4px; }
+.page-canvas .ql-editor.ql-blank::before { left: 2px; }
+.onenote-note .journal-footer { justify-content: flex-start; }
+
+.onenote-groups { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.onenote-group-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.onenote-group-row .muted { margin-left: auto; color: var(--text-faint); font-size: 12px; }
+.onenote-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+@media (max-width: 1280px) {
+  .view.view-pages { grid-template-columns: 240px minmax(0, 1fr); }
+  .page-canvas { padding: 22px 24px 80px; }
+}

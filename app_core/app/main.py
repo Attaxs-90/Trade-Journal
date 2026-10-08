@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -19,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from . import backup, db, earnings, news, weights
+from . import backup, db, diary, earnings, news, onenote_import, weights
 from .brokers import sync_account, ERRORS as BROKER_ERRORS, ALL_PLATFORMS, MANUAL_PLATFORMS
 from .config import IMAGES_DIR
 from .images import save_image, delete_image_files, thumb_name_for
@@ -320,6 +321,7 @@ class JournalTemplateUpdate(BaseModel):
     name: str
     content_html: str = ""
     position: int = 0
+    default_for: str | None = None   # 'day', 'week', 'month', 'review' oder None
 
 
 class NotebookNodeCreate(BaseModel):
@@ -332,6 +334,11 @@ class NotebookNodeUpdate(BaseModel):
     name: str | None = None
     content_html: str | None = None
     plain_text: str | None = None
+    color: str | None = None   # Abschnittsfarbe, "" entfernt sie
+
+
+class OneNoteImportRequest(BaseModel):
+    groups: list[str] | None = None   # oberste OneNote-Bereiche; None = alle nicht sensiblen
 
 
 class NotebookNodeMove(BaseModel):
@@ -983,7 +990,19 @@ def _check_journal_ref(entry_type: str, ref_key: str) -> tuple[str, str]:
         _check_day(ref_key)
     elif entry_type == "trade" and not ref_key.isdigit():
         raise HTTPException(400, "Trade-Bewertung braucht eine numerische Trade-ID.")
+    elif entry_type == "week" and not re.fullmatch(r"\d{4}-W\d{2}", ref_key):
+        raise HTTPException(400, "Kalenderwoche braucht das Format JJJJ-Www.")
+    elif entry_type in ("month", "review") and not re.fullmatch(r"\d{4}-\d{2}", ref_key):
+        raise HTTPException(400, "Monat braucht das Format JJJJ-MM.")
     return entry_type, ref_key
+
+
+def _check_template_default(value: str | None) -> str | None:
+    if value in (None, ""):
+        return None
+    if value not in db.JOURNAL_TEMPLATE_DEFAULTS:
+        raise HTTPException(400, "Unbekannte Seitenart für die Standardvorlage.")
+    return value
 
 
 def _clamp_score(value: int | None) -> int | None:
@@ -1040,6 +1059,41 @@ def api_bulk_delete_journal(entry_type: str, payload: JournalBulkDelete):
     return {"deleted": deleted}
 
 
+@app.get("/api/diary/sections")
+def api_diary_sections(accounts: str | None = None, tags: str | None = None, tag_logic: str = "or",
+                       strategies: str | None = None):
+    return diary.build_sections(_parse_keys(accounts), _parse_keys(tags), tag_logic, _parse_keys(strategies))
+
+
+@app.get("/api/diary/{year}/{month}")
+def api_diary_month(year: int, month: int, accounts: str | None = None, tags: str | None = None,
+                    tag_logic: str = "or", strategies: str | None = None):
+    if not (1 <= month <= 12 and 1900 <= year <= 9999):
+        raise HTTPException(400, "Ungültiger Monat.")
+    return diary.build_month(year, month, _parse_keys(accounts), _parse_keys(tags), tag_logic,
+                             _parse_keys(strategies))
+
+
+@app.get("/api/onenote/structure")
+def api_onenote_structure():
+    try:
+        return onenote_import.structure()
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/onenote/import")
+def api_onenote_import(payload: OneNoteImportRequest):
+    if not onenote_import.start_import(payload.groups):
+        raise HTTPException(409, "Der Import läuft bereits.")
+    return onenote_import.status()
+
+
+@app.get("/api/onenote/status")
+def api_onenote_status():
+    return onenote_import.status()
+
+
 @app.get("/api/journal-templates")
 def api_list_journal_templates():
     return db.list_journal_templates()
@@ -1050,7 +1104,8 @@ def api_add_journal_template(payload: JournalTemplateUpdate):
     name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Name darf nicht leer sein.")
-    return {"id": db.add_journal_template(name, payload.content_html, payload.position)}
+    return {"id": db.add_journal_template(name, payload.content_html, payload.position,
+                                          _check_template_default(payload.default_for))}
 
 
 @app.put("/api/journal-templates/{template_id}")
@@ -1058,7 +1113,8 @@ def api_update_journal_template(template_id: int, payload: JournalTemplateUpdate
     name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Name darf nicht leer sein.")
-    db.update_journal_template(template_id, name, payload.content_html, payload.position)
+    db.update_journal_template(template_id, name, payload.content_html, payload.position,
+                               _check_template_default(payload.default_for))
     return {"ok": True}
 
 
@@ -1112,7 +1168,10 @@ def api_update_notebook(node_id: int, payload: NotebookNodeUpdate):
     name = payload.name.strip() if payload.name is not None else None
     if name == "":
         raise HTTPException(400, "Name darf nicht leer sein.")
-    node = db.update_notebook_node(node_id, name, payload.content_html, payload.plain_text)
+    color = payload.color
+    if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        raise HTTPException(400, "Farbe muss als #RRGGBB angegeben werden.")
+    node = db.update_notebook_node(node_id, name, payload.content_html, payload.plain_text, color)
     return {"node": node}
 
 

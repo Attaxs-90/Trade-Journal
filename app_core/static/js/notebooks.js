@@ -4,7 +4,7 @@ import { shortenLabel } from './analytics.js';
 import { setModalOnClose } from './calendar.js';
 import { JOURNAL_AUTOSAVE_MS, JOURNAL_FONTS, JOURNAL_SIZES, api, attachOutsideClose, escapeHtml, showAppError, state, writeStored } from './core.js';
 import { confirmDelete, promptDialog } from './dialogs.js';
-import { initQuillFormats, renderJournalList } from './journal.js';
+import { imageUploaderModule, initQuillFormats, renderJournalList } from './journal.js';
 import { syncJournalNavActive } from './nav.js';
 
 /* ---------- Notizbuecher: frei verschachtelbare Ordner/Notizen ----------
@@ -474,7 +474,9 @@ async function selectNotebookNote(nodeId) {
   await mountNotebookEditor(host, nodeId);
 }
 
-async function mountNotebookEditor(host, nodeId) {
+/* opts.onSaved({id, name}) haelt z. B. die Seitenliste der OneNote-Ansicht
+   aktuell, opts.onDelete(node) ersetzt den Loeschablauf des Notizbuch-Baums. */
+export async function mountNotebookEditor(host, nodeId, opts = {}) {
   if (!host) return;
   if (host.dataset.notebookId === String(nodeId)) return;
   initQuillFormats();
@@ -489,10 +491,18 @@ async function mountNotebookEditor(host, nodeId) {
       <span class="journal-status" id="notebook-note-status"></span>
     </div>`;
 
+  const uploadImage = (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api(`/api/notebooks/${nodeId}/images`, { method: "POST", body: fd });
+  };
   const quill = new Quill(host.querySelector("#notebook-quill"), {
     theme: "snow",
     placeholder: "Frei schreiben…",
-    modules: { toolbar: { container: NOTEBOOK_TOOLBAR } },
+    modules: {
+      toolbar: { container: NOTEBOOK_TOOLBAR },
+      uploader: imageUploaderModule(uploadImage, () => notebookMarkDirty()),
+    },
   });
   if (node.content_html) quill.clipboard.dangerouslyPasteHTML(node.content_html);
 
@@ -500,6 +510,7 @@ async function mountNotebookEditor(host, nodeId) {
     nodeId, quill, host, dirty: false, timer: null,
     statusEl: host.querySelector("#notebook-note-status"),
     titleEl: host.querySelector("#notebook-note-title"),
+    onSaved: opts.onSaved || null,
   };
 
   // Bilder in Notizen haengen an keinem Tag - eigener Upload-Endpunkt statt
@@ -510,9 +521,7 @@ async function mountNotebookEditor(host, nodeId) {
     input.accept = "image/*";
     input.onchange = async () => {
       if (!input.files || !input.files[0]) return;
-      const fd = new FormData();
-      fd.append("file", input.files[0]);
-      const img = await api(`/api/notebooks/${nodeId}/images`, { method: "POST", body: fd });
+      const img = await uploadImage(input.files[0]);
       const range = quill.getSelection(true);
       quill.insertEmbed(range.index, "image", `/media/${img.filename}`, "user");
       quill.setSelection(range.index + 1);
@@ -525,7 +534,7 @@ async function mountNotebookEditor(host, nodeId) {
   activeNotebookNote.titleEl.addEventListener("input", () => notebookMarkDirty());
   quill.root.addEventListener("blur", () => { if (activeNotebookNote && activeNotebookNote.dirty) saveNotebookNote(); });
   activeNotebookNote.titleEl.addEventListener("blur", () => { if (activeNotebookNote && activeNotebookNote.dirty) saveNotebookNote(); });
-  host.querySelector("#notebook-delete-btn").addEventListener("click", () => notebookDeleteFlow(node));
+  host.querySelector("#notebook-delete-btn").addEventListener("click", () => (opts.onDelete ? opts.onDelete(node) : notebookDeleteFlow(node)));
 }
 
 function notebookStatus(text, tone = "") {
@@ -562,6 +571,7 @@ export async function saveNotebookNote(force = false) {
       body: JSON.stringify(payload),
     });
     notebookStatus("Gespeichert", "saved");
+    if (n.onSaved) n.onSaved({ id: n.nodeId, name });
     const nameEl = document.querySelector(`#notebook-tree .nb-row[data-id="${n.nodeId}"] > .nb-row-main .nb-name`);
     if (nameEl) { nameEl.textContent = name; nameEl.title = name; }
   } catch (e) {

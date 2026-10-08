@@ -64,6 +64,72 @@ export async function openSettings() {
   await renderSettingsAccountDelete();
   await renderTagsSettings();
   await renderJournalTemplatesSettings();
+  renderOneNoteImportSettings();
+}
+
+/* ---------- OneNote-Import (Einstellungen) ----------
+   Erst auf Knopfdruck die OneNote-Struktur laden (startet OneNote im
+   Hintergrund), dann Bereiche auswaehlen. Sensible Bereiche (Logins,
+   Gewerbe, Privat) kommen vom Server bereits abgewaehlt. */
+function renderOneNoteImportSettings() {
+  const groupsEl = document.getElementById("onenote-groups");
+  const importBtn = document.getElementById("onenote-import-btn");
+  const statusEl = document.getElementById("onenote-status");
+  const setStatus = (text, tone = "") => { statusEl.textContent = text; statusEl.className = "journal-status " + tone; };
+
+  document.getElementById("onenote-load-btn").addEventListener("click", async () => {
+    setStatus("OneNote wird gelesen …", "pending");
+    try {
+      const { groups } = await api("/api/onenote/structure");
+      groupsEl.innerHTML = groups.map((g, i) => `
+        <label class="onenote-group-row">
+          <input type="checkbox" data-group-index="${i}"${g.selected ? " checked" : ""}>
+          <span>${escapeHtml(g.name)}</span><span class="muted">${g.pages} Seiten</span>
+        </label>`).join("");
+      groupsEl.dataset.groups = JSON.stringify(groups.map(g => g.name));
+      importBtn.hidden = false;
+      setStatus("");
+    } catch (e) {
+      setStatus(e.message, "error");
+    }
+  });
+
+  const poll = async () => {
+    const st = await api("/api/onenote/status");
+    if (st.running) {
+      setStatus(`${st.phase} … ${st.total ? `${st.done} / ${st.total}` : ""}`, "pending");
+      setTimeout(poll, 1000);
+      return;
+    }
+    importBtn.disabled = false;
+    if (st.error) { setStatus("Import fehlgeschlagen: " + st.error, "error"); return; }
+    if (st.result) {
+      const r = st.result;
+      setStatus(`Fertig: ${r.days} Tage, ${r.weeks} Wochen, ${r.months} Monate, ${r.reviews} Reviews, ${r.notes} Notizen, ${r.images} Bilder übernommen`
+        + (r.skipped_existing ? ` · ${r.skipped_existing} schon vorhanden` : "")
+        + (r.skipped_empty ? ` · ${r.skipped_empty} leere Vorlagen übersprungen` : ""), "saved");
+      document.dispatchEvent(new CustomEvent("pages:changed"));
+    }
+  };
+
+  importBtn.addEventListener("click", async () => {
+    const names = JSON.parse(groupsEl.dataset.groups || "[]");
+    const selected = [...groupsEl.querySelectorAll("input[data-group-index]:checked")].map(cb => names[Number(cb.dataset.groupIndex)]);
+    if (!selected.length) { setStatus("Wähle mindestens einen Bereich aus.", "error"); return; }
+    importBtn.disabled = true;
+    try {
+      await api("/api/onenote/import", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groups: selected }),
+      });
+    } catch (e) {
+      importBtn.disabled = false;
+      setStatus(e.message, "error");
+      return;
+    }
+    poll();
+  });
+  // Laeuft schon ein Import (z. B. Seite neu geladen), Fortschritt weiter zeigen.
+  api("/api/onenote/status").then(st => { if (st.running) { importBtn.hidden = false; importBtn.disabled = true; poll(); } });
 }
 
 /* Springt zu einer Einstellungen-Karte (Sidebar-Unternavigation, siehe nav.js,
@@ -87,6 +153,8 @@ async function goToJournalTemplateSettings() {
 
 /* ---------- Journal-Vorlagen (Einstellungen) ---------- */
 
+const TEMPLATE_DEFAULT_LABELS = { day: "Tag", week: "Woche", month: "Monat", review: "Review" };
+
 async function renderJournalTemplatesSettings() {
   initQuillFormats();
   const host = document.getElementById("journal-tpl-editor");
@@ -99,6 +167,7 @@ async function renderJournalTemplatesSettings() {
 
   const form = document.getElementById("journal-tpl-form");
   const nameInput = document.getElementById("journal-tpl-name");
+  const defaultSelect = document.getElementById("journal-tpl-default");
   const submitBtn = document.getElementById("journal-tpl-submit");
   const cancelBtn = document.getElementById("journal-tpl-cancel");
   let editingId = null;
@@ -108,6 +177,7 @@ async function renderJournalTemplatesSettings() {
     editingId = null;
     editingPosition = 0;
     nameInput.value = "";
+    defaultSelect.value = "";
     tplQuill.setContents([]);
     submitBtn.textContent = "Vorlage anlegen";
     cancelBtn.hidden = true;
@@ -126,7 +196,7 @@ async function renderJournalTemplatesSettings() {
       const row = document.createElement("div");
       row.className = "journal-tpl-row";
       row.innerHTML = `
-        <div class="journal-tpl-row-name"><span class="journal-tpl-row-icon">${ICON_JOURNAL}</span>${escapeHtml(tpl.name)}</div>
+        <div class="journal-tpl-row-name"><span class="journal-tpl-row-icon">${ICON_JOURNAL}</span>${escapeHtml(tpl.name)}${tpl.default_for ? `<span class="badge-tag">Standard: ${TEMPLATE_DEFAULT_LABELS[tpl.default_for] || tpl.default_for}</span>` : ""}</div>
         <div class="journal-tpl-row-actions">
           <button type="button" class="nb-icon-btn tpl-edit" aria-label="Vorlage bearbeiten" title="Bearbeiten">✎</button>
           <button type="button" class="nb-icon-btn nb-delete tpl-delete" aria-label="Vorlage löschen" title="Löschen">×</button>
@@ -135,6 +205,7 @@ async function renderJournalTemplatesSettings() {
         editingId = tpl.id;
         editingPosition = tpl.position;
         nameInput.value = tpl.name;
+        defaultSelect.value = tpl.default_for || "";
         tplQuill.setContents([]);
         tplQuill.clipboard.dangerouslyPasteHTML(tpl.content_html || "");
         submitBtn.textContent = "Änderungen speichern";
@@ -159,6 +230,7 @@ async function renderJournalTemplatesSettings() {
       name,
       content_html: tplQuill.getText().trim() ? tplQuill.root.innerHTML : "",
       position: editingPosition,
+      default_for: defaultSelect.value || null,
     };
     try {
       if (editingId) {

@@ -10,7 +10,7 @@ import './chrome.js';
 import './settings.js';
 import './tags.js';
 import './dialogs.js';
-import { openOverview } from './overview.js';
+import './overview.js';
 import './trades.js';
 import './share.js';
 import './journal.js';
@@ -23,6 +23,7 @@ import { watchStartupSync } from './accounts.js';
 import './analytics.js';
 import './strategies.js';
 import './nav.js';
+import { openStartPage, renderSections } from './pages.js';
 import { initNewsbar } from './news.js';
 import { initEarningsTicker } from './earnings-ticker.js';
 
@@ -48,7 +49,9 @@ loadTagFilterState();
 loadStrategyFilterState();
 loadNotebookExpandedState();
 renderSidebarAccountStatus();
-openOverview();
+// Start wie in OneNote: direkt auf der Seite (Hash) bzw. der heutigen Tagesseite.
+renderSections();
+openStartPage();
 initNewsbar();
 initEarningsTicker();
 loadTodoWidget();

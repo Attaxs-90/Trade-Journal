@@ -431,9 +431,29 @@ export async function populateDay(container, day, opts = {}) {
 
     let activeIndex = Math.min(Math.max(opts.tradeIndex || 0, 0), data.trades.length - 1);
 
+    // Kompakte Trade-Zeilen der OneNote-Tagesseite (nur wenn das Template sie
+    // vorsieht): ein Klick waehlt den Trade fuer die Detailkarte darunter.
+    const listEl = container.querySelector(".day-trade-list");
+    if (listEl) {
+      listEl.innerHTML = data.trades.map((t, i) => {
+        const r = tradeRMultiple(t);
+        return `<button type="button" class="day-trade-row" data-index="${i}">
+            <span class="day-trade-row-time">${fmtTime(t.entry_time).slice(0, 5)}</span>
+            <span class="day-trade-row-inst">${escapeHtml(t.instrument)}</span>
+            <span class="day-trade-row-dir ${t.direction === "Long" ? "pos" : "neg"}">${escapeHtml(t.direction)}</span>
+            <span class="day-trade-row-net ${cls(t.net_usd)}">${fmtSigned(t.net_usd)} $</span>
+            <span class="day-trade-row-r ${r === null ? "muted" : cls(r)}">${r === null ? "–" : fmtSigned(r, 1) + "R"}</span>
+          </button>`;
+      }).join("");
+      listEl.querySelectorAll(".day-trade-row").forEach(row => {
+        row.onclick = () => { activeIndex = Number(row.dataset.index); renderCard(); };
+      });
+    }
+
     function renderCard() {
       const t = data.trades[activeIndex];
       const i = activeIndex;
+      if (listEl) listEl.querySelectorAll(".day-trade-row").forEach(row => row.classList.toggle("active", Number(row.dataset.index) === i));
       closeTagPopover();  // gehoert sonst noch zum vorherigen Trade
       const cumClass = i === highIdx ? "cum-high" : (i === lowIdx ? "cum-low" : "");
       const hiLoBadge = i === highIdx ? '<span class="badge-tag">← Tageshoch</span>' : (i === lowIdx ? '<span class="badge-tag">← Tagestief</span>' : "");
@@ -494,5 +514,6 @@ export async function populateDay(container, day, opts = {}) {
   // mountJournalEditor() steigt selbst aus, wenn der Editor fuer diesen Tag
   // schon steht - populateDay() laeuft nach jedem Bild-Upload erneut und wuerde
   // sonst ungespeicherten Text im Editor verwerfen.
-  await mountJournalEditor(container.querySelector(".day-journal"), day);
+  await mountJournalEditor(container.querySelector(".day-journal"), day, opts.journal || {});
+  return data;
 }
