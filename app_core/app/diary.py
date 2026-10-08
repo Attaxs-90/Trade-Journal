@@ -17,7 +17,7 @@ WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 # Erste passende Regel gewinnt; nur USD-High-Impact und Feiertage USA/UK, weil
 # nur die in den Titeln des Nutzers auftauchen.
 NEWS_SHORT = [
-    ("non-farm", "NFP"), ("cpi", "CPI"), ("ppi", "PPI"), ("fomc", "FOMC"),
+    ("adp", "ADP"), ("non-farm", "NFP"), ("cpi", "CPI"), ("ppi", "PPI"), ("fomc", "FOMC"),
     ("federal funds", "Zins"), ("pce", "PCE"), ("gdp", "GDP"), ("retail sales", "Retail"),
     ("unemployment claims", "Claims"), ("ism", "ISM"), ("powell", "Powell"),
 ]

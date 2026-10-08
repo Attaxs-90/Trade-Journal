@@ -78,6 +78,19 @@ Trades tragen beides: `source` (Herkunft der Daten) und `account_id` (Zuordnung)
 
 **Geloeschte Trades bleiben geloescht:** `db.delete_trade()` merkt sich den (entry_order_id, exit_order_id)-Fingerprint in `deleted_trade_keys`, weil die geloeschte Zeile die UNIQUE-Bremse gegen erneutes Einfuegen mitgeloescht hat. „Jetzt synchronisieren" (`insert_trades(..., skip_deleted=True)`) ueberspringt diese Fingerprints, „Vollstaendig neu synchronisieren" (`full=True`) bewusst nicht — nur dort soll ein versehentlich geloeschter Trade wiederkommen koennen.
 
+## OneNote-Aufbau (Startansicht)
+
+Die App ist wie das OneNote-Tagebuch des Nutzers aufgebaut: Sidebar = Abschnitte (Tagebuch-Monate je Jahr, Notizbuch-Ordner), Mitte = Seitenliste, rechts = Seite. Die bisherigen Ansichten liegen darunter als „Werkzeuge“. Start ist die heutige Tagesseite (bzw. die Seite aus dem Hash `#tag/2026-10-08`, `#kw/2026-W41`, `#monat/…`, `#review/…`, `#notiz/<id>`, `#abschnitt/<id>`). Code: `static/js/pages.js`, `app/diary.py`.
+
+- **Eine KW gehoert zum Monat ihres Donnerstags** (ISO-Regel, so steht es auch im OneNote des Nutzers: KW 40/2026 mit 28.-30.09. unter Oktober). Gilt in `diary.build_month()`, in `db._DIARY_MONTH_SQL` (Abschnittssummen) und in `monthForDay()` im Frontend — alle drei muessen gleich rechnen, sonst zeigt der Abschnitt eine andere Summe als seine Seitenliste.
+- **Seitentitel** („-1R (0R)“, „Kein Trade – NFP“) steht in `journal_entries.title`; der Editor sendet ihn mit (`opts.titleInput`). Ergebnis, News-Label und Monatssumme rechnet die Liste selbst, $ / R / Pkt umschaltbar. R nur aus Trades mit `risk_usd`, ein `*` markiert unvollstaendige R-Werte.
+- **Seitenarten** = `entry_type` `day`, `week` (`2026-W40`), `month` (Monatsziel, `2026-10`), `review` (`2026-10`). `_check_journal_ref` prueft die Formate.
+- **Standardvorlagen** (`journal_templates.default_for`): eine leere Seite wird mit den Leitfragen vorbefuellt, *ohne* als geaendert zu gelten (Quill-Quelle `api`) — gespeichert wird erst beim Tippen. Je Seitenart hoechstens eine Standardvorlage (`_clear_template_default`).
+- **Tagesseite** nutzt `populateDay()` mit eigenem Template `tpl-page-day` (dieselben Klassen-Selektoren, plus `.day-trade-list` fuer kompakte Trade-Zeilen). Nur der Seitenbereich wird getauscht, die Liste bleibt stehen.
+- **Screenshots per Strg+V/Drag** laufen ueber `imageUploaderModule()` (journal.js) auf den jeweiligen Upload-Endpunkt — nie Quills Standard (base64 im HTML).
+- **Notizbuecher**: Ordner = Abschnitt, Notizen = Seiten. Reihenfolge `notebook_nodes.position`, Farbe `color`.
+- **OneNote-Import** (`app/onenote_import.py`, Karte in den Einstellungen): liest per PowerShell/COM ausschliesslich `GetHierarchy`/`GetPageContent`, schreibt nie nach OneNote. Bereiche mit Zugangsdaten (Accounts, Gewerbe, Privat, Login, 2FA …) sind standardmaessig ausgeschlossen. `source_key` (OneNote-Seiten-ID) macht ihn wiederholbar; vorhandene Eintraege werden nie ueberschrieben, OneNote-Inhalt wird angehaengt. Leere Vorlagenseiten (nur Leitfragen) werden uebersprungen.
+
 ## Strategien und Regeln
 
 Eine Strategie bündelt Regeln (optional in Gruppen); ein Trade hat **höchstens eine** Strategie. Was ein Trade von ihren Regeln befolgt hat, steht in `trade_rule_status`.

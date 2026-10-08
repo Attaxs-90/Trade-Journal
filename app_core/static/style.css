@@ -2923,7 +2923,8 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .page-canvas .ql-editor h3 { font-size: 15px; margin-top: 14px; color: var(--accent); }
 .page-canvas .ql-editor img { max-width: 100%; height: auto; border-radius: 4px; }
 .page-canvas .ql-editor.ql-blank::before { left: 2px; }
-.onenote-note .journal-footer { justify-content: flex-start; }
+.onenote-note .journal-footer { order: 2; justify-content: flex-start; }
+.page-list.is-notebook .page-unit-toggle { display: none; }
 
 .onenote-groups { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
 .onenote-group-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }

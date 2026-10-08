@@ -265,6 +265,7 @@ export async function openPages(target, opts = {}) {
   }
   P.target = target;
   history.replaceState(null, "", targetHash(target));
+  document.querySelector(".page-list")?.classList.toggle("is-notebook", P.kind === "notebook");
   markListActive();
   markSectionsActive();
   await renderCanvas(target);
@@ -562,6 +563,12 @@ document.addEventListener("keydown", (e) => {
   if (!next) return;
   e.preventDefault();
   next.click();
+});
+
+// Link oder Zurueck-Taste auf eine Seiten-Adresse (#tag/..., #notiz/...)
+window.addEventListener("hashchange", () => {
+  const t = parseHash();
+  if (t && !(P.target && P.target.type === t.type && P.target.ref === t.ref)) openPages(t);
 });
 
 document.addEventListener("pages:changed", () => {

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unveröffentlicht
+- Komplett neuer Aufbau im Stil von OneNote: links die Abschnitte (Tagebuch
+  je Jahr und Monat, Notizbücher), in der Mitte die Seitenliste Monat → KW →
+  Tag mit Ergebnis in $, R oder Punkten und News-Hinweisen (NFP, CPI, FOMC …),
+  rechts die Seite. Die App startet direkt auf der heutigen Tagesseite.
+- Tagesseite: Seitentitel, kompakte Trade-Liste mit Strategie und Regeln,
+  Journal mit deinen Leitfragen, Screenshots einfach mit Strg+V einfügen.
+- Wochen-, Monats- und Review-Seiten mit eigenen Leitfragen und Kurzstatistik.
+- Leitfragen sind Standardvorlagen und in den Einstellungen änderbar.
+- OneNote-Import in den Einstellungen: übernimmt Tagebuch-Seiten samt
+  Screenshots und alle übrigen Bereiche als Notizbücher, liest OneNote nur.
+- Übersicht, Trades, Auswertungen, Kalender, Strategie, Konten & Sync,
+  Export und Einstellungen bleiben unter „Werkzeuge“ erreichbar.
+- Strg+Bild auf/ab blättert durch die Seiten.
+
 ## 1.14.0
 - MetaTrader 5: Der Sync schließt kein offenes MT5-Terminal mehr und schaltet
   es auch nicht auf ein anderes Konto um. Ist MT5 mit einem anderen Konto
