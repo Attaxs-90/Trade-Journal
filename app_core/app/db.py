@@ -1337,11 +1337,18 @@ def add_image(day: str, trade_id: int | None, filename: str, thumb_filename: str
 
 
 def get_images_for_day(day: str) -> list[dict]:
+    """in_journal: das Bild steckt im Text des Tages-Journals (per Strg+V oder
+    Werkzeugleiste eingefuegt) - die OneNote-Tagesseite zeigt es dann nicht
+    ein zweites Mal als lose Tagesbild."""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM images WHERE day = ? ORDER BY created_at ASC", (day,)
         ).fetchall()
-    return [dict(r) for r in rows]
+        entry = conn.execute(
+            "SELECT content_html FROM journal_entries WHERE entry_type = 'day' AND ref_key = ?", (day,)
+        ).fetchone()
+    html = entry["content_html"] if entry else ""
+    return [dict(r, in_journal=r["filename"] in html) for r in rows]
 
 
 def days_with_images(start: str, end: str) -> set[str]:

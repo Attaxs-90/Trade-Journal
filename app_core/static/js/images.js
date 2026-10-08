@@ -42,11 +42,17 @@ export async function uploadImage(day, file, tradeId) {
 export function renderDayImages(container, day, images) {
   const strip = container.querySelector(".day-images");
   strip.innerHTML = "";
-  images.filter(im => im.trade_id === null).forEach(img => {
+  // OneNote-Tagesseite: nur lose Tagesbilder (nicht im Journaltext) und den
+  // ganzen Bereich nur, wenn es solche gibt - neue Bilder kommen in den Text.
+  const looseOnly = !!container.querySelector(".page-shots");
+  const shown = images.filter(im => im.trade_id === null && !(looseOnly && im.in_journal));
+  if (looseOnly) container.querySelector(".page-shots").hidden = !shown.length;
+  shown.forEach(img => {
     strip.appendChild(imageThumbEl(img, "image-thumb", () => populateDay(container, day)));
   });
 
   const input = container.querySelector(".day-image-input");
+  if (!input) return;
   input.value = "";
   input.onchange = async () => {
     const file = input.files[0];

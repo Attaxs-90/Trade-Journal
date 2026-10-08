@@ -2980,4 +2980,4 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .sections-body { display: flex; flex-direction: column; gap: 1px; }
 .sections-body[hidden] { display: none; }
 .sidebar-scroll > .nav.is-collapsed { display: none; }
-
+.page-shots[hidden] { display: none; }
