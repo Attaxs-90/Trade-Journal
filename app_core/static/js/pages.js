@@ -133,7 +133,7 @@ export async function renderSections() {
 
   const secRes = (st) => (showSectionResults ? resultHtml(st, "sec-res") : "");
   let html = `<div class="sections-head">
-      <span>Tagebuch</span>
+      ${mainToggleHtml("diary", "Tagebuch")}
       <span class="sections-head-actions">
         <button type="button" class="sections-head-btn" id="sections-toggle-results" aria-pressed="${showSectionResults}"
           title="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}" aria-label="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}">${showSectionResults ? "$ an" : "$ aus"}</button>
@@ -147,6 +147,7 @@ export async function renderSections() {
         <button type="button" class="sections-head-btn" id="sections-today" title="Heutige Seite öffnen">Heute</button>
       </span>
     </div>`;
+  html += `<div class="sections-body"${mainCollapsed.has("diary") ? " hidden" : ""}>`;
   for (const y of years) {
     const months = byYear.get(y);
     const color = YEAR_COLORS[allYears.indexOf(y) % YEAR_COLORS.length];
@@ -171,12 +172,16 @@ export async function renderSections() {
       </div>`;
   }
 
-  html += `<div class="sections-head">
-      <span>Notizbücher</span>
+  html += `</div><div class="sections-head">
+      ${mainToggleHtml("notebooks", "Notizbücher")}
       <button type="button" class="sections-head-btn" id="sections-add-notebook" title="Neuen Abschnitt anlegen" aria-label="Neuen Abschnitt anlegen">+</button>
     </div>`;
-  html += folderTreeHtml(null, 0) || `<div class="sections-empty">Noch keine Notizbücher.</div>`;
+  html += `<div class="sections-body"${mainCollapsed.has("notebooks") ? " hidden" : ""}>`
+    + (folderTreeHtml(null, 0) || `<div class="sections-empty">Noch keine Notizbücher.</div>`) + `</div>`;
   host.innerHTML = html;
+  host.querySelectorAll("[data-main-toggle]").forEach(btn => {
+    btn.onclick = () => { toggleMain(btn.dataset.mainToggle); renderSections(); };
+  });
 
   host.querySelector("#sections-today").onclick = () => openPages({ type: "day", ref: todayIso() });
   host.querySelector("#sections-toggle-results").onclick = () => {
@@ -227,6 +232,40 @@ export async function renderSections() {
   });
   markSectionsActive();
 }
+
+/* Hauptbereiche der Sidebar (Tagebuch, Notizbuecher, Werkzeuge) ein-/ausklappen.
+   Gespeichert werden die ZUGEKLAPPTEN - neue Bereiche sind damit offen. */
+function readMainCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem("sectionsMainCollapsed") || "[]")); }
+  catch { return new Set(); }
+}
+const mainCollapsed = readMainCollapsed();
+function toggleMain(key) {
+  if (mainCollapsed.has(key)) mainCollapsed.delete(key); else mainCollapsed.add(key);
+  writeStored("sectionsMainCollapsed", [...mainCollapsed]);
+}
+function mainToggleHtml(key, label) {
+  const open = !mainCollapsed.has(key);
+  return `<button type="button" class="sections-head-toggle" data-main-toggle="${key}" aria-expanded="${open}">
+      <span class="sec-chevron${open ? " open" : ""}" aria-hidden="true"></span>${label}
+    </button>`;
+}
+
+/* Werkzeuge stehen fest in index.html (nav.js verdrahtet sie) - hier nur der
+   Klapp-Schalter dazu. */
+function initToolsToggle() {
+  const head = document.querySelector(".sections-tools-head");
+  const nav = document.querySelector(".sidebar-scroll > .nav");
+  if (!head || !nav) return;
+  const paint = () => {
+    const open = !mainCollapsed.has("tools");
+    nav.classList.toggle("is-collapsed", !open);
+    head.innerHTML = mainToggleHtml("tools", "Werkzeuge");
+    head.querySelector("[data-main-toggle]").onclick = () => { toggleMain("tools"); paint(); };
+  };
+  paint();
+}
+initToolsToggle();
 
 function expandYear(y) {
   expanded.add(`y${y}`);

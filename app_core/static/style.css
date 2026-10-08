@@ -2972,3 +2972,12 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
 .page-delete-btn { flex-shrink: 0; opacity: 0.6; }
 .page-head:hover .page-delete-btn, .page-delete-btn:focus-visible { opacity: 1; }
 
+/* Hauptbereiche der Sidebar ein-/ausklappen (pages.js) */
+.sections-head-toggle { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+.sections-head-toggle:hover { color: var(--text); }
+.sections-head-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sections-head-toggle .sec-chevron { width: 12px; height: 12px; }
+.sections-body { display: flex; flex-direction: column; gap: 1px; }
+.sections-body[hidden] { display: none; }
+.sidebar-scroll > .nav.is-collapsed { display: none; }
+
