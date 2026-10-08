@@ -45,6 +45,14 @@ class DiaryMonthTest(unittest.TestCase):
         self.assertEqual(sections["2026-10"]["net"], diary.build_month(2026, 10)["stats"]["net"])
         self.assertEqual(sections["2026-09"]["net"], 10.0)
 
+    def test_monat_im_voraus_anlegen(self):
+        before = diary.build_sections()["months"][-1]["month"]
+        new = diary.add_month()
+        months = [m["month"] for m in diary.build_sections()["months"]]
+        self.assertEqual(months[-1], new)
+        self.assertGreater(new, before)
+        self.assertEqual(diary.add_month() > new, True)   # weiter in die Zukunft, auch ueber den Jahreswechsel
+
     def test_seitentitel_und_eintrag_in_der_liste(self):
         db.upsert_journal_entry("week", "2026-W40", title="RETRACEMENT", content_html="<p>Woche</p>", plain_text="Woche")
         m = diary.build_month(2026, 10)

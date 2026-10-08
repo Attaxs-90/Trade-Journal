@@ -36,6 +36,8 @@ function readStoredString(key, fallback) {
   try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
 }
 let unit = readStoredString("pageUnit", "usd");
+// Betraege neben Jahren/Monaten in der Sidebar - abschaltbar (roher String wie theme).
+let showSectionResults = readStoredString("sectionsShowResults", "true") !== "false";
 function readExpanded() {
   try { return new Set(JSON.parse(localStorage.getItem("sectionsExpanded") || "null") || [`y${new Date().getFullYear()}`]); }
   catch { return new Set([`y${new Date().getFullYear()}`]); }
@@ -129,9 +131,15 @@ export async function renderSections() {
   const years = [...byYear.keys()].sort().reverse();
   const allYears = [...byYear.keys()].sort();
 
+  const secRes = (st) => (showSectionResults ? resultHtml(st, "sec-res") : "");
   let html = `<div class="sections-head">
       <span>Tagebuch</span>
-      <button type="button" class="sections-head-btn" id="sections-today" title="Heutige Seite öffnen">Heute</button>
+      <span class="sections-head-actions">
+        <button type="button" class="sections-head-btn" id="sections-toggle-results" aria-pressed="${showSectionResults}"
+          title="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}" aria-label="${showSectionResults ? "Beträge ausblenden" : "Beträge einblenden"}">${showSectionResults ? "$ an" : "$ aus"}</button>
+        <button type="button" class="sections-head-btn" id="sections-add-month" title="Nächsten Monat anlegen" aria-label="Nächsten Monat anlegen">+ Monat</button>
+        <button type="button" class="sections-head-btn" id="sections-today" title="Heutige Seite öffnen">Heute</button>
+      </span>
     </div>`;
   for (const y of years) {
     const months = byYear.get(y);
@@ -140,12 +148,12 @@ export async function renderSections() {
     html += `<div class="sec-group" style="--sec-color:${color}">
         <button type="button" class="sec-group-head" data-toggle="y${y}" aria-expanded="${open}">
           <span class="sec-chevron${open ? " open" : ""}" aria-hidden="true"></span>
-          <span class="sec-name">${y}</span>${resultHtml(sumStats(months), "sec-res")}
+          <span class="sec-name">${y}</span>${secRes(sumStats(months))}
         </button>
         <div class="sec-items"${open ? "" : " hidden"}>
           ${months.map(m => `<button type="button" class="sec-item" data-month="${m.month}">
               <span class="sec-tab" aria-hidden="true"></span>
-              <span class="sec-name">${monthName(m.month)}</span>${resultHtml(m, "sec-res")}
+              <span class="sec-name">${monthName(m.month)}</span>${secRes(m)}
             </button>`).join("")}
         </div>
       </div>`;
@@ -159,6 +167,18 @@ export async function renderSections() {
   host.innerHTML = html;
 
   host.querySelector("#sections-today").onclick = () => openPages({ type: "day", ref: todayIso() });
+  host.querySelector("#sections-toggle-results").onclick = () => {
+    showSectionResults = !showSectionResults;
+    try { localStorage.setItem("sectionsShowResults", String(showSectionResults)); } catch { /* nur diese Sitzung */ }
+    renderSections();
+  };
+  host.querySelector("#sections-add-month").onclick = async () => {
+    const { month } = await api("/api/diary/months", { method: "POST" });
+    expanded.add(`y${month.slice(0, 4)}`);
+    writeStored("sectionsExpanded", [...expanded]);
+    await renderSections();
+    await openPages({ type: "month", ref: month });
+  };
   host.querySelector("#sections-add-notebook").onclick = () => createFolder(null);
   host.querySelectorAll("[data-toggle]").forEach(btn => {
     btn.onclick = (e) => {

@@ -2813,7 +2813,7 @@ html[data-newsbar="collapsed"] .app .newsbar-body { display: none; }
 .sections { display: flex; flex-direction: column; gap: 1px; }
 .sections-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
 .sections > .sections-head:first-child { padding-top: 2px; }
-.sections-head-btn { all: unset; cursor: pointer; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 2px 8px; border-radius: 6px; color: var(--accent); }
+.sections-head-btn { all: unset; cursor: pointer; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 2px 5px; border-radius: 6px; color: var(--accent); }
 .sections-head-btn:hover, .sections-head-btn:focus-visible { background: var(--accent-fill); }
 .sections-empty { padding: 4px 8px; font-size: 12px; color: var(--text-faint); }
 .sec-group-head, .sec-item { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 6px; font-size: 13px; color: var(--text-dim); }
@@ -2935,3 +2935,13 @@ html[data-sidebar="collapsed"] .app .sections-head { display: none; }
   .view.view-pages { grid-template-columns: 240px minmax(0, 1fr); }
   .page-canvas { padding: 22px 24px 80px; }
 }
+
+/* Bildansicht 100 %: echte Pixel statt eingepasst, die Box scrollt (images.js). */
+.lightbox-box.lightbox-actual { overflow: auto; }
+.lightbox-actual .lightbox-img { flex: none; width: auto; max-width: none; height: auto; align-self: flex-start; object-fit: unset; }
+.lightbox-actual .lightbox-toolbar { position: sticky; bottom: 0; left: 0; background: var(--bg-elevated); padding-top: 6px; }
+.ql-editor img { cursor: zoom-in; }
+.sections-head-actions { display: inline-flex; gap: 2px; }
+.sections-head-btn[aria-pressed="false"] { color: var(--text-faint); }
+/* .btn setzt display - ohne das bliebe der Knopf trotz hidden sichtbar */
+.lightbox-toolbar .btn[hidden] { display: none; }

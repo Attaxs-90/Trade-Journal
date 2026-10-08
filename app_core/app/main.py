@@ -1065,6 +1065,11 @@ def api_diary_sections(accounts: str | None = None, tags: str | None = None, tag
     return diary.build_sections(_parse_keys(accounts), _parse_keys(tags), tag_logic, _parse_keys(strategies))
 
 
+@app.post("/api/diary/months")
+def api_diary_add_month():
+    return {"month": diary.add_month()}
+
+
 @app.get("/api/diary/{year}/{month}")
 def api_diary_month(year: int, month: int, accounts: str | None = None, tags: str | None = None,
                     tag_logic: str = "or", strategies: str | None = None):

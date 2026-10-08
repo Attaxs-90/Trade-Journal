@@ -109,6 +109,8 @@ function positionLightboxBox(size) {
 function openLightbox(img) {
   lightboxCurrentImage = img;
   lightboxOpenDay = img.day || state.currentDay;
+  document.getElementById("lightbox-delete").hidden = false;
+  setLightboxActualSize(false);
 
   const overlay = document.getElementById("lightbox-overlay");
   const imgEl = document.getElementById("lightbox-img");
@@ -116,6 +118,27 @@ function openLightbox(img) {
 
   positionLightboxBox(getLightboxSize());
   overlay.classList.add("visible");
+}
+
+/* Bild aus einem Editor (Journal/Notiz, z. B. importierte OneNote-Screenshots)
+   gross ansehen: direkt im Vollbild, ohne Loeschen-Knopf - das Bild gehoert
+   zum Text und wird dort geloescht, nicht als Tagesbild. */
+export function openImageViewer(src) {
+  lightboxCurrentImage = null;
+  document.getElementById("lightbox-delete").hidden = true;
+  document.getElementById("lightbox-img").src = src;
+  setLightboxActualSize(false);
+  document.getElementById("lightbox-overlay").classList.add("visible");
+  setLightboxFullscreen(true);
+}
+
+/* 100 %: Bild in echten Pixeln statt auf das Fenster eingepasst, die Box
+   scrollt. Fuer WQHD-Screenshots, auf denen sonst Details zu klein sind. */
+let lightboxActual = false;
+function setLightboxActualSize(on) {
+  lightboxActual = on;
+  document.getElementById("lightbox-box").classList.toggle("lightbox-actual", on);
+  document.getElementById("lightbox-actual").textContent = on ? "Einpassen" : "Originalgröße (100 %)";
 }
 
 export function closeLightbox() {
@@ -198,6 +221,14 @@ document.getElementById("lightbox-close").addEventListener("click", closeLightbo
 attachOutsideClose(document.getElementById("lightbox-overlay"), closeLightbox);
 document.getElementById("lightbox-fullscreen").addEventListener("click", toggleLightboxFullscreen);
 document.getElementById("lightbox-img").addEventListener("dblclick", toggleLightboxFullscreen);
+document.getElementById("lightbox-actual").addEventListener("click", () => setLightboxActualSize(!lightboxActual));
+// Doppelklick auf ein Bild im Text eines Editors oeffnet die grosse Ansicht.
+document.addEventListener("dblclick", (e) => {
+  const img = e.target.closest(".ql-editor img");
+  if (!img || !img.src) return;
+  e.preventDefault();
+  openImageViewer(img.src);
+});
 document.getElementById("lightbox-reset").addEventListener("click", () => {
   positionLightboxBox(LIGHTBOX_DEFAULT_SIZE);
   saveLightboxSize({ ...LIGHTBOX_DEFAULT_SIZE });
@@ -222,5 +253,7 @@ document.getElementById("lightbox-delete").addEventListener("click", async () =>
     await populateDay(document.getElementById("content"), state.currentDay);
   } else if (state.view === "trade" && state.currentTradeId) {
     await populateTrade(document.getElementById("content"), state.currentTradeId);
+  } else if (state.view === "pages") {
+    document.dispatchEvent(new CustomEvent("pages:changed"));
   }
 });

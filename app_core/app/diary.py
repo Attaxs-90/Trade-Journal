@@ -78,6 +78,23 @@ def _final(stats: dict) -> dict:
     )
 
 
+# Bis zu welchem Monat das Tagebuch reicht, wenn der Nutzer Monate im Voraus
+# anlegt ("+ Monat") - wie ein neuer Abschnitt in OneNote. Ohne Eintrag endet
+# die Abschnittsleiste beim laufenden Monat.
+DIARY_UNTIL_KEY = "diary_until"
+
+
+def add_month() -> str:
+    """Haengt den Monat nach dem letzten angezeigten an und gibt ihn zurueck."""
+    last = build_sections()["months"][-1]["month"]
+    y, m = int(last[:4]), int(last[5:7]) + 1
+    if m > 12:
+        y, m = y + 1, 1
+    new = f"{y:04d}-{m:02d}"
+    db.set_app_setting(DIARY_UNTIL_KEY, new)
+    return new
+
+
 def build_sections(account_keys=None, tag_keys=None, tag_logic="or", strategy_keys=None) -> dict:
     """Alle Monate vom ersten Trade/Eintrag bis zum laufenden Monat - auch
     Monate ohne Daten, damit die Abschnittsleiste lueckenlos wie in OneNote ist."""
@@ -88,9 +105,10 @@ def build_sections(account_keys=None, tag_keys=None, tag_logic="or", strategy_ke
     first = keys[0] if keys else current
     if first > current:
         first = current
+    last = max([current] + keys[-1:] + [db.get_app_setting(DIARY_UNTIL_KEY) or current])
     months = []
     y, m = int(first[:4]), int(first[5:7])
-    while f"{y:04d}-{m:02d}" <= max(current, keys[-1] if keys else current):
+    while f"{y:04d}-{m:02d}" <= last:
         key = f"{y:04d}-{m:02d}"
         t = totals.get(key, {})
         r_sum = t.get("r_sum")
